@@ -292,10 +292,32 @@ Contract expression transfers borrow immutable declarations and local values,
 separately from OXC traversal and statement/function collection. Each expression
 root returns its value/effect summary, ordered deduplicated updates, consumed
 work, and opacity. A transfer-local accumulator avoids copying update logs along
-recursive edges; collection merges outcomes in source order and carries the
+expression edges; collection merges outcomes in source order and carries the
 remaining per-function budget. Invocation expansion borrows contracts rather
-than cloning them. Traversal is still recursive and serial: work limits do not
-bound native stack depth, and no expression scheduler or pool is installed.
+than cloning them. Common leaf hazard summaries stay compact rather than
+materializing a symbolic expression for every hazard slot.
+
+Contract inference and lazy-operation extraction lower expressions iteratively
+into transient node/operand tables containing no OXC node or semantic references.
+Ready transfers consume child summaries once, leaf-inward, preserving the
+original grouping and operand positions. Contract visit costs retain preorder
+budget boundaries, including uncharged callee-member references and PURE masking.
+Lazy Context recording stays source-ordered: key/coercion/spread operations are
+recorded before later operands, not postponed to their parent's transfer.
+Projection storage is linear and bounded by the expression's source size (and
+the contract work limit); exhausted contract planning stays unknown.
+Opaque/exhausted inference skips lowering; each further projection is bounded
+by the remaining function budget, not a fresh full-function allowance.
+Dependency, binding and compiler expression scans also use explicit worklists.
+This is sequential extraction, not a runtime scheduler or a parallel expression
+pool. Statement/function nesting and declared-contract expansion retain their
+existing traversal and limits; general AST/interpreter stack safety is not claimed.
+
+`cargo bench -p ecco --bench frontier` measures inference and owned extraction
+over pre-parsed small, wide and deep fixtures. It uses an explicit 64 MiB
+benchmark-only stack so recursive baselines and frontier versions run identically;
+production-stack regressions do not use this accommodation. Override iterations
+with `ECCO_FRONTIER_ITERATIONS` (default 100, five samples).
 
 The extractor handles simple declarations, calls, object literals, member reads,
 operators, templates, conditional/logical expressions, aliases, and the function

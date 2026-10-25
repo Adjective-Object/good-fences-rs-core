@@ -5,6 +5,7 @@ use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
 use oxc_semantic::{ScopeFlags, Semantic, SymbolId};
 
+use crate::frontier::{FlatVisit, Mode, Op, Plan, Role, Step};
 use crate::*;
 
 // Bound substitutions and copied expressions, not just source visits.
@@ -127,6 +128,7 @@ pub(crate) fn infer_contracts<'a>(
             indices: HashSet::new(),
             missing: false,
             external: false,
+            expressions: None,
         };
         if let Some(body) = function.body {
             dependencies.visit_function_body(body);
@@ -331,9 +333,19 @@ struct Dependencies<'s, 'a> {
     indices: HashSet<usize>,
     missing: bool,
     external: bool,
+    expressions: Option<Vec<&'a Expression<'a>>>,
+}
+
+impl<'a> FlatVisit<'a> for Dependencies<'_, 'a> {
+    fn expression_queue(&mut self) -> &mut Option<Vec<&'a Expression<'a>>> {
+        &mut self.expressions
+    }
 }
 
 impl<'a> Visit<'a> for Dependencies<'_, 'a> {
+    fn visit_expression(&mut self, expression: &Expression<'a>) {
+        self.flat_expression(expression);
+    }
     fn visit_binary_expression(&mut self, expression: &BinaryExpression<'a>) {
         // Equal argument identities are known only after graph linking.
         self.external |= matches!(expression.operator.as_str(), "==" | "!=");
@@ -371,23 +383,35 @@ enum Origin {
     Unknown,
 }
 
+// Common leaves stay inline without materializing every symbolic hazard slot.
+#[derive(Clone)]
+enum ValueHazards {
+    Pure,
+    Unknown,
+    Input,
+    Fields(Box<[HazardExpr; Hazard::ALL.len()]>),
+}
+
 #[derive(Clone)]
 struct Value {
     origin: Origin,
-    hazards: [HazardExpr; Hazard::ALL.len()],
+    hazards: ValueHazards,
     callable: Option<usize>,
     binding: Option<Binding>,
 }
 
 impl Value {
     fn size(&self) -> usize {
-        self.hazards.iter().map(expression_size).sum()
+        match &self.hazards {
+            ValueHazards::Fields(fields) => fields.iter().map(expression_size).sum(),
+            _ => Hazard::ALL.len(),
+        }
     }
 
     fn unknown() -> Self {
         Self {
             origin: Origin::Unknown,
-            hazards: std::array::from_fn(|_| HazardExpr::Unknown),
+            hazards: ValueHazards::Unknown,
             callable: None,
             binding: None,
         }
@@ -395,7 +419,7 @@ impl Value {
     fn primitive() -> Self {
         Self {
             origin: Origin::Fresh,
-            hazards: std::array::from_fn(|_| HazardExpr::Bool(false)),
+            hazards: ValueHazards::Pure,
             callable: None,
             binding: None,
         }
@@ -408,17 +432,34 @@ impl Value {
     }
     fn input(name: String) -> Self {
         Self {
-            origin: Origin::Input(name.clone()),
-            hazards: std::array::from_fn(|index| HazardExpr::Read {
-                value: name.clone(),
-                slot: Hazard::ALL[index],
-            }),
+            origin: Origin::Input(name),
+            hazards: ValueHazards::Input,
             callable: None,
             binding: None,
         }
     }
     fn hazard(&self, slot: Hazard) -> HazardExpr {
-        self.hazards[slot as usize].clone()
+        match &self.hazards {
+            ValueHazards::Pure => HazardExpr::Bool(false),
+            ValueHazards::Unknown => HazardExpr::Unknown,
+            ValueHazards::Input => {
+                let Origin::Input(name) = &self.origin else {
+                    unreachable!("input hazards have an input origin")
+                };
+                HazardExpr::Read {
+                    value: name.clone(),
+                    slot,
+                }
+            }
+            ValueHazards::Fields(fields) => fields[slot as usize].clone(),
+        }
+    }
+
+    fn hazard_size(&self, slot: Hazard) -> usize {
+        match &self.hazards {
+            ValueHazards::Fields(fields) => expression_size(&fields[slot as usize]),
+            _ => 1,
+        }
     }
 }
 
@@ -501,17 +542,18 @@ impl Computed {
 
     fn object(empty: bool, unknown_read: bool, effects: Vec<HazardExpr>) -> Self {
         let mut value = Value::primitive();
-        value.hazards = std::array::from_fn(|_| HazardExpr::Unknown);
-        value.hazards[Hazard::PropertyRead as usize] = if unknown_read {
+        let mut hazards = std::array::from_fn(|_| HazardExpr::Unknown);
+        hazards[Hazard::PropertyRead as usize] = if unknown_read {
             HazardExpr::Unknown
         } else {
             HazardExpr::Bool(false)
         };
-        value.hazards[Hazard::ToPrimitive as usize] = if empty {
+        hazards[Hazard::ToPrimitive as usize] = if empty {
             HazardExpr::Bool(false)
         } else {
             HazardExpr::Unknown
         };
+        value.hazards = ValueHazards::Fields(Box::new(hazards));
         Self {
             value,
             effects: union(effects),
@@ -603,11 +645,6 @@ struct Transfer<'s> {
     expanding: HashSet<usize>,
 }
 
-struct Expressions<'s, 'a> {
-    semantic: &'s Semantic<'a>,
-    transfer: Transfer<'s>,
-}
-
 impl<'s> Transfer<'s> {
     fn new(inputs: TransferInputs<'s>, budget: usize, opaque: bool) -> Self {
         Self {
@@ -657,13 +694,20 @@ impl<'s> Transfer<'s> {
         if let Some(index) = self.inputs.bindings.get(&binding) {
             value.callable = Some(*index);
             let definition = &self.inputs.contracts[*index];
-            value.hazards =
-                std::array::from_fn(|index| match definition.hazards().get(Hazard::ALL[index]) {
+            value.hazards = ValueHazards::Fields(Box::new(std::array::from_fn(|index| {
+                match definition.hazards().get(Hazard::ALL[index]) {
                     HazardExpr::Bool(false) => HazardExpr::Bool(false),
                     _ => HazardExpr::Unknown,
-                });
+                }
+            })));
         } else if self.inputs.prefixes.contains(&binding) {
-            value.hazards[Hazard::PropertyRead as usize] = HazardExpr::Bool(false);
+            value.hazards = ValueHazards::Fields(Box::new(std::array::from_fn(|index| {
+                if Hazard::ALL[index] == Hazard::PropertyRead {
+                    HazardExpr::Bool(false)
+                } else {
+                    HazardExpr::Unknown
+                }
+            })));
         }
         value.binding = Some(binding);
         value
@@ -705,169 +749,152 @@ impl<'s> Transfer<'s> {
     }
 }
 
-impl<'a> Expressions<'_, 'a> {
-    fn expression(&mut self, expression: &Expression<'a>) -> Computed {
-        if self.transfer.opaque || !self.transfer.spend() {
-            return self.transfer.unknown();
-        }
-        match expression.get_inner_expression() {
-            Expression::BooleanLiteral(_)
-            | Expression::NumericLiteral(_)
-            | Expression::StringLiteral(_)
-            | Expression::BigIntLiteral(_)
-            | Expression::NullLiteral(_) => Computed::pure(Value::primitive()),
-            Expression::ThisExpression(_) => Computed::pure(if self.transfer.inputs.arrow {
-                Value::unknown()
-            } else {
-                Value::input("this".into())
-            }),
-            Expression::Identifier(identifier) => {
-                let reference = self
-                    .semantic
-                    .scoping()
-                    .get_reference(identifier.reference_id.get().expect("checked references"));
-                self.transfer
-                    .identifier(reference.symbol_id(), identifier.name.as_str())
-            }
-            Expression::StaticMemberExpression(member) => {
-                let object = self.expression(&member.object);
-                self.transfer
-                    .member(object, Some(member.property.name.as_str()), None)
-            }
-            Expression::ComputedMemberExpression(member) => {
-                let object = self.expression(&member.object);
-                let key = self.expression(&member.expression);
-                let property = match member.expression.get_inner_expression() {
-                    Expression::StringLiteral(node) => node.value.as_str(),
-                    _ => None,
-                };
-                self.transfer.member(object, property, Some(key))
-            }
-            Expression::CallExpression(call) => {
-                let (callee, receiver) = match call.callee.get_inner_expression() {
-                    Expression::StaticMemberExpression(member) => {
-                        let object = self.expression(&member.object);
-                        let receiver = object.value.clone();
-                        (
-                            self.transfer
-                                .member(object, Some(member.property.name.as_str()), None),
-                            receiver,
-                        )
+impl Transfer<'_> {
+    fn evaluate(&mut self, plan: &Plan<'_>) -> Computed {
+        let mut results = Vec::new();
+        results.resize_with(plan.nodes.len(), || None);
+        let mut step = 0;
+        while step < plan.steps.len() {
+            match plan.steps[step] {
+                Step::Enter(id) => {
+                    if plan.nodes[id].charge && (self.opaque || !self.spend()) {
+                        results[id] = Some((self.unknown(), None));
+                        step = plan.nodes[id].end + 1;
+                        continue;
                     }
-                    Expression::ComputedMemberExpression(member) => {
-                        let object = self.expression(&member.object);
-                        let receiver = object.value.clone();
-                        let key = self.expression(&member.expression);
-                        let property = match member.expression.get_inner_expression() {
-                            Expression::StringLiteral(node) => node.value.as_str(),
-                            _ => None,
+                }
+                Step::Input(_) => {}
+                Step::Ready(id) => {
+                    let (computed, receiver) = {
+                        let mut values =
+                            plan.inputs[plan.nodes[id].inputs.clone()]
+                                .iter()
+                                .map(|input| {
+                                    results[input.node].take().expect("ready expression input")
+                                });
+                        let mut receiver = None;
+                        let computed = match &plan.nodes[id].op {
+                            Op::Primitive => Computed::pure(Value::primitive()),
+                            Op::This => Computed::pure(if self.inputs.arrow {
+                                Value::unknown()
+                            } else {
+                                Value::input("this".into())
+                            }),
+                            Op::Identifier { symbol, name, .. } => self.identifier(*symbol, name),
+                            Op::Member {
+                                property,
+                                reference,
+                                ..
+                            } => {
+                                let object = values.next().expect("member object").0;
+                                if *reference {
+                                    receiver = Some(object.value.clone());
+                                }
+                                self.member(object, *property, values.next().map(|value| value.0))
+                            }
+                            Op::Call { pure, spread } => {
+                                let (callee, receiver) = values.next().expect("callee");
+                                if *spread || (values.len() > 0 && self.opaque) {
+                                    self.unknown()
+                                } else {
+                                    let mut effects = vec![callee.effects];
+                                    let arguments = values
+                                        .map(|(value, _)| {
+                                            effects.push(value.effects);
+                                            value.value
+                                        })
+                                        .collect();
+                                    let result = self.invocation(
+                                        callee.value,
+                                        arguments,
+                                        receiver.unwrap_or_else(Value::void),
+                                        *pure,
+                                    );
+                                    effects.push(result.effects);
+                                    Computed {
+                                        value: result.value,
+                                        effects: union(effects),
+                                    }
+                                }
+                            }
+                            Op::Binary(operator) => Computed::binary(
+                                operator,
+                                values.next().expect("left").0,
+                                values.next().expect("right").0,
+                            ),
+                            Op::Unary(operator) => {
+                                Computed::unary(operator, values.next().expect("argument").0)
+                            }
+                            Op::Logical => Computed::alternatives(
+                                values.next().expect("left").0,
+                                values.next().expect("right").0,
+                            ),
+                            Op::Conditional => Computed::conditional(
+                                values.next().expect("test").0,
+                                values.next().expect("left").0,
+                                values.next().expect("right").0,
+                            ),
+                            Op::Sequence => {
+                                let mut effects = Vec::new();
+                                let mut last = Value::void();
+                                for (value, _) in values {
+                                    effects.push(value.effects);
+                                    last = value.value;
+                                }
+                                Computed {
+                                    value: last,
+                                    effects: union(effects),
+                                }
+                            }
+                            Op::Template
+                            | Op::Object {
+                                unsupported: false, ..
+                            } => {
+                                let mut effects = Vec::new();
+                                for ((value, _), input) in
+                                    values.zip(&plan.inputs[plan.nodes[id].inputs.clone()])
+                                {
+                                    effects.push(value.effects);
+                                    if input.role == Role::Coerce {
+                                        effects.push(value.value.hazard(Hazard::ToPrimitive));
+                                    }
+                                }
+                                if let Op::Object {
+                                    empty,
+                                    unknown_read,
+                                    ..
+                                } = &plan.nodes[id].op
+                                {
+                                    Computed::object(*empty, *unknown_read, effects)
+                                } else {
+                                    Computed {
+                                        value: Value::primitive(),
+                                        effects: union(effects),
+                                    }
+                                }
+                            }
+                            Op::Function { .. } => Computed::pure(Value::unknown()),
+                            _ => self.unknown(),
                         };
-                        (self.transfer.member(object, property, Some(key)), receiver)
-                    }
-                    _ => (self.expression(&call.callee), Value::void()),
-                };
-                let mut effects = vec![callee.effects];
-                let mut arguments = Vec::new();
-                for argument in &call.arguments {
-                    let Some(expression) = argument.as_expression() else {
-                        return self.transfer.unknown();
+                        (computed, receiver)
                     };
-                    let argument = self.expression(expression);
-                    if self.transfer.opaque {
-                        return self.transfer.unknown();
-                    }
-                    effects.push(argument.effects);
-                    arguments.push(argument.value);
-                }
-                let result = self
-                    .transfer
-                    .invocation(callee.value, arguments, receiver, call.pure);
-                effects.push(result.effects);
-                Computed {
-                    value: result.value,
-                    effects: union(effects),
+                    results[id] = Some((computed, receiver));
                 }
             }
-            Expression::BinaryExpression(binary) => {
-                let left = self.expression(&binary.left);
-                let right = self.expression(&binary.right);
-                Computed::binary(binary.operator.as_str(), left, right)
-            }
-            Expression::UnaryExpression(unary) if unary.operator.as_str() != "delete" => {
-                let argument = self.expression(&unary.argument);
-                Computed::unary(unary.operator.as_str(), argument)
-            }
-            Expression::LogicalExpression(logical) => {
-                let left = self.expression(&logical.left);
-                let right = self.expression(&logical.right);
-                Computed::alternatives(left, right)
-            }
-            Expression::ConditionalExpression(conditional) => {
-                let test = self.expression(&conditional.test);
-                let left = self.expression(&conditional.consequent);
-                let right = self.expression(&conditional.alternate);
-                Computed::conditional(test, left, right)
-            }
-            Expression::SequenceExpression(sequence) => {
-                let mut effects = Vec::new();
-                let mut last = Value::void();
-                for expression in &sequence.expressions {
-                    let value = self.expression(expression);
-                    effects.push(value.effects);
-                    last = value.value;
-                }
-                Computed {
-                    value: last,
-                    effects: union(effects),
-                }
-            }
-            Expression::TemplateLiteral(template) => {
-                let mut effects = Vec::new();
-                for expression in &template.expressions {
-                    let value = self.expression(expression);
-                    effects.extend([value.effects, value.value.hazard(Hazard::ToPrimitive)]);
-                }
-                Computed {
-                    value: Value::primitive(),
-                    effects: union(effects),
-                }
-            }
-            Expression::ObjectExpression(object) => {
-                let mut effects = Vec::new();
-                let mut unknown_read = false;
-                for property in &object.properties {
-                    let ObjectPropertyKind::ObjectProperty(property) = property else {
-                        return self.transfer.unknown();
-                    };
-                    if property.computed {
-                        if let Some(key) = property.key.as_expression() {
-                            let key = self.expression(key);
-                            effects.extend([key.effects, key.value.hazard(Hazard::ToPrimitive)]);
-                        }
-                    }
-                    if property.kind == PropertyKind::Get
-                        || property
-                            .key
-                            .static_name()
-                            .is_some_and(|name| name == "__proto__")
-                    {
-                        unknown_read = true;
-                    }
-                    effects.push(self.expression(&property.value).effects);
-                }
-                Computed::object(object.properties.is_empty(), unknown_read, effects)
-            }
-            Expression::FunctionExpression(_) | Expression::ArrowFunctionExpression(_) => {
-                Computed::pure(Value::unknown())
-            }
-            _ => self.transfer.unknown(),
+            step += 1;
         }
+        results[0].take().expect("root summary").0
     }
 }
 
 impl Transfer<'_> {
-    fn member(&self, object: Computed, property: Option<&str>, key: Option<Computed>) -> Computed {
-        let binding = match (object.value.binding.clone(), property) {
+    fn member(
+        &self,
+        mut object: Computed,
+        property: Option<&str>,
+        key: Option<Computed>,
+    ) -> Computed {
+        let binding = match (object.value.binding.take(), property) {
             (Some(Binding::Global(mut path)), Some(property)) => {
                 path.push(property.into());
                 Some(Binding::Global(path))
@@ -913,12 +940,25 @@ impl<'a> Analyzer<'_, 'a> {
             locals: &self.locals,
             arrow: self.arrow,
         };
-        let mut expressions = Expressions {
-            semantic: self.semantic,
-            transfer: Transfer::new(inputs, self.remaining, self.opaque),
+        let mut transfer = Transfer::new(inputs, self.remaining, self.opaque);
+        if self.opaque || self.remaining == 0 {
+            let computed = transfer.unknown();
+            return transfer.finish(computed);
+        }
+        // Every uncharged member has a charged call parent: exceeding this
+        // projection bound already implies visit-budget exhaustion.
+        let computed = if let Some(plan) = Plan::lower(
+            expression,
+            self.semantic,
+            Mode::Contract,
+            self.remaining * 2 + 1,
+        ) {
+            transfer.evaluate(&plan)
+        } else {
+            transfer.remaining = 0;
+            transfer.unknown()
         };
-        let computed = expressions.expression(expression);
-        expressions.transfer.finish(computed)
+        transfer.finish(computed)
     }
 
     fn statements(&mut self, statements: &[Statement<'a>]) -> bool {
@@ -998,9 +1038,36 @@ impl<'a> Analyzer<'_, 'a> {
 
 impl Transfer<'_> {
     fn join(values: &[Value]) -> Value {
-        let first = values.first().cloned().unwrap_or_else(Value::void);
+        let fallback = Value::void();
+        let first = values.first().unwrap_or(&fallback);
+        let hazards = match &first.hazards {
+            ValueHazards::Pure
+                if values
+                    .iter()
+                    .all(|value| matches!(value.hazards, ValueHazards::Pure)) =>
+            {
+                ValueHazards::Pure
+            }
+            ValueHazards::Unknown
+                if values
+                    .iter()
+                    .all(|value| matches!(value.hazards, ValueHazards::Unknown)) =>
+            {
+                ValueHazards::Unknown
+            }
+            ValueHazards::Input
+                if values.iter().all(|value| {
+                    value.origin == first.origin && matches!(value.hazards, ValueHazards::Input)
+                }) =>
+            {
+                ValueHazards::Input
+            }
+            _ => ValueHazards::Fields(Box::new(std::array::from_fn(|index| {
+                union(values.iter().map(|value| value.hazard(Hazard::ALL[index])))
+            }))),
+        };
         let origin = if values.iter().all(|value| value.origin == first.origin) {
-            first.origin
+            first.origin.clone()
         } else if values
             .iter()
             .all(|value| matches!(value.origin, Origin::Fresh | Origin::Void))
@@ -1011,9 +1078,7 @@ impl Transfer<'_> {
         };
         Value {
             origin,
-            hazards: std::array::from_fn(|index| {
-                union(values.iter().map(|value| value.hazards[index].clone()))
-            }),
+            hazards,
             callable: None,
             binding: None,
         }
@@ -1107,14 +1172,14 @@ impl Transfer<'_> {
                 Returns::Unknown => Value::unknown(),
                 Returns::Fresh => Value {
                     origin: Origin::Fresh,
-                    hazards: std::array::from_fn(|index| {
+                    hazards: ValueHazards::Fields(Box::new(std::array::from_fn(|index| {
                         self.substitute(
                             &definition.return_hazards().get(Hazard::ALL[index]),
                             &frame,
                             &arguments,
                             definition,
                         )
-                    }),
+                    }))),
                     callable: None,
                     binding: None,
                 },
@@ -1191,7 +1256,7 @@ impl Transfer<'_> {
             HazardExpr::Unknown => HazardExpr::Unknown,
             HazardExpr::Read { value, slot } => {
                 if let Some(value) = frame.get(value) {
-                    if self.spend_size(expression_size(&value.hazards[*slot as usize])) {
+                    if self.spend_size(value.hazard_size(*slot)) {
                         return value.hazard(*slot);
                     }
                 }
@@ -1265,7 +1330,13 @@ impl Analyzer<'_, '_> {
             Origin::Unknown => Returns::Unknown,
         };
         let return_hazards = if matches!(returns, Returns::Fresh) {
-            HazardFields::new(None, Hazard::ALL.into_iter().zip(value.hazards).collect())
+            let fields = match value.hazards {
+                ValueHazards::Pure => std::array::from_fn(|_| HazardExpr::Bool(false)),
+                ValueHazards::Unknown => std::array::from_fn(|_| HazardExpr::Unknown),
+                ValueHazards::Fields(fields) => *fields,
+                ValueHazards::Input => unreachable!("fresh return has no input hazards"),
+            };
+            HazardFields::new(None, Hazard::ALL.into_iter().zip(fields).collect())
         } else {
             HazardFields::default()
         };
@@ -1301,11 +1372,62 @@ mod tests {
     use super::*;
 
     #[test]
+    fn frontier_planning_skips_opaque_initializers_and_respects_remaining_work() {
+        let large = vec!["a"; 512].join("||");
+        for (prefix, declarations, max_nodes) in [
+            (
+                String::new(),
+                format!("const first = opaque(), second = {large}, third = {large};"),
+                2,
+            ),
+            (
+                "0;".repeat(CONTRACT_BUDGET),
+                format!("const first = {large}, second = {large};"),
+                CONTRACT_BUDGET,
+            ),
+            (
+                "0;".repeat(CONTRACT_BUDGET - 1),
+                format!("const first = {large}, second = {large};"),
+                CONTRACT_BUDGET - 1 + 3,
+            ),
+        ] {
+            let allocator = oxc_allocator::Allocator::default();
+            let source = format!("function check(a) {{ {prefix} {declarations} }}");
+            let parsed = oxc_utils_parse::parse_bundler_file(
+                &allocator,
+                &source,
+                std::path::Path::new("planning.js"),
+                oxc_utils_parse::ModuleFormat::Esm,
+            )
+            .unwrap();
+            let semantic = oxc_semantic::SemanticBuilder::new().build(&parsed.program);
+            let before = crate::frontier::projected_nodes();
+            let facts = infer_function_contracts(
+                &parsed.program,
+                &semantic.semantic,
+                &LocalFacts::default(),
+            )
+            .unwrap();
+            let projected = crate::frontier::projected_nodes() - before;
+            assert!(
+                projected <= max_nodes,
+                "projected {projected} nodes, bound {max_nodes}"
+            );
+            assert_eq!(facts.definitions()[0].returns(), &Returns::Unknown);
+            assert_eq!(
+                facts.definitions()[0].hazards().get(Hazard::Call),
+                HazardExpr::Unknown
+            );
+        }
+    }
+
+    #[test]
     fn transfer_outcomes_isolate_updates_opacity_and_work() {
         fn send_sync<T: Send + Sync>() {}
         send_sync::<TransferInputs<'_>>();
         send_sync::<Transfer<'_>>();
         send_sync::<TransferOutcome>();
+        send_sync::<Plan<'_>>();
 
         let facts = parse_declarations(
             "global fn mutate(target) {
@@ -1393,5 +1515,49 @@ mod tests {
         assert!(outcome.opaque);
         assert_eq!(outcome.budget_used, 2);
         assert_eq!(outcome.updates[0].expression(), &HazardExpr::Unknown);
+
+        let allocator = oxc_allocator::Allocator::default();
+        let parsed = oxc_utils_parse::parse_bundler_file(
+            &allocator,
+            "/*#__PURE__*/ mutate(0);",
+            std::path::Path::new("budget.js"),
+            oxc_utils_parse::ModuleFormat::Esm,
+        )
+        .unwrap();
+        let semantic = oxc_semantic::SemanticBuilder::new().build(&parsed.program);
+        let Statement::ExpressionStatement(statement) = &parsed.program.body[0] else {
+            unreachable!("expression fixture")
+        };
+        let plan = Plan::lower(
+            &statement.expression,
+            &semantic.semantic,
+            Mode::Contract,
+            16,
+        )
+        .unwrap();
+        for budget in [2, 3, 4] {
+            let mut transfer = Transfer::new(inputs, budget, false);
+            let computed = transfer.evaluate(&plan);
+            let outcome = transfer.finish(computed);
+            assert_eq!(outcome.budget_used, budget);
+            // Two visits exhaust work in an argument; three exhaust it only
+            // inside the masked invocation. Neither path refunds work.
+            assert_eq!(outcome.opaque, budget == 2);
+            assert_eq!(
+                outcome.computed.effects,
+                if budget == 2 {
+                    HazardExpr::Unknown
+                } else {
+                    HazardExpr::Bool(false)
+                }
+            );
+            assert_eq!(
+                matches!(outcome.computed.value.origin, Origin::Fresh),
+                budget == 4
+            );
+            let mut next = Transfer::new(inputs, budget - outcome.budget_used, outcome.opaque);
+            let computed = next.evaluate(&plan);
+            assert!(next.finish(computed).opaque);
+        }
     }
 }

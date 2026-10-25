@@ -1270,6 +1270,185 @@ fn isolated_contract_growth_is_bounded_for_shared_dependencies_and_large_bodies(
 }
 
 #[test]
+fn expression_frontiers_handle_deep_shapes_on_default_worker_stacks() {
+    let depth = 192;
+    let nested =
+        |prefix: &str, suffix: &str| format!("{}a{}", prefix.repeat(depth), suffix.repeat(depth));
+    let cases = [
+        (
+            "logical-left",
+            vec!["a"; depth].join("||"),
+            Returns::Argument("a".into()),
+        ),
+        (
+            "logical-right",
+            nested("a||(", ")"),
+            Returns::Argument("a".into()),
+        ),
+        (
+            "and",
+            vec!["a"; depth].join("&&"),
+            Returns::Argument("a".into()),
+        ),
+        ("binary", vec!["a"; depth].join("+"), Returns::Fresh),
+        (
+            "member",
+            format!("a{}", ".x".repeat(depth)),
+            Returns::Unknown,
+        ),
+        ("unary", nested("!", ""), Returns::Fresh),
+        ("calls", nested("a(", ")"), Returns::Unknown),
+        (
+            "conditional",
+            nested("a?a:(", ")"),
+            Returns::Argument("a".into()),
+        ),
+        ("objects", nested("({x:", "})"), Returns::Fresh),
+        (
+            "wide",
+            format!("({})", vec!["a.x"; depth].join(",")),
+            Returns::Unknown,
+        ),
+    ];
+    for workers in [1, 4] {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(workers)
+            .build()
+            .unwrap();
+        // No stack_size/RUST_MIN_STACK accommodation: these are production stacks.
+        pool.install(|| {
+            for (name, expression, expected) in &cases {
+                let javascript = format!("export function check(a) {{ return {expression}; }}");
+                let parsed =
+                    parse_source(&javascript, Path::new("deep.js"), LocalFacts::default()).unwrap();
+                parsed.validate().unwrap();
+                let definition = &parsed.declarations().definitions()[0];
+                assert_eq!(definition.returns(), expected, "{name}, workers={workers}");
+                assert_eq!(parsed.functions().len(), 1);
+                assert_eq!(parsed.roots().len(), 1);
+                assert!(!parsed.functions()[0].instructions().is_empty());
+            }
+        });
+    }
+}
+
+#[test]
+fn deep_unsupported_and_exhausted_frontiers_stay_conservative() {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build()
+        .unwrap();
+    pool.install(|| {
+        let depth = 512;
+        for expression in [
+            vec!["a"; depth].join("||"),
+            format!("{}a{}", "[".repeat(depth), "]".repeat(depth)),
+            format!("({})", vec!["1"; 10_000].join(",")),
+        ] {
+            let javascript = format!("function check(a) {{ return {expression}; }}");
+            let parsed =
+                parse_source(&javascript, Path::new("bounded.js"), LocalFacts::default()).unwrap();
+            parsed.validate().unwrap();
+            let definition = &parsed.declarations().definitions()[0];
+            assert_eq!(definition.returns(), &Returns::Unknown);
+            assert_eq!(definition.hazards().get(Hazard::Call), HazardExpr::Unknown);
+        }
+    });
+}
+
+#[test]
+fn expression_frontiers_preserve_recorded_input_operation_order() {
+    use crate::solver::Instruction;
+    let parsed = parsed(
+        r#"
+        function check(target) {
+            return /*#__PURE__*/ target.method(
+                `${left}${right}`,
+                { [key]: value, ...spread, tail },
+                ...iterable,
+                after
+            );
+        }
+    "#,
+    );
+    let operations: Vec<_> = parsed.functions()[0]
+        .instructions()
+        .iter()
+        .filter_map(|instruction| match instruction {
+            Instruction::External(_, index) => Some(format!(
+                "read {:?}",
+                parsed.external_references()[*index].binding()
+            )),
+            Instruction::Operation(_, hazard) => Some(format!("operation {hazard:?}")),
+            Instruction::Opaque => Some("opaque".into()),
+            Instruction::Call(_, _, _, _, pure) => Some(format!("call pure={pure}")),
+            _ => None,
+        })
+        .collect();
+    insta::assert_debug_snapshot!(operations, @r#"
+    [
+        "operation PropertyRead",
+        "read Global([\"left\"])",
+        "operation ToPrimitive",
+        "read Global([\"right\"])",
+        "operation ToPrimitive",
+        "read Global([\"key\"])",
+        "operation ToPrimitive",
+        "read Global([\"value\"])",
+        "read Global([\"spread\"])",
+        "opaque",
+        "read Global([\"tail\"])",
+        "read Global([\"iterable\"])",
+        "operation Iterate",
+        "read Global([\"after\"])",
+    ]
+    "#);
+    // Spread calls conservatively describe the result without recording a call.
+    parsed.validate().unwrap();
+}
+
+#[test]
+fn expression_frontiers_keep_logical_grouping_in_owned_operations() {
+    use crate::solver::Instruction;
+    for (expression, expected) in [
+        ("(a || b) || c", "((a|b)|c)"),
+        ("a || (b || c)", "(a|(b|c))"),
+    ] {
+        let parsed = parsed(&format!("function check(a,b,c) {{ return {expression}; }}"));
+        let function = &parsed.functions()[0];
+        let mut names: std::collections::HashMap<_, _> = function
+            .signature()
+            .parameters()
+            .iter()
+            .copied()
+            .zip(["a".to_owned(), "b".to_owned(), "c".to_owned()])
+            .collect();
+        for instruction in function.instructions() {
+            match instruction {
+                Instruction::Read(value, slot) => {
+                    names.insert(*value, names[slot].clone());
+                }
+                Instruction::Join(value, inputs) => {
+                    names.insert(
+                        *value,
+                        format!(
+                            "({})",
+                            inputs
+                                .iter()
+                                .map(|input| names[input].as_str())
+                                .collect::<Vec<_>>()
+                                .join("|")
+                        ),
+                    );
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(names[&function.returns()[0]], expected);
+    }
+}
+
+#[test]
 fn isolated_contract_api_returns_owned_facts_without_an_analysis_context() {
     use oxc_allocator::Allocator;
     use oxc_semantic::SemanticBuilder;

@@ -21,7 +21,14 @@
 - Contract transfers borrow immutable, arena-free inputs and return summaries,
   ordered updates, work cost and opacity. Keep transfer-local expansion state
   separate from statement collection; merge outcomes in source order without
-  cloning declaration/local tables or contracts. Traversal remains recursive.
+  cloning declaration/local tables or contracts.
+- Lower expressions and scan their dependencies/bindings/functions with explicit
+  worklists. Transient arena-free node/operand tables preserve grouping and
+  receivers; take consumed summaries and bound planning by source/remaining-work
+  limits. Skip lowering when inference is already opaque or exhausted.
+  Keep preorder budget/PURE boundaries and source-ordered Context recording,
+  including coercion/spread continuations before later operands. No expression
+  pool or persisted scheduling format; statement/function traversal is unchanged.
 - Keep declarations and extracted graphs owned; never retain OXC arena data.
 - Persist only `ParsedFile` precursors. Instantiate roots/functions in a fresh
   `Analysis`; external resolutions come from the caller's canonical graph.

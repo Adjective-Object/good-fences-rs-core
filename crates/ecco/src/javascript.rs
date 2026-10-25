@@ -10,6 +10,7 @@ use oxc_ast_visit::{walk, Visit};
 use oxc_semantic::{ScopeFlags, Semantic, SemanticBuilder, SymbolId as OxcSymbolId};
 use oxc_span::{GetSpan, Span};
 
+use crate::frontier::{FlatVisit, Mode, Op, Plan, Role, Step};
 use crate::solver::FunctionSignature;
 use crate::*;
 
@@ -126,6 +127,7 @@ pub fn parse_from_ast<'a>(
         missing_reference: false,
         functions: HashMap::new(),
         stack: Vec::new(),
+        expressions: None,
     };
     collector.visit_program(program);
     ensure!(
@@ -177,6 +179,7 @@ pub fn parse_from_ast<'a>(
     let values = extractor.context.parsed_values();
     Compiler {
         extractor: &mut extractor,
+        expressions: None,
     }
     .visit_program(program);
     extractor.context.start_function();
@@ -259,6 +262,7 @@ struct Bindings<'s, 'a> {
     missing_reference: bool,
     functions: HashMap<Span, FunctionInfo>,
     stack: Vec<Span>,
+    expressions: Option<Vec<&'a Expression<'a>>>,
 }
 
 #[derive(Clone)]
@@ -272,7 +276,16 @@ struct FunctionInfo {
     arguments: Option<ValueId>,
 }
 
+impl<'a> FlatVisit<'a> for Bindings<'_, 'a> {
+    fn expression_queue(&mut self) -> &mut Option<Vec<&'a Expression<'a>>> {
+        &mut self.expressions
+    }
+}
+
 impl<'a> Visit<'a> for Bindings<'_, 'a> {
+    fn visit_expression(&mut self, expression: &Expression<'a>) {
+        self.flat_expression(expression);
+    }
     fn visit_import_declaration(&mut self, declaration: &ImportDeclaration<'a>) {
         if declaration.import_kind.is_type() {
             return;
@@ -344,6 +357,7 @@ impl<'a> Visit<'a> for Bindings<'_, 'a> {
     }
 
     fn visit_function(&mut self, function: &Function<'a>, _: ScopeFlags) {
+        let expressions = self.expressions.take();
         let declaration = function.r#type == FunctionType::FunctionDeclaration;
         if let Some(identifier) = &function.id {
             if let Some(symbol) = identifier.symbol_id.get() {
@@ -389,9 +403,11 @@ impl<'a> Visit<'a> for Bindings<'_, 'a> {
             self.visit_function_body(body);
         }
         self.stack.pop();
+        self.expressions = expressions;
     }
 
     fn visit_arrow_function_expression(&mut self, function: &ArrowFunctionExpression<'a>) {
+        let expressions = self.expressions.take();
         let receiver = self.stack.last().map_or(self.context.undefined(), |span| {
             self.functions[span].receiver
         });
@@ -416,6 +432,7 @@ impl<'a> Visit<'a> for Bindings<'_, 'a> {
         self.stack.push(function.span);
         walk::walk_arrow_function_expression(self, function);
         self.stack.pop();
+        self.expressions = expressions;
     }
 
     fn visit_binding_identifier(&mut self, identifier: &BindingIdentifier<'a>) {
@@ -449,6 +466,12 @@ struct Extractor<'s, 'a> {
 struct Computed {
     named: NamedValue,
     effects: Effect,
+}
+
+struct Operand {
+    computed: Computed,
+    receiver: Option<ValueId>,
+    extra: Option<Effect>,
 }
 
 impl<'a> Extractor<'_, 'a> {
@@ -704,157 +727,159 @@ impl<'a> Extractor<'_, 'a> {
         }
     }
 
-    fn invocation_arguments(
-        &mut self,
-        arguments: &[Argument<'_>],
-    ) -> (Vec<ValueId>, Vec<Effect>, bool) {
-        let mut values = Vec::new();
-        let mut effects = Vec::new();
-        let mut spread = false;
-        for argument in arguments {
-            if let Argument::SpreadElement(element) = argument {
-                let value = self.expression(&element.argument);
-                effects.push(value.effects);
-                effects.push(self.context.operation(value.named.value, Hazard::Iterate));
-                spread = true;
-            } else {
-                let value = self.expression(argument.as_expression().expect("expression argument"));
-                effects.push(value.effects);
-                values.push(value.named.value);
+    fn expression(&mut self, expression: &Expression<'_>) -> Computed {
+        let limit = (expression.span().size() as usize)
+            .saturating_mul(2)
+            .saturating_add(1);
+        let Some(plan) = Plan::lower(expression, self.semantic, Mode::Recording, limit) else {
+            return self.unknown();
+        };
+        let mut results: Vec<Option<Operand>> = Vec::new();
+        results.resize_with(plan.nodes.len(), || None);
+        for step in &plan.steps {
+            match *step {
+                Step::Enter(_) => {}
+                Step::Input(input) => {
+                    let input = &plan.inputs[input];
+                    let value = results[input.node].as_mut().expect("completed input");
+                    value.extra = Some(match input.role {
+                        Role::Coerce => self
+                            .context
+                            .operation(value.computed.named.value, Hazard::ToPrimitive),
+                        Role::Iterate => self
+                            .context
+                            .operation(value.computed.named.value, Hazard::Iterate),
+                        Role::Enumerate => self.context.opaque_effects(),
+                        Role::Value => unreachable!("undecorated input"),
+                    });
+                }
+                Step::Ready(id) => {
+                    let inputs = plan.inputs[plan.nodes[id].inputs.clone()]
+                        .iter()
+                        .map(|input| results[input.node].take().expect("ready expression input"));
+                    let value = self.expression_transfer(&plan.nodes[id].op, inputs);
+                    results[id] = Some(value);
+                }
             }
         }
-        (values, effects, spread)
+        results[0].take().expect("root summary").computed
     }
 
-    fn reference(&mut self, expression: &Expression<'_>) -> (Computed, Option<ValueId>) {
-        let member = match expression.get_inner_expression() {
-            Expression::StaticMemberExpression(member) => (
-                &member.object,
-                Some(member.property.name.as_str()),
-                None,
-                member.span,
-            ),
-            Expression::ComputedMemberExpression(member) => {
-                (&member.object, None, Some(&member.expression), member.span)
-            }
-            Expression::ChainExpression(chain) => match &chain.expression {
-                ChainElement::StaticMemberExpression(member) => (
-                    &member.object,
-                    Some(member.property.name.as_str()),
-                    None,
-                    member.span,
-                ),
-                ChainElement::ComputedMemberExpression(member) => {
-                    (&member.object, None, Some(&member.expression), member.span)
-                }
-                ChainElement::CallExpression(call) => return (self.call_expression(call), None),
-                _ => return (self.unknown(), None),
-            },
-            _ => return (self.expression(expression), None),
-        };
-        let (object, property, key, span) = member;
-        let object = self.expression(object);
-        let receiver = object.named.value;
-        let property = property.or_else(|| match key?.get_inner_expression() {
-            Expression::StringLiteral(literal) => literal.value.as_str(),
-            _ => None,
-        });
-        let key = key.map(|key| self.expression(key));
-        (self.member(object, property, key, span), Some(receiver))
-    }
-
-    fn call_expression(&mut self, call: &CallExpression<'_>) -> Computed {
-        let (callee, receiver) = self.reference(&call.callee);
-        let mut effects = vec![callee.effects];
-        let (arguments, argument_effects, spread) = self.invocation_arguments(&call.arguments);
-        effects.extend(argument_effects);
-        let result = if spread {
-            CallResult::new(
-                self.context.unknown(),
-                if call.pure {
-                    self.context.pure()
-                } else {
-                    self.context.opaque_effects()
-                },
-            )
-        } else {
-            self.context
-                .call_with_annotation(callee.named.value, &arguments, receiver, call.pure)
-        };
-        effects.push(result.effects());
-        let effects = self.context.any(effects);
-        self.computed(result.value(), effects)
-    }
-
-    fn expression(&mut self, expression: &Expression<'_>) -> Computed {
-        match expression.get_inner_expression() {
-            Expression::BooleanLiteral(_)
-            | Expression::NullLiteral(_)
-            | Expression::NumericLiteral(_)
-            | Expression::BigIntLiteral(_)
-            | Expression::StringLiteral(_) => self.pure_value(Hazards::NONE),
-            Expression::ThisExpression(_) => self.computed(self.this_value, self.context.pure()),
-            Expression::Identifier(identifier) => {
-                let reference = self
-                    .semantic
-                    .scoping()
-                    .get_reference(identifier.reference_id.get().expect("checked reference"));
-                if reference.symbol_id().is_none() && identifier.name == "arguments" {
+    fn expression_transfer(
+        &mut self,
+        op: &Op<'_>,
+        mut values: impl ExactSizeIterator<Item = Operand>,
+    ) -> Operand {
+        let mut receiver = None;
+        let computed = match op {
+            Op::Primitive => self.pure_value(Hazards::NONE),
+            Op::This => self.computed(self.this_value, self.context.pure()),
+            Op::Identifier { symbol, name, span } => {
+                if symbol.is_none() && *name == "arguments" {
                     if let Some(value) = self.arguments_value {
                         let value = self.context.read_binding(value);
-                        return self.computed(value, self.context.pure());
+                        return Operand {
+                            computed: self.computed(value, self.context.pure()),
+                            receiver: None,
+                            extra: None,
+                        };
                     }
                 }
-                let named = if let Some(symbol) = reference.symbol_id() {
-                    let mut named = self.values.get(&symbol).cloned().unwrap_or(NamedValue {
+                let named = if let Some(symbol) = symbol {
+                    let mut named = self.values.get(symbol).cloned().unwrap_or(NamedValue {
                         value: self.context.unknown(),
                         binding: None,
                     });
                     if let Some(binding) = &named.binding {
-                        named.value = self.resolve(binding, identifier.span);
+                        named.value = self.resolve(binding, *span);
                     } else {
                         named.value = self.context.read_binding(named.value);
                     }
                     named
                 } else {
-                    let binding = Binding::Global(vec![identifier.name.to_string()]);
-                    let value = if identifier.name == "undefined" {
+                    let binding = Binding::Global(vec![(*name).to_owned()]);
+                    let value = if *name == "undefined" {
                         self.context.undefined()
                     } else {
-                        self.resolve(&binding, identifier.span)
+                        self.resolve(&binding, *span)
                     };
                     NamedValue {
                         value,
                         binding: Some(binding),
                     }
                 };
-                let effects = if reference.symbol_id().is_none() {
-                    self.global_read(identifier.name.as_str(), identifier.span)
+                let effects = if symbol.is_none() {
+                    self.global_read(name, *span)
                 } else {
                     self.context.pure()
                 };
                 Computed { named, effects }
             }
-            Expression::StaticMemberExpression(_)
-            | Expression::ComputedMemberExpression(_)
-            | Expression::ChainExpression(_) => self.reference(expression).0,
-            Expression::CallExpression(call) => self.call_expression(call),
-            Expression::NewExpression(call) => {
-                let callee = self.expression(&call.callee);
-                let (_, mut effects, _) = self.invocation_arguments(&call.arguments);
+            Op::Member {
+                property,
+                span,
+                reference,
+            } => {
+                let object = values.next().expect("member object").computed;
+                if *reference {
+                    receiver = Some(object.named.value);
+                }
+                let key = values.next().map(|value| value.computed);
+                self.member(object, *property, key, *span)
+            }
+            Op::Call { pure, spread } => {
+                let callee = values.next().expect("callee");
+                let mut effects = vec![callee.computed.effects];
+                let mut arguments = Vec::new();
+                for value in values {
+                    effects.push(value.computed.effects);
+                    if let Some(extra) = value.extra {
+                        effects.push(extra);
+                    } else {
+                        arguments.push(value.computed.named.value);
+                    }
+                }
+                let result = if *spread {
+                    CallResult::new(
+                        self.context.unknown(),
+                        if *pure {
+                            self.context.pure()
+                        } else {
+                            self.context.opaque_effects()
+                        },
+                    )
+                } else {
+                    self.context.call_with_annotation(
+                        callee.computed.named.value,
+                        &arguments,
+                        callee.receiver,
+                        *pure,
+                    )
+                };
+                effects.push(result.effects());
+                let effects = self.context.any(effects);
+                self.computed(result.value(), effects)
+            }
+            Op::New { pure, .. } => {
+                let callee = values.next().expect("constructor").computed;
+                let mut effects = Vec::new();
+                for value in values {
+                    effects.push(value.computed.effects);
+                    effects.extend(value.extra);
+                }
                 effects.push(callee.effects);
-                if !call.pure {
+                if !pure {
                     effects.push(self.context.opaque_effects());
                 }
                 let value = self.context.value(Hazards::UNKNOWN);
                 let effects = self.context.any(effects);
                 self.computed(value, effects)
             }
-            Expression::BinaryExpression(binary) => {
-                let left = self.expression(&binary.left);
-                let right = self.expression(&binary.right);
+            Op::Binary(operator) => {
+                let left = values.next().expect("left").computed;
+                let right = values.next().expect("right").computed;
                 let mut effects = vec![left.effects, right.effects];
-                match binary.operator.as_str() {
+                match *operator {
                     "===" | "!==" => {}
                     "==" | "!=" => {
                         effects.push(
@@ -894,9 +919,9 @@ impl<'a> Extractor<'_, 'a> {
                 let value = self.context.value(Hazards::NONE);
                 self.computed(value, effects)
             }
-            Expression::UnaryExpression(unary) if unary.operator.as_str() != "delete" => {
-                let argument = self.expression(&unary.argument);
-                let effects = if matches!(unary.operator.as_str(), "!" | "void" | "typeof") {
+            Op::Unary(operator) => {
+                let argument = values.next().expect("argument").computed;
+                let effects = if matches!(*operator, "!" | "void" | "typeof") {
                     argument.effects
                 } else {
                     let coercion = self
@@ -907,19 +932,19 @@ impl<'a> Extractor<'_, 'a> {
                 let value = self.context.value(Hazards::NONE);
                 self.computed(value, effects)
             }
-            Expression::LogicalExpression(logical) => {
-                let left = self.expression(&logical.left);
-                let right = self.expression(&logical.right);
+            Op::Logical => {
+                let left = values.next().expect("left").computed;
+                let right = values.next().expect("right").computed;
                 let value = self
                     .context
                     .join_values(&[left.named.value, right.named.value]);
                 let effects = self.context.any([left.effects, right.effects]);
                 self.computed(value, effects)
             }
-            Expression::ConditionalExpression(conditional) => {
-                let test = self.expression(&conditional.test);
-                let left = self.expression(&conditional.consequent);
-                let right = self.expression(&conditional.alternate);
+            Op::Conditional => {
+                let test = values.next().expect("test").computed;
+                let left = values.next().expect("left").computed;
+                let right = values.next().expect("right").computed;
                 let value = self
                     .context
                     .join_values(&[left.named.value, right.named.value]);
@@ -928,86 +953,67 @@ impl<'a> Extractor<'_, 'a> {
                     .any([test.effects, left.effects, right.effects]);
                 self.computed(value, effects)
             }
-            Expression::SequenceExpression(sequence) => {
+            Op::Sequence => {
                 let mut effects = Vec::new();
                 let mut last = self.computed(self.context.undefined(), self.context.pure());
-                for expression in &sequence.expressions {
-                    last = self.expression(expression);
+                for value in values {
+                    last = value.computed;
                     effects.push(last.effects);
                 }
                 last.effects = self.context.any(effects);
                 last
             }
-            Expression::TemplateLiteral(template) => {
+            Op::Template => {
                 let mut effects = Vec::new();
-                for expression in &template.expressions {
-                    let value = self.expression(expression);
-                    effects.push(value.effects);
-                    effects.push(
-                        self.context
-                            .operation(value.named.value, Hazard::ToPrimitive),
-                    );
+                for value in values {
+                    effects.push(value.computed.effects);
+                    effects.extend(value.extra);
                 }
                 let effects = self.context.any(effects);
                 let value = self.context.value(Hazards::NONE);
                 self.computed(value, effects)
             }
-            Expression::ObjectExpression(object) => {
+            Op::Object {
+                empty,
+                getter,
+                prototype,
+                ..
+            } => {
                 let mut effects = Vec::new();
-                let mut getter = false;
-                let mut prototype = false;
-                for property in &object.properties {
-                    match property {
-                        ObjectPropertyKind::ObjectProperty(property) => {
-                            getter |= property.kind == PropertyKind::Get;
-                            prototype |= !property.computed
-                                && property
-                                    .key
-                                    .static_name()
-                                    .is_some_and(|name| name == "__proto__");
-                            if property.computed {
-                                if let Some(key) = property.key.as_expression() {
-                                    let key = self.expression(key);
-                                    effects.push(key.effects);
-                                    effects.push(
-                                        self.context
-                                            .operation(key.named.value, Hazard::ToPrimitive),
-                                    );
-                                }
-                            }
-                            let value = self.expression(&property.value);
-                            effects.push(value.effects);
-                        }
-                        ObjectPropertyKind::SpreadProperty(spread) => {
-                            let value = self.expression(&spread.argument);
-                            effects.push(value.effects);
-                            // Enumeration and property getter execution are not
-                            // represented by the iterable hazard.
-                            effects.push(self.context.opaque_effects());
-                            getter = true;
-                        }
-                    }
+                for value in values {
+                    effects.push(value.computed.effects);
+                    effects.extend(value.extra);
                 }
                 let mut hazards = Hazards::UNKNOWN;
-                hazards.0[Hazard::PropertyRead as usize] = getter;
-                hazards.0[Hazard::PropertyRead as usize] |= prototype;
-                hazards.0[Hazard::PrototypeRead as usize] = prototype;
-                hazards.0[Hazard::ToPrimitive as usize] = !object.properties.is_empty();
+                hazards.0[Hazard::PropertyRead as usize] = *getter || *prototype;
+                hazards.0[Hazard::PrototypeRead as usize] = *prototype;
+                hazards.0[Hazard::ToPrimitive as usize] = !empty;
                 let value = self.context.value(hazards);
                 let effects = self.context.any(effects);
                 self.computed(value, effects)
             }
-            Expression::FunctionExpression(function) => {
-                let value = self.function(function);
-                self.computed(value, self.context.pure())
-            }
-            Expression::ArrowFunctionExpression(function) => {
-                let value = self
-                    .context
-                    .function_value(self.functions[&function.span].index);
+            Op::Function {
+                symbol,
+                span,
+                arrow,
+            } => {
+                let contract = if !arrow {
+                    symbol
+                        .and_then(|symbol| self.values[&symbol].binding.as_ref())
+                        .and_then(|binding| self.context.definition(binding))
+                } else {
+                    None
+                };
+                let value = contract
+                    .unwrap_or_else(|| self.context.function_value(self.functions[span].index));
                 self.computed(value, self.context.pure())
             }
             _ => self.unknown(),
+        };
+        Operand {
+            computed,
+            receiver,
+            extra: None,
         }
     }
 }
@@ -1194,6 +1200,7 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
 
 struct Compiler<'e, 's, 'a> {
     extractor: &'e mut Extractor<'s, 'a>,
+    expressions: Option<Vec<&'a Expression<'a>>>,
 }
 
 impl<'a> Compiler<'_, '_, 'a> {
@@ -1301,8 +1308,18 @@ impl<'a> Compiler<'_, '_, 'a> {
     }
 }
 
+impl<'a> FlatVisit<'a> for Compiler<'_, '_, 'a> {
+    fn expression_queue(&mut self) -> &mut Option<Vec<&'a Expression<'a>>> {
+        &mut self.expressions
+    }
+}
+
 impl<'a> Visit<'a> for Compiler<'_, '_, 'a> {
+    fn visit_expression(&mut self, expression: &Expression<'a>) {
+        self.flat_expression(expression);
+    }
     fn visit_function(&mut self, function: &Function<'a>, flags: ScopeFlags) {
+        let expressions = self.expressions.take();
         self.compile(
             function.span,
             &function.params,
@@ -1311,9 +1328,11 @@ impl<'a> Visit<'a> for Compiler<'_, '_, 'a> {
             None,
         );
         walk::walk_function(self, function, flags);
+        self.expressions = expressions;
     }
 
     fn visit_arrow_function_expression(&mut self, function: &ArrowFunctionExpression<'a>) {
+        let expressions = self.expressions.take();
         self.compile(
             function.span,
             &function.params,
@@ -1322,5 +1341,6 @@ impl<'a> Visit<'a> for Compiler<'_, '_, 'a> {
             function.get_expression(),
         );
         walk::walk_arrow_function_expression(self, function);
+        self.expressions = expressions;
     }
 }

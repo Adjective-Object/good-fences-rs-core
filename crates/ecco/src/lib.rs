@@ -2,6 +2,7 @@
 #![doc = include_str!("../README.md")]
 mod analysis;
 mod environment;
+mod frontier;
 mod inference;
 mod javascript;
 mod language;

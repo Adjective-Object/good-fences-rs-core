@@ -22,3 +22,7 @@ oxc_utils_parse = { path = "../oxc_utils_parse" }
 insta = { version = "1", default-features = false }
 serde_json.workspace = true
 serde_cbor = "0.11.2"
+
+[[bench]]
+name = "frontier"
+harness = false
