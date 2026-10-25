@@ -201,6 +201,16 @@ pub(super) fn candidates(
     entries: impl Iterator<Item = PathBuf>,
     options: &BuildOptions,
 ) -> eyre::Result<BTreeSet<PathBuf>> {
+    options
+        .execution
+        .scoped_pool(|| candidates_inner(root, entries, options))?
+}
+
+fn candidates_inner(
+    root: &Path,
+    entries: impl Iterator<Item = PathBuf>,
+    options: &BuildOptions,
+) -> eyre::Result<BTreeSet<PathBuf>> {
     let _span = tracing::info_span!("build.discover_local").entered();
     tracing::info!(target: "bundler::progress", "Discovering local source candidates");
     let progress = Arc::new(Progress::new());
@@ -262,13 +272,14 @@ pub(super) fn candidates(
         .flat_map(|path| path.ancestors().take_while(|path| path.starts_with(root)))
         .map(Path::to_owned)
         .collect();
-    let pool = Arc::new(
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(options.execution.workers().get())
-            .thread_name(|index| format!("bundler-discovery-{index}"))
-            .build()
-            .wrap_err("starting local source discovery workers")?,
-    );
+    // The iterator can block: never leave its only worker waiting on itself.
+    let parallelism = if rayon::current_thread_index().is_some() {
+        jwalk::Parallelism::Serial
+    } else if let Some(pool) = crate::execution::owned_pool() {
+        jwalk::Parallelism::RayonExistingPool(pool)
+    } else {
+        jwalk::Parallelism::Serial
+    };
     let root = root.to_owned();
     let mut inherited = WalkState::default();
     for ancestor in root
@@ -301,7 +312,7 @@ pub(super) fn candidates(
     let dispatch = tracing::dispatcher::get_default(Clone::clone);
     let parent = tracing::Span::current();
     let walk = jwalk::WalkDirGeneric::<(WalkState, ())>::new(&root)
-        .parallelism(jwalk::Parallelism::RayonExistingPool(pool))
+        .parallelism(parallelism)
         .skip_hidden(false)
         .follow_links(false)
         .process_read_dir(move |state, children| {
@@ -484,25 +495,62 @@ mod tests {
             "b/source.mjs" => ""
         };
         let root = dir.root().canonicalize().unwrap();
-        let observed = Arc::new(Observed::default());
-        let subscriber = tracing_subscriber::registry().with(Observer(observed.clone()));
         let mut options = BuildOptions::default();
         options.execution =
             crate::execution::ExecutionOptions::new(std::num::NonZeroUsize::new(2).unwrap());
-        let found = tracing::subscriber::with_default(subscriber, || {
-            candidates(&root, std::iter::once(root.join("main.mjs")), &options).unwrap()
-        });
-        assert_eq!(found.len(), 3);
-        assert!(!observed.package.timed_out.load(Ordering::Relaxed));
-        assert!(!observed.walk.timed_out.load(Ordering::Relaxed));
-        for threads in [&observed.package_threads, &observed.walk_threads] {
-            let threads = threads.lock();
-            assert_eq!(threads.len(), 2, "{threads:?}");
-            assert!(!threads.contains(&std::thread::current().id()));
+        // Other tests can first register walk callsites without a subscriber.
+        // Keep tracing's single-dispatch shortcut from caching them as disabled.
+        let _other_dispatch = tracing::Dispatch::new(tracing_subscriber::registry());
+        for shared in [false, true] {
+            let observed = Arc::new(Observed::default());
+            let subscriber = tracing_subscriber::registry().with(Observer(observed.clone()));
+            let discover =
+                || candidates(&root, std::iter::once(root.join("main.mjs")), &options).unwrap();
+            let found = tracing::subscriber::with_default(subscriber, || {
+                if shared {
+                    options.execution.scoped_pool(discover).unwrap()
+                } else {
+                    discover()
+                }
+            });
+            assert_eq!(found.len(), 3);
+            assert!(!observed.package.timed_out.load(Ordering::Relaxed));
+            assert!(!observed.walk.timed_out.load(Ordering::Relaxed));
+            let package_threads = observed.package_threads.lock();
+            let walk_threads = observed.walk_threads.lock();
+            assert_eq!(package_threads.len(), 2, "{package_threads:?}");
+            assert_eq!(*package_threads, *walk_threads);
+            assert!(!walk_threads.contains(&std::thread::current().id()));
+            let events = observed.events.lock();
+            assert!(events.iter().any(|event| event.0.contains_key("directory")));
+            assert!(events.iter().any(|event| event.0.contains_key("file")));
         }
-        let events = observed.events.lock();
-        assert!(events.iter().any(|event| event.0.contains_key("directory")));
-        assert!(events.iter().any(|event| event.0.contains_key("file")));
+    }
+
+    #[test]
+    fn directory_walk_reuses_installed_caller_pools_including_one_worker() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "package.json" => "{}",
+            "main.mjs" => "",
+            "src/other.mjs" => ""
+        };
+        let root = dir.root().canonicalize().unwrap();
+        for workers in [1, 2] {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(workers)
+                .build()
+                .unwrap();
+            pool.install(|| {
+                let mut options = BuildOptions::default();
+                options.execution = crate::execution::ExecutionOptions::new(
+                    std::num::NonZeroUsize::new(workers).unwrap(),
+                );
+                let found =
+                    candidates(&root, std::iter::once(root.join("main.mjs")), &options).unwrap();
+                assert_eq!(found.len(), 2);
+                assert!(crate::execution::owned_pool().is_none());
+            });
+        }
     }
 
     #[test]

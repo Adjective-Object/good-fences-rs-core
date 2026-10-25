@@ -27,8 +27,11 @@
   receivers; take consumed summaries and bound planning by source/remaining-work
   limits. Skip lowering when inference is already opaque or exhausted.
   Keep preorder budget/PURE boundaries and source-ordered Context recording,
-  including coercion/spread continuations before later operands. No expression
-  pool or persisted scheduling format; statement/function traversal is unchanged.
+  including coercion/spread continuations before later operands. Batch wide,
+  independent immutable transfers on the caller's installed Rayon pool; keep
+  narrow frontiers inline, bound speculative credits and replay exhausted jobs
+  in source order. Never create an expression/global pool or persist scheduling
+  state; statement/function traversal is unchanged.
 - Keep declarations and extracted graphs owned; never retain OXC arena data.
 - Persist only `ParsedFile` precursors. Instantiate roots/functions in a fresh
   `Analysis`; external resolutions come from the caller's canonical graph.

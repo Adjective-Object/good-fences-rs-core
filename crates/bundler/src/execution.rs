@@ -1,6 +1,83 @@
 //! Explicit execution limits; scheduling never changes artifact identity.
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+
+thread_local! {
+    static BUILD_POOL: std::cell::RefCell<Option<Arc<rayon::ThreadPool>>> =
+        const { std::cell::RefCell::new(None) };
+    static FORWARDED: std::cell::Cell<crate::rewrite::ParseCounts> =
+        const { std::cell::Cell::new(crate::rewrite::ParseCounts::ZERO) };
+    static BUILD_LIMIT: std::cell::Cell<usize> = const { std::cell::Cell::new(usize::MAX) };
+}
+
+pub(crate) fn owned_pool() -> Option<Arc<rayon::ThreadPool>> {
+    BUILD_POOL.with(|pool| pool.borrow().clone())
+}
+
+/// Enter CPU work only, never move the non-Send build coordinator.
+pub(crate) fn cpu<R: Send>(work: impl FnOnce() -> R + Send) -> R {
+    let limit = BUILD_LIMIT.with(std::cell::Cell::get);
+    let limited = || ecco::with_worker_limit(NonZeroUsize::new(limit).unwrap(), work);
+    if rayon::current_thread_index().is_some() {
+        return limited();
+    }
+    match owned_pool() {
+        Some(pool) => {
+            let dispatch = tracing::dispatcher::get_default(Clone::clone);
+            let parent = tracing::Span::current();
+            pool.install(|| {
+                tracing::dispatcher::with_default(&dispatch, || parent.in_scope(limited))
+            })
+        }
+        None => limited(),
+    }
+}
+
+fn cooperate() {
+    if rayon::current_thread_index().is_some() {
+        rayon::yield_now();
+    }
+    std::thread::yield_now();
+}
+
+fn receive<T>(receiver: &std::sync::mpsc::Receiver<T>) -> Result<T, std::sync::mpsc::RecvError> {
+    if rayon::current_thread_index().is_none() {
+        return receiver.recv();
+    }
+    loop {
+        match receiver.try_recv() {
+            Ok(value) => return Ok(value),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                return Err(std::sync::mpsc::RecvError)
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => cooperate(),
+        }
+    }
+}
+
+fn run_job<R>(
+    origin: std::thread::ThreadId,
+    workers: NonZeroUsize,
+    work: impl FnOnce() -> R,
+) -> (std::thread::Result<R>, crate::rewrite::ParseCounts) {
+    let before = crate::rewrite::parse_counts();
+    let forwarded = FORWARDED.with(std::cell::Cell::get);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ecco::with_worker_limit(workers, work)
+    }));
+    // A nested Rayon wait may run another module on this same thread.
+    let counts = if std::thread::current().id() == origin {
+        crate::rewrite::ParseCounts::ZERO
+    } else {
+        let counts = crate::rewrite::parse_counts()
+            .difference(before)
+            .difference(FORWARDED.with(std::cell::Cell::get).difference(forwarded));
+        FORWARDED.with(|total| total.set(total.get().plus(counts)));
+        counts
+    };
+    (result, counts)
+}
 
 fn worker_panic(payload: Box<dyn std::any::Any + Send>) -> eyre::Report {
     let message = payload
@@ -55,6 +132,46 @@ impl Default for ExecutionOptions {
 }
 
 impl ExecutionOptions {
+    pub(crate) fn scoped_pool<R>(self, work: impl FnOnce() -> R) -> eyre::Result<R> {
+        struct ResetLimit(usize);
+        impl Drop for ResetLimit {
+            fn drop(&mut self) {
+                BUILD_LIMIT.with(|limit| limit.set(self.0));
+            }
+        }
+        let previous = BUILD_LIMIT.with(|limit| limit.replace(limit.get().min(self.workers.get())));
+        let _limit = ResetLimit(previous);
+        if rayon::current_thread_index().is_some() || owned_pool().is_some() {
+            return Ok(work());
+        }
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(self.workers.get())
+            .thread_name(|index| format!("bundler-cpu-{index}"))
+            .build()
+            .map_err(|error| eyre::Report::from(error).wrap_err("starting build CPU workers"))?;
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                BUILD_POOL.with(|pool| *pool.borrow_mut() = None);
+            }
+        }
+        BUILD_POOL.with(|slot| *slot.borrow_mut() = Some(Arc::new(pool)));
+        let _reset = Reset;
+        Ok(work())
+    }
+
+    fn cpu_scope<'scope, R>(
+        self,
+        work: impl FnOnce(&rayon::Scope<'scope>) -> R,
+    ) -> eyre::Result<R> {
+        self.scoped_pool(|| {
+            if rayon::current_thread_index().is_some() {
+                rayon::in_place_scope(work)
+            } else {
+                owned_pool().expect("build CPU pool").in_place_scope(work)
+            }
+        })
+    }
     /// At most this many workers run at once, further limited by the job count.
     /// Fingerprinting and emission may run inline with one worker.
     pub const fn new(workers: NonZeroUsize) -> Self {
@@ -104,7 +221,7 @@ impl ExecutionOptions {
         mut integrate: impl FnMut(R) -> eyre::Result<(Vec<J>, bool)>,
         speculative: impl Fn(&J) -> bool,
     ) -> eyre::Result<()> {
-        use std::sync::{mpsc, Mutex};
+        use std::sync::mpsc;
         let (mut eager, mut pending): (std::collections::VecDeque<_>, _) =
             jobs.into_iter().partition(&speculative);
         if self.workers.get() == 1 && matches!(stage, WorkStage::Lockfile) {
@@ -123,63 +240,17 @@ impl ExecutionOptions {
         if pending.is_empty() {
             return Ok(());
         }
-        enum Event<R> {
-            Completed(R, bool),
-            Exited,
-        }
-        // An exit notification also runs during unwinding: a lost job cannot
-        // leave the coordinator waiting while the other workers wait for work.
-        struct Exit<R>(mpsc::SyncSender<Event<R>>);
-        impl<R> Drop for Exit<R> {
-            fn drop(&mut self) {
-                let _ = self.0.send(Event::Exited);
-            }
-        }
         let workers = self.workers.get();
-        let (jobs_tx, jobs_rx) = mpsc::sync_channel(workers);
-        let jobs_rx = Mutex::new(jobs_rx);
         let dispatch = tracing::dispatcher::get_default(Clone::clone);
         let parent = tracing::Span::current();
-        std::thread::scope(|scope| {
-            let jobs_tx = jobs_tx;
-            // Drop this receiver before joining on every path, so even exit
-            // notifications during multiple panics cannot block worker cleanup.
+        let origin = std::thread::current().id();
+        self.cpu_scope(|cpu_scope| {
             let (results_tx, results_rx) = mpsc::sync_channel(workers);
-            let mut handles = Vec::new();
-            let mut error = None;
-            for worker_id in 0..workers {
-                let (jobs_rx, work) = (&jobs_rx, &work);
-                let results_tx = results_tx.clone();
-                let (dispatch, parent) = (dispatch.clone(), parent.clone());
-                match std::thread::Builder::new().spawn_scoped(scope, move || {
-                    let _dispatch = tracing::dispatcher::set_default(&dispatch);
-                    let _exit = Exit(results_tx.clone());
-                    let before = crate::rewrite::parse_counts();
-                    loop {
-                        let job = jobs_rx.lock().expect("job queue poisoned").recv();
-                        let Ok(job) = job else { break };
-                        let (job, eager) = job;
-                        let result = stage.span(&parent, worker_id).in_scope(|| work(job));
-                        if results_tx.send(Event::Completed(result, eager)).is_err() {
-                            break;
-                        }
-                    }
-                    crate::rewrite::parse_counts().difference(before)
-                }) {
-                    Ok(handle) => handles.push(handle),
-                    Err(spawn_error) => {
-                        error = Some(
-                            eyre::Report::from(spawn_error)
-                                .wrap_err(format!("spawning {} worker", stage.name())),
-                        );
-                        break;
-                    }
-                }
-            }
-            drop(results_tx);
+            let mut available: Vec<_> = (0..workers).rev().collect();
             let mut outstanding = 0;
             let mut precise = 0;
             let mut waiting = false;
+            let mut error = None;
             while error.is_none() {
                 while outstanding < workers {
                     let next = pending.pop_front().map(|job| (job, false)).or_else(|| {
@@ -187,62 +258,73 @@ impl ExecutionOptions {
                             .then(|| eager.pop_front().map(|job| (job, true)))
                             .flatten()
                     });
-                    let Some((job, is_eager)) = next else {
-                        break;
-                    };
-                    if jobs_tx.send((job, is_eager)).is_err() {
-                        error = Some(eyre::eyre!("{} workers disconnected", stage.name()));
-                        break;
-                    }
+                    let Some((job, is_eager)) = next else { break };
+                    let worker_id = available.pop().expect("bounded worker slot");
+                    let work = &work;
+                    let results = results_tx.clone();
+                    let (dispatch, parent) = (dispatch.clone(), parent.clone());
+                    cpu_scope.spawn(move |_| {
+                        let (result, counts) = run_job(origin, self.workers, || {
+                            tracing::dispatcher::with_default(&dispatch, || {
+                                stage.span(&parent, worker_id).in_scope(|| work(job))
+                            })
+                        });
+                        let _ = results.send((result, counts, is_eager, worker_id));
+                    });
                     outstanding += 1;
                     precise += usize::from(!is_eager);
                 }
-                if error.is_some() || outstanding == 0 {
+                if outstanding == 0 {
                     break;
                 }
-                match results_rx.recv() {
-                    Ok(Event::Completed(result, is_eager)) => {
-                        outstanding -= 1;
-                        precise -= usize::from(!is_eager);
-                        match integrate(result) {
-                            Ok((jobs, required)) => {
-                                waiting = required;
-                                for job in jobs {
-                                    if speculative(&job) {
-                                        eager.push_front(job);
-                                    } else {
-                                        pending.push_back(job);
-                                    }
+                let (result, counts, is_eager, worker_id) =
+                    receive(&results_rx).expect("scoped jobs always report completion");
+                crate::rewrite::record_worker_parses(counts);
+                outstanding -= 1;
+                precise -= usize::from(!is_eager);
+                available.push(worker_id);
+                match result {
+                    Ok(result) => match integrate(result) {
+                        Ok((jobs, required)) => {
+                            waiting = required;
+                            for job in jobs {
+                                if speculative(&job) {
+                                    eager.push_front(job);
+                                } else {
+                                    pending.push_back(job);
                                 }
                             }
-                            Err(integration_error) => error = Some(integration_error),
                         }
-                    }
-                    Ok(Event::Exited) | Err(_) => {
-                        error = Some(eyre::eyre!("{} worker exited prematurely", stage.name()));
+                        Err(integration_error) => error = Some(integration_error),
+                    },
+                    Err(payload) => {
+                        error = Some(
+                            worker_panic(payload)
+                                .wrap_err(format!("{} worker panicked", stage.name())),
+                        );
                     }
                 }
             }
-            drop(jobs_tx);
-            drop(results_rx);
-            for handle in handles {
-                match handle.join() {
-                    Ok(counts) => crate::rewrite::record_worker_parses(counts),
-                    Err(payload) => {
-                        let panic = worker_panic(payload)
-                            .wrap_err(format!("{} worker panicked", stage.name()));
-                        error = Some(match error.take() {
-                            Some(error) => error.wrap_err(format!("{panic:#}")),
-                            None => panic,
-                        });
-                    }
+            // Drain submitted work on both success and failure before leaving
+            // the scope, preserving counts and panic diagnostics.
+            for _ in 0..outstanding {
+                let (result, counts, _, _) =
+                    receive(&results_rx).expect("scoped jobs always report completion");
+                crate::rewrite::record_worker_parses(counts);
+                if let Err(payload) = result {
+                    let panic =
+                        worker_panic(payload).wrap_err(format!("{} worker panicked", stage.name()));
+                    error = Some(match error.take() {
+                        Some(error) => error.wrap_err(format!("{panic:#}")),
+                        None => panic,
+                    });
                 }
             }
             match error {
                 Some(error) => Err(error),
                 None => Ok(()),
             }
-        })
+        })?
     }
 
     pub(crate) fn resolve<R: Send>(
@@ -251,26 +333,22 @@ impl ExecutionOptions {
     ) -> eyre::Result<R> {
         let dispatch = tracing::dispatcher::get_default(Clone::clone);
         let parent = tracing::Span::current();
-        std::thread::scope(|scope| {
-            let worker = std::thread::Builder::new()
-                .spawn_scoped(scope, move || {
-                    let _dispatch = tracing::dispatcher::set_default(&dispatch);
-                    let _span = tracing::info_span!(parent: &parent, "resolve.worker").entered();
-                    let before = crate::rewrite::parse_counts();
-                    let result = work();
-                    (result, crate::rewrite::parse_counts().difference(before))
-                })
-                .map_err(|error| {
-                    eyre::Report::from(error).wrap_err("spawning resolution worker")
-                })?;
-            match worker.join() {
-                Ok((result, counts)) => {
-                    crate::rewrite::record_worker_parses(counts);
-                    result
-                }
-                Err(payload) => Err(worker_panic(payload).wrap_err("resolution worker panicked")),
-            }
-        })
+        let origin = std::thread::current().id();
+        self.cpu_scope(|scope| {
+            let (send, done) = std::sync::mpsc::sync_channel(1);
+            scope.spawn(move |_| {
+                let result = run_job(origin, self.workers, || {
+                    tracing::dispatcher::with_default(&dispatch, || {
+                        tracing::info_span!(parent: &parent, "resolve.worker").in_scope(work)
+                    })
+                });
+                let _ = send.send(result);
+            });
+            let (result, counts) = receive(&done).expect("scoped job always reports completion");
+            crate::rewrite::record_worker_parses(counts);
+            result
+                .map_err(|payload| worker_panic(payload).wrap_err("resolution worker panicked"))?
+        })?
     }
 
     pub(crate) fn map<T: Sync, R: Send>(
@@ -294,51 +372,45 @@ impl ExecutionOptions {
         let parent = tracing::Span::current();
         #[cfg(test)]
         let observer = JOB_OBSERVER.with(|observer| observer.borrow().clone());
-        let mut results = std::thread::scope(|scope| {
-            let mut handles = Vec::new();
-            let mut error = None;
+        let origin = std::thread::current().id();
+        let mut results = self.cpu_scope(|cpu_scope| {
+            let (send, done) = std::sync::mpsc::sync_channel(workers);
             for worker_id in 0..workers {
                 let (next, emit) = (&next, &emit);
                 let (dispatch, parent) = (dispatch.clone(), parent.clone());
+                let send = send.clone();
                 #[cfg(test)]
                 let observer = &observer;
-                let spawned = std::thread::Builder::new().spawn_scoped(scope, move || {
-                    let _dispatch = tracing::dispatcher::set_default(&dispatch);
-                    let before = crate::rewrite::parse_counts();
-                    let mut results = Vec::new();
-                    loop {
-                        let index = next.fetch_add(1, Ordering::Relaxed);
-                        let Some(job) = jobs.get(index) else { break };
-                        #[cfg(test)]
-                        if let Some(observer) = observer {
-                            observer(jobs.len(), index);
+                cpu_scope.spawn(move |_| {
+                    let result = run_job(origin, self.workers, || {
+                        let _dispatch = tracing::dispatcher::set_default(&dispatch);
+                        let mut results = Vec::new();
+                        loop {
+                            let index = next.fetch_add(1, Ordering::Relaxed);
+                            let Some(job) = jobs.get(index) else { break };
+                            #[cfg(test)]
+                            if let Some(observer) = observer {
+                                observer(jobs.len(), index);
+                            }
+                            let result = tracing::info_span!(
+                                parent: &parent, "emit.owner", worker_id, owner_id = index
+                            )
+                            .in_scope(|| emit(job));
+                            results.push((index, result));
                         }
-                        let result = tracing::info_span!(
-                            parent: &parent, "emit.owner", worker_id, owner_id = index
-                        )
-                        .in_scope(|| emit(job));
-                        results.push((index, result));
-                    }
-                    (results, crate::rewrite::parse_counts().difference(before))
+                        results
+                    });
+                    let _ = send.send(result);
                 });
-                match spawned {
-                    Ok(handle) => handles.push(handle),
-                    Err(spawn_error) => {
-                        error = Some(
-                            eyre::Report::from(spawn_error)
-                                .wrap_err("spawning output emission worker"),
-                        );
-                        break;
-                    }
-                }
             }
             let mut results = Vec::new();
-            for handle in handles {
-                match handle.join() {
-                    Ok((mut output, counts)) => {
-                        crate::rewrite::record_worker_parses(counts);
-                        results.append(&mut output);
-                    }
+            let mut error = None;
+            for _ in 0..workers {
+                let (result, counts) =
+                    receive(&done).expect("scoped jobs always report completion");
+                crate::rewrite::record_worker_parses(counts);
+                match result {
+                    Ok(mut output) => results.append(&mut output),
                     Err(payload) => {
                         error.get_or_insert_with(|| {
                             worker_panic(payload).wrap_err("output emission worker panicked")
@@ -350,7 +422,7 @@ impl ExecutionOptions {
                 return Err(error);
             }
             Ok::<_, eyre::Report>(results)
-        })?;
+        })??;
         results.sort_by_key(|(index, _)| *index);
         Ok(results.into_iter().map(|(_, output)| output).collect())
     }
@@ -360,6 +432,90 @@ impl ExecutionOptions {
 mod tests {
     use super::*;
     use std::sync::Barrier;
+
+    #[test]
+    fn nested_module_expressions_reuse_the_build_or_caller_pool() {
+        use std::collections::HashSet;
+        for (pool_workers, workers) in [(1, 1), (4, 4), (4, 1), (8, 4)] {
+            let execution = ExecutionOptions::new(NonZeroUsize::new(workers).unwrap());
+            let source = format!(
+                "export function check(a) {{ return ({}); }}",
+                vec!["a.x + 1"; 256].join(",")
+            );
+            let expected = ecco::parse_source(
+                &source,
+                std::path::Path::new("wide.mjs"),
+                ecco::LocalFacts::default(),
+            )
+            .unwrap();
+            let expected = serde_json::to_vec(&expected).unwrap();
+            let exercise = |pool: &rayon::ThreadPool| {
+                let members: HashSet<_> = pool
+                    .broadcast(|_| std::thread::current().id())
+                    .into_iter()
+                    .collect();
+                let mut completed = 0;
+                let before = crate::rewrite::parse_counts();
+                execution
+                    .replenish(
+                        0..8,
+                        |_| {
+                            assert!(members.contains(&std::thread::current().id()));
+                            let parsed = ecco::parse_source(
+                                &source,
+                                std::path::Path::new("wide.mjs"),
+                                ecco::LocalFacts::default(),
+                            )
+                            .unwrap();
+                            assert_eq!(serde_json::to_vec(&parsed).unwrap(), expected);
+                            ast_segmenter::parse_module(
+                                &logger::StdioLogger::new(),
+                                &source,
+                                std::path::Path::new("wide.mjs"),
+                                ast_segmenter::ModuleFormat::Esm,
+                            )
+                            .unwrap();
+                            rayon::scope(|scope| {
+                                for _ in 0..8 {
+                                    scope.spawn(|_| {
+                                        assert!(members.contains(&std::thread::current().id()));
+                                    });
+                                }
+                            });
+                        },
+                        |_| {
+                            completed += 1;
+                            vec![]
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(completed, 8);
+                let counts = crate::rewrite::parse_counts().difference(before);
+                assert_eq!(counts.source, 8);
+                assert_eq!(counts.declarations, 8);
+            };
+            execution
+                .scoped_pool(|| {
+                    let pool = owned_pool().unwrap();
+                    exercise(&pool);
+                    execution
+                        .scoped_pool(|| {
+                            assert!(Arc::ptr_eq(&pool, &owned_pool().unwrap()));
+                        })
+                        .unwrap();
+                })
+                .unwrap();
+            assert!(owned_pool().is_none());
+            let caller = rayon::ThreadPoolBuilder::new()
+                .num_threads(pool_workers)
+                .build()
+                .unwrap();
+            caller.install(|| {
+                exercise(&caller);
+                assert!(owned_pool().is_none());
+            });
+        }
+    }
 
     #[test]
     fn precise_frontier_overtakes_speculation_and_does_not_drain_the_eager_tail() {

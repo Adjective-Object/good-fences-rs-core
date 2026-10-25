@@ -606,11 +606,14 @@ entry aliases and naming.
 
 `BuildOptions.execution` and low-level `link::esm_with_execution` accept
 `execution::ExecutionOptions::new(NonZeroUsize::new(4).unwrap())`. The default is
-one worker; preparation/resolution run off the coordinator even with one worker.
-Existing `link::esm` callers remain serial, and single-worker fingerprinting and
-emission run inline. The
-explicit count bounds scoped workers, additionally capped by each batch's
-actual owner count for emission. No environment variable or global pool selects concurrency.
+one worker; preparation/resolution run on the CPU pool even with one worker.
+One build-scoped Rayon pool bounds preparation, resolution, discovery, nested
+immutable Ecco expression transfers, fixed-point evaluation and owner emission.
+An installed caller pool is reused rather than creating a competing pool.
+If that pool exceeds the configured limit, nested Ecco parallel work stays
+inline; outstanding module jobs remain bounded by the configured count.
+Single-worker fingerprinting and emission stay inline. Emission is additionally capped by
+each batch's actual owner count. No environment variable or global pool selects concurrency.
 
 Module preparation uses a replenished, deduplicated canonical-path frontier:
 the coordinator integrates each completed job and enqueues separate preparation
@@ -626,12 +629,15 @@ work is abandoned when the precise frontier settles. Evicted results can be
 prepared again on demand. `Counters.speculative_parses` separates unused eager
 extraction from emission reparsing.
 Resolution, proof checks and route admission run on workers; graph mutation and
-Ecco solving stay serial. Resolver maps use short guards, with package loading and
+Ecco graph construction stay serial. Resolver maps use short guards, with package loading and
 borrowed disk-proof validation outside them. Stateful resources
 (CSS, JSON and assets) use a canonical serial frontier after the script frontier
 drains; CSS/Sass request resolution and context expansion also run off the
-coordinator. Preparation workers join
-before resource processing or emission starts, so stage worker counts never add.
+coordinator. Scoped jobs drain before resource processing or emission starts,
+so stage worker counts never add. The non-Send coordinator stays on its calling
+thread; when called from a Rayon worker, result waits yield to that same pool,
+including with one worker. Discovery walks stay serial in an installed caller
+pool to avoid blocking its only worker.
 Source errors are selected by canonical path after script discovery; serial
 resource processing stops at its first failure. Cache warnings are sorted.
 Failed builds retain the previous successful product but never return it as success.

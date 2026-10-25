@@ -6,6 +6,34 @@ use oxc_ast_visit::{walk, Visit};
 use oxc_semantic::{Semantic, SymbolId};
 use oxc_span::Span;
 
+thread_local! {
+    static WORKER_LIMIT: std::cell::Cell<usize> = const { std::cell::Cell::new(usize::MAX) };
+}
+
+/// Limit nested analysis in an installed pool without creating another pool.
+/// If that pool is larger than the limit, transfers/equations run inline.
+/// The limit is scoped to this call, including unwinding.
+pub fn with_worker_limit<R>(workers: std::num::NonZeroUsize, work: impl FnOnce() -> R) -> R {
+    struct Reset(usize);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            WORKER_LIMIT.with(|limit| limit.set(self.0));
+        }
+    }
+    let previous = WORKER_LIMIT.with(|limit| limit.replace(limit.get().min(workers.get())));
+    let _reset = Reset(previous);
+    work()
+}
+
+pub(crate) fn parallel_allowed() -> bool {
+    let limit = WORKER_LIMIT.with(std::cell::Cell::get);
+    if limit <= 1 || rayon::current_thread_index().is_none() {
+        return false;
+    }
+    let workers = rayon::current_num_threads();
+    workers > 1 && workers <= limit
+}
+
 #[cfg(test)]
 thread_local! {
     static PROJECTED_NODES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -76,6 +104,7 @@ pub(crate) struct Node<'s> {
     pub inputs: Range<usize>,
     pub charge: bool,
     pub end: usize,
+    pub next: usize,
 }
 
 pub(crate) struct Input {
@@ -171,6 +200,7 @@ impl<'s> Plan<'s> {
                         inputs: start..start + children.len(),
                         charge,
                         end: 0,
+                        next: 0,
                     });
                     plan.steps.push(Step::Enter(id));
                     pending.push(Lower::Ready(id));
@@ -188,6 +218,7 @@ impl<'s> Plan<'s> {
                 }
                 Lower::Ready(id) => {
                     plan.nodes[id].end = plan.steps.len();
+                    plan.nodes[id].next = plan.nodes.len();
                     plan.steps.push(Step::Ready(id));
                 }
                 Lower::Input(input) => {

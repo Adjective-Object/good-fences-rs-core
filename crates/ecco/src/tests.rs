@@ -1333,6 +1333,132 @@ fn expression_frontiers_handle_deep_shapes_on_default_worker_stacks() {
 }
 
 #[test]
+fn wide_expression_transfers_use_installed_workers_and_merge_identical_facts() {
+    use std::collections::HashSet;
+    use std::sync::Mutex;
+
+    let javascript = format!(
+        "export function check(a) {{ return ({}); }}",
+        vec!["a.x + 1"; 256].join(",")
+    );
+    let baseline = parse_source(&javascript, Path::new("wide.js"), LocalFacts::default()).unwrap();
+    let baseline = serde_json::to_vec(&baseline).unwrap();
+    for (pool_workers, limit) in [(1, 1), (4, 4), (4, 1), (8, 4)] {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(pool_workers)
+            .build()
+            .unwrap();
+        let threads = Arc::new(Mutex::new(HashSet::new()));
+        let observed = threads.clone();
+        let bytes = pool.install(|| {
+            crate::inference::FRONTIER_OBSERVER.with(|observer| {
+                *observer.borrow_mut() = Some(Arc::new(move |parallel| {
+                    if parallel {
+                        assert_eq!(rayon::current_num_threads(), pool_workers);
+                        observed.lock().unwrap().insert(std::thread::current().id());
+                        // Give ready batches time to be stolen, without a rendezvous
+                        // that could deadlock a correctly inline execution.
+                        std::thread::sleep(std::time::Duration::from_micros(100));
+                    }
+                }));
+            });
+            let parsed = with_worker_limit(std::num::NonZeroUsize::new(limit).unwrap(), || {
+                parse_source(&javascript, Path::new("wide.js"), LocalFacts::default()).unwrap()
+            });
+            crate::inference::FRONTIER_OBSERVER.with(|observer| *observer.borrow_mut() = None);
+            parsed.validate().unwrap();
+            serde_json::to_vec(&parsed).unwrap()
+        });
+        assert_eq!(bytes, baseline, "pool={pool_workers}, limit={limit}");
+        let count = threads.lock().unwrap().len();
+        if limit == 1 || pool_workers > limit {
+            assert_eq!(count, 0);
+        } else {
+            assert!(count > 1 && count <= limit, "observed {count} threads");
+        }
+    }
+}
+
+#[test]
+fn parallel_expression_transfers_preserve_budget_pure_receivers_and_updates() {
+    let declarations = parse_declarations(
+        r#"
+        global fn mutate(target) {
+            call_effects = false
+            updates target.property_read_effects |= true
+            returns = target
+        }
+        global fn namespace.method(value) {
+            call_effects = this.property_read_effects | value.toprimitive_effects
+            returns = value
+        }
+        global fn expand(value) {
+            call_effects = false
+            returns.*_effects = value.property_read_effects | value.toprimitive_effects
+        }
+        "#,
+    )
+    .unwrap();
+    let wide = |values: Vec<String>| format!("({})", values.join(","));
+    let expressions = [
+        wide(
+            (0..128)
+                .map(|i| if i % 2 == 0 { "mutate(a)" } else { "mutate(b)" }.into())
+                .collect(),
+        ),
+        wide(vec!["namespace.method(a)".into(); 128]),
+        wide(vec!["/*#__PURE__*/ unknown(a.x)".into(); 128]),
+        wide(vec!["(/*#__PURE__*/ mutate(a), mutate(b))".into(); 128]),
+        // Exceeds each speculative credit without exhausting the serial budget.
+        wide(
+            (0..128)
+                .map(|i| {
+                    if i == 0 {
+                        format!("{}a{}", "expand(".repeat(40), ")".repeat(40))
+                    } else {
+                        "1".into()
+                    }
+                })
+                .collect(),
+        ),
+        // Visit planning fits, but invocation/substitution work exhausts the budget.
+        wide(vec!["expand(expand(expand(a)))".into(); 256]),
+        wide(
+            (0..128)
+                .map(|i| if i == 0 { "unknown()" } else { "mutate(a)" }.into())
+                .collect(),
+        ),
+        format!(
+            "({{{}}})",
+            vec!["[a.x]: namespace.method(b)"; 128].join(",")
+        ),
+    ];
+    let pools: Vec<_> = [1, 4]
+        .into_iter()
+        .map(|workers| {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(workers)
+                .build()
+                .unwrap()
+        })
+        .collect();
+    for expression in expressions {
+        let javascript =
+            format!("export function check(a,b) {{ const alias = a; return {expression}; }}");
+        let extract = || {
+            let parsed =
+                parse_source(&javascript, Path::new("merge.js"), declarations.clone()).unwrap();
+            parsed.validate().unwrap();
+            serde_json::to_vec(&parsed).unwrap()
+        };
+        let baseline = extract();
+        for pool in &pools {
+            assert_eq!(pool.install(extract), baseline, "{expression}");
+        }
+    }
+}
+
+#[test]
 fn deep_unsupported_and_exhausted_frontiers_stay_conservative() {
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(1)

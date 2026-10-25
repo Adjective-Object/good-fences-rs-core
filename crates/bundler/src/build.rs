@@ -270,7 +270,9 @@ impl BuildSession {
     }
 
     pub fn build(&mut self, options: &BuildOptions) -> eyre::Result<BuildResult> {
-        self.build_inner(options)
+        options
+            .execution
+            .scoped_pool(|| self.build_inner(options))?
             .wrap_err_with(|| format!("building project {}", self.root.display()))
     }
 

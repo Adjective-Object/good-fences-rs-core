@@ -270,7 +270,8 @@ earlier pure calls. Executing a potentially replaced target conservatively
 widens heap and return hazards, not only that call's effect.
 `SourceAnalysis.matches` and `FileAnalysis.matches` include matched contracts in
 supported deferred bodies as well as module roots. Summaries are shared within the context; graph
-construction is serial and fixed-point evaluation remains parallel.
+construction is serial and fixed-point evaluation uses an installed Rayon pool,
+or stays inline without one.
 
 ## Conservative boundaries
 
@@ -309,15 +310,23 @@ the contract work limit); exhausted contract planning stays unknown.
 Opaque/exhausted inference skips lowering; each further projection is bounded
 by the remaining function budget, not a fresh full-function allowance.
 Dependency, binding and compiler expression scans also use explicit worklists.
-This is sequential extraction, not a runtime scheduler or a parallel expression
-pool. Statement/function nesting and declared-contract expansion retain their
+Wide independent contract operands run as immutable transfer batches on the
+caller's installed Rayon pool; no expression-specific or global pool is created.
+Frontiers below 64 operands stay inline; ready operands are batched in groups of
+16. Each speculative transfer receives a bounded share of remaining work.
+Outcomes merge in source order, replaying exhausted jobs against the actual
+remaining budget, so worker count cannot alter opacity, updates or facts.
+`with_worker_limit` can disable parallel work inside an oversized caller pool
+without creating another pool. Mutable lazy Context recording remains sequential.
+Statement/function nesting and declared-contract expansion retain their
 existing traversal and limits; general AST/interpreter stack safety is not claimed.
 
 `cargo bench -p ecco --bench frontier` measures inference and owned extraction
 over pre-parsed small, wide and deep fixtures. It uses an explicit 64 MiB
 benchmark-only stack so recursive baselines and frontier versions run identically;
 production-stack regressions do not use this accommodation. Override iterations
-with `ECCO_FRONTIER_ITERATIONS` (default 100, five samples).
+with `ECCO_FRONTIER_ITERATIONS` (default 100, five samples). It measures installed
+one- and four-worker pools by default; `ECCO_FRONTIER_WORKERS` selects one count.
 
 The extractor handles simple declarations, calls, object literals, member reads,
 operators, templates, conditional/logical expressions, aliases, and the function

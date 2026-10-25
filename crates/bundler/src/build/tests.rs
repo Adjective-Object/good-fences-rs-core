@@ -7576,6 +7576,51 @@ fn package_classification_only_edit_reparses_only_effective_mode_change() {
 }
 
 #[test]
+fn wide_expression_builds_are_identical_in_single_and_shared_caller_pools() {
+    let dir = TmpDir::new();
+    let root = dir.root().to_owned();
+    write(
+        &root,
+        "main.mjs",
+        "export {left} from './left.mjs'; export {right} from './right.mjs';",
+    );
+    for name in ["left", "right"] {
+        write(
+            &root,
+            &format!("{name}.mjs"),
+            &format!(
+                "export function {name}(a) {{ return ({}); }}",
+                vec!["a.x + 1"; 256].join(",")
+            ),
+        );
+    }
+    let mut baseline = None;
+    for workers in [1, 4] {
+        let mut config = options();
+        config.cache = CacheMode::Disabled;
+        config.execution =
+            crate::execution::ExecutionOptions::new(std::num::NonZeroUsize::new(workers).unwrap());
+        let build = || {
+            let result = BuildSession::new(&root).unwrap().build(&config).unwrap();
+            assert_eq!(result.counters.source_parses, 3);
+            assert_eq!(result.counters.declaration_fingerprints, 1);
+            assert_eq!(result.counters.source_reparses, 0);
+            result.product.artifacts.clone()
+        };
+        let built = build();
+        if let Some(expected) = &baseline {
+            assert_eq!(&built, expected);
+        }
+        let caller = rayon::ThreadPoolBuilder::new()
+            .num_threads(workers)
+            .build()
+            .unwrap();
+        assert_eq!(caller.install(build), built);
+        baseline = Some(built);
+    }
+}
+
+#[test]
 fn parallel_execution_preserves_build_bytes_counters_and_noop_generation() {
     let dir = TmpDir::new();
     write(

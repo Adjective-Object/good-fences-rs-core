@@ -649,14 +649,16 @@ impl Context {
         }
         let mut pending: Vec<_> = (0..self.equations.len()).collect();
         while !pending.is_empty() {
-            let mut changed: Vec<_> = pending
-                .par_iter()
-                .filter_map(|index| {
-                    let equation = &self.equations[*index];
-                    (!state[equation.target] && equation.expression.evaluate(&state))
-                        .then_some(equation.target)
-                })
-                .collect();
+            let evaluate = |index: &usize| {
+                let equation = &self.equations[*index];
+                (!state[equation.target] && equation.expression.evaluate(&state))
+                    .then_some(equation.target)
+            };
+            let mut changed: Vec<_> = if crate::frontier::parallel_allowed() {
+                pending.par_iter().filter_map(evaluate).collect()
+            } else {
+                pending.iter().filter_map(evaluate).collect()
+            };
             changed.sort_unstable();
             changed.dedup();
             let mut next = Vec::new();

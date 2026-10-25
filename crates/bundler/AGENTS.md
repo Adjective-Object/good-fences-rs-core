@@ -445,7 +445,11 @@ Export-only names constrain default allocation, not local import aliases.
 Sort canonical definitions once by source path/binding offset. Partition that
 order by actual segment ownership after each placement revision; reuse the final
 owner slices for local naming and private exports, never source-file seams.
-ExecutionOptions bounds sequential preparation/output-owner stages; one is inline.
+ExecutionOptions shares one build-scoped Rayon CPU pool across preparation,
+resolution, discovery, nested immutable Ecco transfers/solving and output owners.
+Reuse installed caller pools; never block their sole worker on same-pool jobs.
+The non-Send coordinator stays in place and yields while awaiting scoped jobs.
+Keep nested Ecco work inline when a caller pool exceeds the configured limit.
 The coordinator deduplicates canonical paths and replenishes script jobs after
 each completion; outstanding reads/results together never exceed the worker bound.
 Workers read/check caches/extract owned facts with private arenas and shared

@@ -4,12 +4,19 @@ use eyre::{ensure, Result};
 use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
 use oxc_semantic::{ScopeFlags, Semantic, SymbolId};
+use rayon::prelude::*;
 
 use crate::frontier::{FlatVisit, Mode, Op, Plan, Role, Step};
 use crate::*;
 
 // Bound substitutions and copied expressions, not just source visits.
 const CONTRACT_BUDGET: usize = 4096;
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static FRONTIER_OBSERVER: std::cell::RefCell<Option<std::sync::Arc<dyn Fn(bool) + Send + Sync>>> =
+        const { std::cell::RefCell::new(None) };
+}
 
 struct Function<'s, 'a> {
     symbol: SymbolId,
@@ -389,6 +396,7 @@ enum ValueHazards {
     Pure,
     Unknown,
     Input,
+    Object { empty: bool, unknown_read: bool },
     Fields(Box<[HazardExpr; Hazard::ALL.len()]>),
 }
 
@@ -451,6 +459,14 @@ impl Value {
                     slot,
                 }
             }
+            ValueHazards::Object {
+                empty,
+                unknown_read,
+            } => match slot {
+                Hazard::PropertyRead if !unknown_read => HazardExpr::Bool(false),
+                Hazard::ToPrimitive if *empty => HazardExpr::Bool(false),
+                _ => HazardExpr::Unknown,
+            },
             ValueHazards::Fields(fields) => fields[slot as usize].clone(),
         }
     }
@@ -542,18 +558,10 @@ impl Computed {
 
     fn object(empty: bool, unknown_read: bool, effects: Vec<HazardExpr>) -> Self {
         let mut value = Value::primitive();
-        let mut hazards = std::array::from_fn(|_| HazardExpr::Unknown);
-        hazards[Hazard::PropertyRead as usize] = if unknown_read {
-            HazardExpr::Unknown
-        } else {
-            HazardExpr::Bool(false)
+        value.hazards = ValueHazards::Object {
+            empty,
+            unknown_read,
         };
-        hazards[Hazard::ToPrimitive as usize] = if empty {
-            HazardExpr::Bool(false)
-        } else {
-            HazardExpr::Unknown
-        };
-        value.hazards = ValueHazards::Fields(Box::new(hazards));
         Self {
             value,
             effects: union(effects),
@@ -562,7 +570,19 @@ impl Computed {
 }
 
 fn union(expressions: impl IntoIterator<Item = HazardExpr>) -> HazardExpr {
-    let mut pending: Vec<_> = expressions.into_iter().collect();
+    let mut expressions = expressions
+        .into_iter()
+        .filter(|expression| *expression != HazardExpr::Bool(false));
+    let Some(first) = expressions.next() else {
+        return HazardExpr::Bool(false);
+    };
+    let second = expressions.next();
+    if second.is_none() && !matches!(first, HazardExpr::Or(_)) {
+        return first;
+    }
+    let mut pending = vec![first];
+    pending.extend(second);
+    pending.extend(expressions);
     pending.reverse();
     let mut unique = HashSet::new();
     let mut output = Vec::new();
@@ -633,6 +653,7 @@ struct TransferOutcome {
     updates: Vec<Update>,
     budget_used: usize,
     opaque: bool,
+    exhausted: bool,
 }
 
 /// One owned accumulator per expression root, not one copied log per AST edge.
@@ -642,6 +663,7 @@ struct Transfer<'s> {
     budget: usize,
     remaining: usize,
     opaque: bool,
+    exhausted: bool,
     expanding: HashSet<usize>,
 }
 
@@ -653,6 +675,7 @@ impl<'s> Transfer<'s> {
             budget,
             remaining: budget,
             opaque,
+            exhausted: false,
             expanding: HashSet::new(),
         }
     }
@@ -663,6 +686,7 @@ impl<'s> Transfer<'s> {
             updates: self.updates,
             budget_used: self.budget - self.remaining,
             opaque: self.opaque,
+            exhausted: self.exhausted,
         }
     }
 
@@ -674,6 +698,7 @@ impl<'s> Transfer<'s> {
         if size > self.remaining {
             self.remaining = 0;
             self.opaque = true;
+            self.exhausted = true;
             false
         } else {
             self.remaining -= size;
@@ -751,15 +776,103 @@ impl<'s> Transfer<'s> {
 
 impl Transfer<'_> {
     fn evaluate(&mut self, plan: &Plan<'_>) -> Computed {
-        let mut results = Vec::new();
-        results.resize_with(plan.nodes.len(), || None);
-        let mut step = 0;
-        while step < plan.steps.len() {
+        #[cfg(test)]
+        FRONTIER_OBSERVER.with(|observer| {
+            if let Some(observer) = &*observer.borrow() {
+                observer(false);
+            }
+        });
+        self.evaluate_node(plan, 0, 0, &mut Vec::new(), true).0
+    }
+
+    fn evaluate_node(
+        &mut self,
+        plan: &Plan<'_>,
+        root: usize,
+        first_step: usize,
+        results: &mut Vec<Option<(Computed, Option<Value>)>>,
+        parallel: bool,
+    ) -> (Computed, Option<Value>) {
+        results.clear();
+        results.resize_with(plan.nodes[root].next - root, || None);
+        let mut step = first_step;
+        while step <= plan.nodes[root].end {
             match plan.steps[step] {
                 Step::Enter(id) => {
                     if plan.nodes[id].charge && (self.opaque || !self.spend()) {
-                        results[id] = Some((self.unknown(), None));
+                        results[id - root] = Some((self.unknown(), None));
                         step = plan.nodes[id].end + 1;
+                        continue;
+                    }
+                    let inputs = &plan.inputs[plan.nodes[id].inputs.clone()];
+                    // Small/narrow trees stay inline. Credits bound speculative
+                    // work in aggregate; only exhausted jobs need serial replay.
+                    if parallel
+                        && inputs.len() >= 64
+                        && self.remaining / inputs.len() >= 4
+                        && crate::frontier::parallel_allowed()
+                    {
+                        let credit = self.remaining / inputs.len();
+                        let mut cursor = step + 1;
+                        let jobs: Vec<_> = inputs
+                            .iter()
+                            .map(|input| {
+                                while !matches!(plan.steps[cursor], Step::Enter(_)) {
+                                    cursor += 1;
+                                }
+                                let first = cursor;
+                                cursor = plan.nodes[input.node].end + 1;
+                                (input.node, first)
+                            })
+                            .collect();
+                        let immutable = self.inputs;
+                        #[cfg(test)]
+                        let observer = FRONTIER_OBSERVER.with(|observer| observer.borrow().clone());
+                        let batches: Vec<_> = jobs
+                            .par_chunks(16)
+                            .map(|jobs| {
+                                let mut scratch = Vec::new();
+                                jobs.iter()
+                                    .map(|&(node, first)| {
+                                        #[cfg(test)]
+                                        if let Some(observer) = &observer {
+                                            observer(true);
+                                        }
+                                        let mut transfer = Transfer::new(immutable, credit, false);
+                                        let (computed, receiver) = transfer.evaluate_node(
+                                            plan,
+                                            node,
+                                            first,
+                                            &mut scratch,
+                                            false,
+                                        );
+                                        (transfer.finish(computed), receiver)
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
+                            .collect();
+                        let mut scratch = Vec::new();
+                        for ((node, first), (outcome, receiver)) in
+                            jobs.into_iter().zip(batches.into_iter().flatten())
+                        {
+                            let operand = if !self.opaque
+                                && !outcome.exhausted
+                                && outcome.budget_used <= self.remaining
+                            {
+                                self.remaining -= outcome.budget_used;
+                                self.opaque = outcome.opaque;
+                                for update in outcome.updates {
+                                    if !self.updates.contains(&update) {
+                                        self.updates.push(update);
+                                    }
+                                }
+                                (outcome.computed, receiver)
+                            } else {
+                                self.evaluate_node(plan, node, first, &mut scratch, false)
+                            };
+                            results[node - root] = Some(operand);
+                        }
+                        step = plan.nodes[id].end;
                         continue;
                     }
                 }
@@ -770,7 +883,9 @@ impl Transfer<'_> {
                             plan.inputs[plan.nodes[id].inputs.clone()]
                                 .iter()
                                 .map(|input| {
-                                    results[input.node].take().expect("ready expression input")
+                                    results[input.node - root]
+                                        .take()
+                                        .expect("ready expression input")
                                 });
                         let mut receiver = None;
                         let computed = match &plan.nodes[id].op {
@@ -878,12 +993,12 @@ impl Transfer<'_> {
                         };
                         (computed, receiver)
                     };
-                    results[id] = Some((computed, receiver));
+                    results[id - root] = Some((computed, receiver));
                 }
             }
             step += 1;
         }
-        results[0].take().expect("root summary").0
+        results[0].take().expect("root summary")
     }
 }
 
@@ -1334,6 +1449,14 @@ impl Analyzer<'_, '_> {
                 ValueHazards::Pure => std::array::from_fn(|_| HazardExpr::Bool(false)),
                 ValueHazards::Unknown => std::array::from_fn(|_| HazardExpr::Unknown),
                 ValueHazards::Fields(fields) => *fields,
+                ValueHazards::Object {
+                    empty,
+                    unknown_read,
+                } => std::array::from_fn(|index| match Hazard::ALL[index] {
+                    Hazard::PropertyRead if !unknown_read => HazardExpr::Bool(false),
+                    Hazard::ToPrimitive if empty => HazardExpr::Bool(false),
+                    _ => HazardExpr::Unknown,
+                }),
                 ValueHazards::Input => unreachable!("fresh return has no input hazards"),
             };
             HazardFields::new(None, Hazard::ALL.into_iter().zip(fields).collect())

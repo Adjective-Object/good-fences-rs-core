@@ -75,11 +75,20 @@ fn run() -> Result<()> {
 fn main() -> Result<()> {
     // Identical benchmark-only stack for the recursive baseline and frontier.
     // Production/default-stack regressions must not use this accommodation.
-    std::thread::Builder::new()
-        .name("frontier-benchmark".into())
-        .stack_size(64 * 1024 * 1024)
-        .spawn(run)
-        .wrap_err("spawning frontier benchmark worker")?
-        .join()
-        .map_err(|_| eyre::eyre!("frontier benchmark worker panicked"))?
+    let workers = std::env::var("ECCO_FRONTIER_WORKERS")
+        .ok()
+        .map(|value| value.parse::<usize>())
+        .transpose()?
+        .map_or_else(|| vec![1, 4], |workers| vec![workers]);
+    for workers in workers {
+        eyre::ensure!(workers > 0, "benchmark workers must be positive");
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(workers)
+            .stack_size(64 * 1024 * 1024)
+            .build()
+            .wrap_err("starting frontier benchmark pool")?;
+        println!("workers={workers}");
+        pool.install(run)?;
+    }
+    Ok(())
 }

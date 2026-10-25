@@ -27,6 +27,13 @@ pub(crate) fn analyze(
     graph: &SourceGraph,
     policy: &EffectPolicy,
 ) -> eyre::Result<BTreeMap<SegmentKey, bool>> {
+    crate::execution::cpu(|| analyze_inner(graph, policy))
+}
+
+fn analyze_inner(
+    graph: &SourceGraph,
+    policy: &EffectPolicy,
+) -> eyre::Result<BTreeMap<SegmentKey, bool>> {
     let mut analysis = ecco::Analysis::new();
     for file in graph.module_ids() {
         let facts = graph

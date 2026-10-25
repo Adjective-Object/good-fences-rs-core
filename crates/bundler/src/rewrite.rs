@@ -27,6 +27,22 @@ pub(crate) struct ParseCounts {
 }
 
 impl ParseCounts {
+    pub(crate) const ZERO: Self = Self {
+        source: 0,
+        output: 0,
+        validation: 0,
+        declarations: 0,
+    };
+
+    pub(crate) fn plus(self, other: Self) -> Self {
+        Self {
+            source: self.source + other.source,
+            output: self.output + other.output,
+            validation: self.validation + other.validation,
+            declarations: self.declarations + other.declarations,
+        }
+    }
+
     pub(crate) fn difference(self, before: Self) -> Self {
         Self {
             source: self.source - before.source,
