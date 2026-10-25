@@ -53,9 +53,11 @@ Explicit .mjsx/.cjsx requests may resolve .mtsx/.ctsx, matching .mjs/.cjs
 TypeScript substitution; do not widen default extension probing implicitly.
 Keep legacy `.js` preference explicit in `prefer_js_extension`; ordered custom
 suffix policies disable it. Include both suffix order and preference in target keys.
-Browser defaults activate browser; structural browser requests reject remaining
-Node builtins even with explicit external policy and native addons, never inject
-polyfills/empty stubs. Preserve original importer/request in errors.
+Browser defaults activate browser. Bare builtin spellings resolve installed
+packages through normal checked import/require/exports and cache proofs, excluding
+the legacy cwd-relative file shortcut. Never allow cwd shadowing, external escape
+or implicit polyfills. Reject remaining node: requests, missing builtin packages
+and native addons. Preserve original importer/request in errors.
 Apply a dependency's browser object mapping to its selected legacy package entry,
 then retain the importer's request/path mapping policy.
 An existing exports map forbids filesystem fallback for unmatched/private paths.

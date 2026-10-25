@@ -281,6 +281,103 @@ fn browser_package_conditions_and_browser_field_follow_target_switches() {
 }
 
 #[test]
+fn browser_bare_builtin_package_bundles_native_cjs_dependencies_and_revalidates() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import {Buffer} from 'buffer'; export {Buffer}; export const load = () => import('./lazy.cjs');",
+    );
+    write(
+        dir.root(),
+        "lazy.cjs",
+        "events.push('lazy'); module.exports = require('buffer').Buffer;",
+    );
+    write(
+        dir.root(),
+        "node_modules/buffer/package.json",
+        r#"{"name":"buffer","main":"index.js","dependencies":{"base64-js":"1.0.0","ieee754":"1.0.0"}}"#,
+    );
+    write(
+        dir.root(),
+        "node_modules/buffer/index.js",
+        "events.push('buffer'); const base = require('base64-js'); const ieee = require('ieee754'); exports.Buffer = {value: base.value + ieee.value};",
+    );
+    for (name, value) in [("base64-js", 20), ("ieee754", 22)] {
+        write(
+            dir.root(),
+            &format!("node_modules/{name}/package.json"),
+            &format!(r#"{{"name":"{name}","main":"index.js"}}"#),
+        );
+        write(
+            dir.root(),
+            &format!("node_modules/{name}/index.js"),
+            &format!("events.push('{name}'); exports.value = {value};"),
+        );
+    }
+    let mut config = browser_options();
+    // Even an external declaration cannot turn a builtin spelling into host transport.
+    config.externals.insert("buffer".into());
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let first = session.build(&config).unwrap();
+    assert_eq!(
+        first.product.artifacts.backend,
+        crate::link::Backend::Native
+    );
+    assert_browser_transport(&first.product.artifacts);
+    let check = |value| {
+        format!(
+            r#"
+if (typeof require !== 'undefined' || typeof module !== 'undefined') throw new Error('host loader');
+globalThis.events = [];
+const main = await import('./main.mjs');
+if (main.Buffer.value !== {value}) throw new Error('package value');
+if (events.join() !== 'buffer,base64-js,ieee754') throw new Error('activation: ' + events);
+const lazy = await main.load();
+if (lazy.default !== main.Buffer || (await main.load()).default !== main.Buffer) throw new Error('cache identity');
+console.log(events.join());
+"#
+        )
+    };
+    let expected = b"buffer,base64-js,ieee754,lazy\n";
+    assert_eq!(
+        observe_named(&first.product.artifacts, &check(42)),
+        expected
+    );
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&first.product, &noop.product));
+    let disk = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(disk.product.artifacts, first.product.artifacts);
+    assert_eq!(observe_named(&disk.product.artifacts, &check(42)), expected);
+    write(
+        dir.root(),
+        "node_modules/buffer/package.json",
+        r#"{"name":"buffer","main":"next.cjs","dependencies":{"base64-js":"1.0.0","ieee754":"1.0.0"}}"#,
+    );
+    write(
+        dir.root(),
+        "node_modules/buffer/next.cjs",
+        "events.push('buffer'); const base = require('base64-js'); const ieee = require('ieee754'); exports.Buffer = {value: base.value + ieee.value + 1};",
+    );
+    let changed = session.build(&config).unwrap();
+    assert_browser_transport(&changed.product.artifacts);
+    assert_eq!(
+        observe_named(&changed.product.artifacts, &check(43)),
+        expected
+    );
+    std::fs::remove_file(dir.root().join("node_modules/buffer/next.cjs")).unwrap();
+    std::fs::remove_file(dir.root().join("node_modules/buffer/index.js")).unwrap();
+    let error = format!("{:#}", session.build(&config).err().unwrap());
+    assert!(
+        error.contains("buffer") && error.contains("browser target"),
+        "{error}"
+    );
+}
+
+#[test]
 fn browser_rejects_node_builtins_even_if_external_and_node_default_still_accepts_them() {
     for request in ["node:fs", "fs", "node:not-a-real-builtin"] {
         let dir = TmpDir::new();

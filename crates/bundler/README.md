@@ -1493,9 +1493,12 @@ nondefault condition sets remain explicit caller policy. Browser defaults activa
 determines exports selection. String `browser` entries and dependency-local
 object mappings of the selected legacy entry are supported alongside importer
 request/path mappings. No polyfills or empty-module substitutions
-are injected. Unreplaced Node builtins (bare and `node:`) fail even if listed as
-externals. Supply a concrete local stub through `options.resolver.alias`, for
-example:
+are injected. Bare builtin spellings such as `buffer` may resolve real installed
+packages through normal checked resolution, including import/require conditions,
+exports and cache invalidation. Missing builtin packages and remaining `node:`
+requests fail even if listed as externals; installed packages are bundled, not
+externalized. Alternatively supply a concrete local stub through
+`options.resolver.alias`, for example:
 
 ```rust,ignore
 options.resolver.alias.insert("fs".into(), "./browser-fs.cjs".into());
@@ -1507,7 +1510,8 @@ Aliases are exact, one-step replacements: `fs` does not match `node:fs` or
 path to an inventoried file when importers live in different directories.
 Explicit replacements precede builtin/external policy and pass through normal
 file resolution, checked inventory and module graph loading. Missing files,
-native `.node` addons, and replacements still naming builtins fail; no host
+native `.node` addons, and replacements still naming `node:` requests or missing
+builtin packages fail; no host
 `require` or implicit empty stub is supplied. CJS stubs may have bundled
 dependencies; ESM stubs used by `require` have the leaf restrictions below.
 
@@ -1538,7 +1542,7 @@ global writes/implicit global `this`. `__filename`/`__dirname` are emitted
 availability URLs, not filesystem paths.
 
 Caller-loaded CSS remains application-ordered; auto-mount follows activation
-timing. External require, unreplaced Node builtins, native addons, unbounded require and loader APIs
+timing. External require, unresolved Node builtins, native addons, unbounded require and loader APIs
 (`require.resolve`, `require.cache`, `module.require`) remain unsupported.
 Explicit nonbuiltin import externals need a host-provided resolution mechanism.
 No worker subtargets, DOM typings, rendering/readiness guarantees, or single-file

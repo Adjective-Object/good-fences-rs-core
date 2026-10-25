@@ -20,7 +20,7 @@ TypeScript substitutions. Both the list and fast-path policy key package targets
 `structural::StructuralResolver` implements `DependencyResolver` with explicit
 import/require conditions and separate caches. Package-target cache keys include
 the active export-condition set. Only exact declared externals are accepted;
-undeclared builtins fail. External export names are delegated to the host, not
+undeclared Node-target builtins fail. External export names are delegated to the host, not
 validated as local files. Options retain explicit canonical/preserved symlink
 policy. Graph source identities must use the same policy.
 Node defaults activate `node`, `node-addons` and `module-sync` in addition to the
@@ -32,9 +32,13 @@ relative paths are importer-relative, absolute paths are also supported.
 There is no prefix matching or recursive alias expansion (`fs` does not match
 `fs/promises`). Replacements undergo ordinary file resolution, and graph consumers
 still enforce their checked source inventory. Missing replacements fail with the
-original importer/request. Structural browser resolution rejects unreplaced or
-replacement bare/`node:` builtins even when external, and native `.node` addons;
-it never injects polyfills or empty modules. Package declaration
+original importer/request. Browser bare builtin spellings (including alias
+replacements) resolve real installed packages through normal import/require,
+exports and tracked-cache policy, never the legacy cwd-relative file shortcut.
+Competing cwd files cannot shadow packages or bypass their exports.
+An external declaration cannot bypass that file resolution.
+Missing packages, remaining `node:` requests and native `.node`
+addons fail; no polyfills or empty modules are injected. Package declaration
 order, including an early `default`, determines which active condition wins.
 Nested export conditions are evaluated in declaration order at each level,
 including `import`/`require` branches containing `types` and runtime `default`

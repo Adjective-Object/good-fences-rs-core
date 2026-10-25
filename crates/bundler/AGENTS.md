@@ -98,9 +98,11 @@ Availability imports never invoke factories; require sites/facades own activatio
 ESM literal requires share CJS expression planning in ordinary and reconstructed
 recipes: typed availability imports plus whole-call replacements, never static
 facade activation or an injected loader. ESM require contexts remain rejected.
-Resolve explicit one-step exact aliases before rejecting Node builtins even as
-externals; local stubs still require checked inventory/graph loading. Never
-provide automatic polyfills/empty stubs; reject native addons and external require.
+Resolve explicit one-step exact aliases before builtin policy. Browser bare
+builtin spellings require real installed packages through checked resolution,
+inventory and graph loading, never external escape. Reject remaining node:
+requests and missing builtin packages. Never provide automatic polyfills/empty
+stubs; reject native addons and external require.
 Deduplicate availability imports by output chunk and binding, not factory.
 Capture shim
 intrinsics in native ESM before entry effects, never package a Node loader.

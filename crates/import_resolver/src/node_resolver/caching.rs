@@ -640,7 +640,10 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             }
         }
 
-        if !self.alias.contains_key(module_specifier) && !module_specifier.starts_with('.') {
+        if !self.alias.contains_key(module_specifier)
+            && !module_specifier.starts_with('.')
+            && !(self.target_env == TargetEnv::Browser && is_core_module(target))
+        {
             // Handle absolute path
 
             let path = Path::new(module_specifier);

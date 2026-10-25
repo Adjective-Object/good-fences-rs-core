@@ -129,18 +129,20 @@ impl StructuralResolver {
         // Check the same one-step exact replacement used by the file resolver.
         let replacement = self.options.alias.get(specifier);
         let target = replacement.map(String::as_str).unwrap_or(specifier);
+        let browser = self.options.target_env == TargetEnv::Browser;
+        let builtin = target.starts_with("node:") || NODE_BUILTINS.contains(&target);
         eyre::ensure!(
-            self.options.target_env != TargetEnv::Browser
-                || (!target.starts_with("node:") && !NODE_BUILTINS.contains(&target)),
+            !browser || !target.starts_with("node:"),
             "{mode:?} resolving {specifier:?} from {}: Node builtin {target:?} is unsupported for the browser target; no polyfills are provided",
             base.display()
         );
-        if replacement.is_none() && self.externals.contains(specifier) {
+        // Browser bare builtins must prove a real package, never escape as externals.
+        if replacement.is_none() && self.externals.contains(specifier) && !(browser && builtin) {
             return Ok(ResolvedDependency::External(specifier.to_owned()));
         }
 
         eyre::ensure!(
-            !target.starts_with("node:") && !NODE_BUILTINS.contains(&target),
+            browser || !builtin,
             "{mode:?} resolving {specifier:?} from {}: external {target:?} requires explicit external policy",
             base.display()
         );
@@ -167,7 +169,16 @@ impl StructuralResolver {
             None => resolver.resolve(base, specifier),
         }
         .map_err(|error| eyre::eyre!(error.into_boxed_dyn_error()))
-        .wrap_err_with(|| format!("{mode:?} resolving {specifier:?} from {}", base.display()))?;
+        .wrap_err_with(|| {
+            if browser && builtin {
+                format!(
+                    "{mode:?} resolving {specifier:?} from {}: Node builtin {target:?} requires a resolvable installed package for the browser target; no polyfills are provided",
+                    base.display()
+                )
+            } else {
+                format!("{mode:?} resolving {specifier:?} from {}", base.display())
+            }
+        })?;
         eyre::ensure!(
             observer.map_or_else(
                 || result.path.is_file(),
@@ -670,6 +681,260 @@ mod tests {
             std::fs::remove_dir(&link).unwrap();
             #[cfg(unix)]
             std::fs::remove_file(&link).unwrap();
+        }
+    }
+
+    #[test]
+    fn browser_bare_builtin_packages_use_mode_exports_and_tracked_invalidation() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "entry.mjs" => "",
+            "node_modules/buffer/package.json" => r#"{"exports":{".":{"browser":{"import":"./import.mjs","require":"./require.cjs"}},"./private":null}}"#,
+            "node_modules/buffer/import.mjs" => "",
+            "node_modules/buffer/require.cjs" => "",
+            "node_modules/buffer/next.mjs" => "",
+            "node_modules/buffer/private.js" => ""
+        };
+        let mut resolver = StructuralResolver::new(
+            dir.root().into(),
+            NodeModulesResolverOptions::default_for_env(TargetEnv::Browser),
+            BTreeSet::from(["buffer".into()]),
+        );
+        let base = dir.root().join("entry.mjs");
+        let mut proofs = Vec::new();
+        for (mode, file) in [
+            (ResolutionMode::Import, "import.mjs"),
+            (ResolutionMode::Require, "require.cjs"),
+        ] {
+            let first = tracked(&resolver, &base, "buffer", mode);
+            assert_eq!(
+                first.dependency,
+                ResolvedDependency::File(dir.root().join("node_modules/buffer").join(file))
+            );
+            assert_eq!(
+                tracked(&resolver, &base, "buffer", mode).inputs,
+                first.inputs
+            );
+            assert!(resolver
+                .resolve_dependency(&base, "buffer/private", mode)
+                .is_err());
+            proofs.push(first);
+        }
+        std::fs::write(
+            dir.root().join("node_modules/buffer/package.json"),
+            r#"{"exports":"./next.mjs"}"#,
+        )
+        .unwrap();
+        for proof in &proofs {
+            assert!(proof.inputs.validate().is_err());
+        }
+        resolver.invalidate();
+        for mode in [ResolutionMode::Import, ResolutionMode::Require] {
+            assert_eq!(
+                tracked(&resolver, &base, "buffer", mode).dependency,
+                ResolvedDependency::File(dir.root().join("node_modules/buffer/next.mjs"))
+            );
+        }
+        std::fs::remove_file(dir.root().join("node_modules/buffer/next.mjs")).unwrap();
+        resolver.invalidate();
+        for mode in [ResolutionMode::Import, ResolutionMode::Require] {
+            let error = resolver
+                .resolve_dependency(&base, "buffer", mode)
+                .unwrap_err();
+            assert!(error.chain().count() > 1, "{error:?}");
+            let chain = format!("{error:#}");
+            assert!(
+                chain.contains("Node builtin") && chain.contains("entry.mjs"),
+                "{chain}"
+            );
+        }
+        std::fs::write(dir.root().join("node_modules/buffer/next.mjs"), "").unwrap();
+        resolver.invalidate();
+        for mode in [ResolutionMode::Import, ResolutionMode::Require] {
+            tracked(&resolver, &base, "buffer", mode);
+        }
+    }
+
+    #[test]
+    fn browser_bare_builtin_packages_ignore_competing_cwd_files() {
+        const CHILD_ROOT: &str = "IMPORT_RESOLVER_BUILTIN_CWD_ROOT";
+        if std::env::var_os(CHILD_ROOT).is_some() {
+            let cwd = std::env::current_dir().unwrap().canonicalize().unwrap();
+            for project in ["installed", "private", "absent"] {
+                let root = cwd.join(project);
+                let base = root.join("entry.mjs");
+                let mut options = NodeModulesResolverOptions::default_for_env(TargetEnv::Browser);
+                options.alias.insert("shim".into(), "buffer".into());
+                options
+                    .alias
+                    .insert("node:buffer".into(), "./stub.cjs".into());
+                let resolver = StructuralResolver::new(
+                    root.clone(),
+                    options,
+                    BTreeSet::from(["buffer".into(), "shim".into(), "node:buffer".into()]),
+                );
+                for mode in [ResolutionMode::Import, ResolutionMode::Require] {
+                    for request in ["buffer", "shim", "buffer"] {
+                        if project == "installed" {
+                            let expected = ResolvedDependency::File(root.join(match mode {
+                                ResolutionMode::Import => "node_modules/buffer/import.mjs",
+                                ResolutionMode::Require => "node_modules/buffer/require.cjs",
+                            }));
+                            assert_eq!(
+                                resolver.resolve_dependency(&base, request, mode).unwrap(),
+                                expected
+                            );
+                            let result = tracked(&resolver, &base, request, mode);
+                            assert_eq!(result.dependency, expected);
+                            assert!(result.inputs.inputs().iter().any(|input| {
+                                input.path() == root.join("node_modules/buffer/package.json")
+                            }));
+                            assert!(!result
+                                .inputs
+                                .inputs()
+                                .iter()
+                                .any(|input| input.path() == cwd.join("buffer.js")));
+                        } else {
+                            for error in [
+                                resolver
+                                    .resolve_dependency(&base, request, mode)
+                                    .unwrap_err(),
+                                resolver
+                                    .resolve_dependency_with_inputs(&base, request, mode)
+                                    .unwrap_err(),
+                            ] {
+                                let chain = format!("{error:#}");
+                                assert!(
+                                    chain.contains("requires a resolvable installed package")
+                                        && chain.contains(request)
+                                        && chain.contains(&base.display().to_string()),
+                                    "{chain}"
+                                );
+                                if project == "private" {
+                                    assert!(chain.contains("marked as private"), "{chain}");
+                                }
+                            }
+                        }
+                    }
+                    assert_eq!(
+                        tracked(&resolver, &base, "node:buffer", mode).dependency,
+                        ResolvedDependency::File(root.join("stub.cjs"))
+                    );
+                }
+            }
+            return;
+        }
+
+        let dir = test_tmpdir::test_tmpdir! {
+            "buffer.js" => "throw new Error('cwd must not shadow installed packages');",
+            "installed/entry.mjs" => "",
+            "installed/stub.cjs" => "",
+            "installed/node_modules/buffer/package.json" => r#"{"exports":{".":{"import":"./import.mjs","require":"./require.cjs"}}}"#,
+            "installed/node_modules/buffer/import.mjs" => "",
+            "installed/node_modules/buffer/require.cjs" => "",
+            "private/entry.mjs" => "",
+            "private/stub.cjs" => "",
+            "private/node_modules/buffer/package.json" => r#"{"exports":{".":null}}"#,
+            "private/node_modules/buffer/index.js" => "",
+            "absent/entry.mjs" => "",
+            "absent/stub.cjs" => ""
+        };
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "structural::tests::browser_bare_builtin_packages_ignore_competing_cwd_files",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(CHILD_ROOT, dir.root())
+            .current_dir(dir.root())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "isolated resolver test failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn browser_bare_builtin_packages_do_not_relax_node_scheme_native_or_node_policy() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "entry.mjs" => "",
+            "stub.cjs" => "",
+            "node_modules/buffer/package.json" => r#"{"main":"index.js"}"#,
+            "node_modules/buffer/index.js" => "exports.Buffer = {};",
+            "node_modules/path/package.json" => r#"{"main":"addon.node"}"#,
+            "node_modules/path/addon.node" => ""
+        };
+        let base = dir.root().join("entry.mjs");
+        for environment in [TargetEnv::Browser, TargetEnv::Node] {
+            for external in [false, true] {
+                let mut options = NodeModulesResolverOptions::default_for_env(environment);
+                options
+                    .alias
+                    .insert("node:aliased".into(), "./stub.cjs".into());
+                options.alias.insert("shim".into(), "buffer".into());
+                let resolver = StructuralResolver::new(
+                    dir.root().into(),
+                    options,
+                    if external {
+                        ["buffer", "node:buffer", "fs", "path"]
+                            .map(String::from)
+                            .into()
+                    } else {
+                        BTreeSet::new()
+                    },
+                );
+                for mode in [ResolutionMode::Import, ResolutionMode::Require] {
+                    assert_eq!(
+                        tracked(&resolver, &base, "node:aliased", mode).dependency,
+                        ResolvedDependency::File(dir.root().join("stub.cjs"))
+                    );
+                    if environment == TargetEnv::Node {
+                        for request in ["buffer", "node:buffer", "fs", "path"] {
+                            let result = resolver.resolve_dependency(&base, request, mode);
+                            if external {
+                                assert_eq!(
+                                    result.unwrap(),
+                                    ResolvedDependency::External(request.into())
+                                );
+                            } else {
+                                assert!(result.is_err());
+                            }
+                        }
+                        assert!(resolver.resolve_dependency(&base, "shim", mode).is_err());
+                        continue;
+                    }
+                    for request in ["buffer", "shim"] {
+                        assert_eq!(
+                            tracked(&resolver, &base, request, mode).dependency,
+                            ResolvedDependency::File(
+                                dir.root().join("node_modules/buffer/index.js")
+                            )
+                        );
+                    }
+                    for (request, message) in [
+                        ("node:buffer", "Node builtin"),
+                        ("fs", "Node builtin"),
+                        ("path", "native addon"),
+                    ] {
+                        let error = resolver
+                            .resolve_dependency(&base, request, mode)
+                            .unwrap_err();
+                        let chain = format!("{error:#}");
+                        assert!(
+                            chain.contains(message)
+                                && chain.contains(request)
+                                && chain.contains("entry.mjs"),
+                            "{chain}"
+                        );
+                        if request == "fs" {
+                            assert!(error.chain().count() > 1, "{error:?}");
+                        }
+                    }
+                }
+            }
         }
     }
 
