@@ -713,6 +713,9 @@ fn emit_inner(
                     .get(&segments::Owner::Evaluation(root))
                     .cloned()
                     .unwrap_or_default();
+                if let Some(availability) = connections.require_imports.get(&owner) {
+                    imports.push(availability.clone());
+                }
                 for &key in placement.schedule(segments::Owner::Evaluation(root)) {
                     eyre::ensure!(
                         key.file_id == root,

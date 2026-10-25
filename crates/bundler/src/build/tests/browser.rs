@@ -647,20 +647,29 @@ fn browser_require_aliases_do_not_hide_invalid_targets() {
 
 #[test]
 fn browser_require_esm_leaf_preserves_timing_live_bindings_and_cached_errors() {
-    let dir = TmpDir::new();
-    write(dir.root(), "main.mjs", "export {default} from './api.cjs';");
-    write(
-        dir.root(),
-        "api.cjs",
-        r#"
+    for esm in [false, true] {
+        let dir = TmpDir::new();
+        write(
+            dir.root(),
+            "main.mjs",
+            if esm {
+                "const load = () => require('./leaf.mjs'); const fail = () => require('./fail.mjs'); export default {load, fail};"
+            } else {
+                "export {default} from './api.cjs';"
+            },
+        );
+        write(
+            dir.root(),
+            "api.cjs",
+            r#"
 exports.load = () => require('./leaf.mjs');
 exports.fail = () => require('./fail.mjs');
 "#,
-    );
-    write(
-        dir.root(),
-        "leaf.mjs",
-        r#"
+        );
+        write(
+            dir.root(),
+            "leaf.mjs",
+            r#"
 events.push('leaf');
 export let value = 1;
 export const bump = () => value++;
@@ -668,21 +677,21 @@ export {value as alias};
 export default function () { return value; }
 export const topThis = this;
 "#,
-    );
-    write(
-        dir.root(),
-        "fail.mjs",
-        "events.push('fail'); throw new Error('leaf failure');",
-    );
-    let result = BuildSession::new(dir.root())
-        .unwrap()
-        .build(&browser_options())
-        .unwrap();
-    assert_browser_transport(&result.product.artifacts);
-    assert_eq!(
-        observe_named(
-            &result.product.artifacts,
-            r#"
+        );
+        write(
+            dir.root(),
+            "fail.mjs",
+            "events.push('fail'); throw new Error('leaf failure');",
+        );
+        let result = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&browser_options())
+            .unwrap();
+        assert_browser_transport(&result.product.artifacts);
+        assert_eq!(
+            observe_named(
+                &result.product.artifacts,
+                r#"
 globalThis.events = [];
 const {default: api} = await import('./main.mjs');
 if (events.length) throw new Error('eager ESM');
@@ -697,52 +706,223 @@ try { api.fail(); } catch(e) { first = e; }
 try { api.fail(); } catch(e) { if (e !== first) throw new Error('ESM error identity'); }
 console.log(JSON.stringify(events));
 "#
-        ),
-        b"[\"before\",\"leaf\",\"after\",\"fail\"]\n"
-    );
+            ),
+            b"[\"before\",\"leaf\",\"after\",\"fail\"]\n"
+        );
+    }
 }
 
 #[test]
 fn browser_require_rejects_external_async_and_shared_native_esm_boundaries() {
-    for (entry, source, extra, diagnostic) in [
-        (
-            "export {default} from './api.cjs';",
-            "exports.load = () => require('external-pkg');",
-            "",
-            "cannot require external",
-        ),
-        (
-            "export {default} from './api.cjs';",
-            "exports.load = () => require('./leaf.mjs');",
-            "await 0; export const value = 1;",
-            "async",
-        ),
-        (
-            "import './leaf.mjs'; export {default} from './api.cjs';",
-            "exports.load = () => require('./leaf.mjs');",
-            "console.log('leaf'); export let value = 1;",
-            "native static/dynamic",
-        ),
-        (
-            "export {default} from './api.cjs';",
-            "exports.load = () => require('./leaf.mjs');",
-            "import './other.mjs'; export let value = 1;",
-            "dependency-free leaf",
-        ),
-    ] {
+    for esm in [false, true] {
+        for (entry, source, extra, diagnostic) in [
+            (
+                "export {default} from './api.cjs';",
+                "exports.load = () => require('external-pkg');",
+                "",
+                "cannot require external",
+            ),
+            (
+                "export {default} from './api.cjs';",
+                "exports.load = () => require('./leaf.mjs');",
+                "await 0; export const value = 1;",
+                "async",
+            ),
+            (
+                "import './leaf.mjs'; export {default} from './api.cjs';",
+                "exports.load = () => require('./leaf.mjs');",
+                "console.log('leaf'); export let value = 1;",
+                "native static/dynamic",
+            ),
+            (
+                "export {default} from './api.cjs';",
+                "exports.load = () => require('./leaf.mjs');",
+                "import './other.mjs'; export let value = 1;",
+                "dependency-free leaf",
+            ),
+            (
+                "export const dynamic = () => import('./leaf.mjs'); export {default} from './api.cjs';",
+                "exports.load = () => require('./leaf.mjs');",
+                "console.log('leaf'); export const value = 1;",
+                "native entry or dynamic-import job",
+            ),
+        ] {
+            let dir = TmpDir::new();
+            let entry = if esm {
+                entry.replace("api.cjs", "api.mjs")
+            } else {
+                entry.into()
+            };
+            let source = if esm {
+                format!(
+                    "{} export default {{load}};",
+                    source.replace("exports.load =", "export const load =")
+                )
+            } else {
+                source.into()
+            };
+            write(dir.root(), "main.mjs", &entry);
+            write(dir.root(), if esm { "api.mjs" } else { "api.cjs" }, &source);
+            write(dir.root(), "leaf.mjs", extra);
+            write(dir.root(), "other.mjs", "export {};");
+            let mut config = browser_options();
+            config.externals.insert("external-pkg".into());
+            let error = BuildSession::new(dir.root())
+                .unwrap()
+                .build(&config)
+                .err()
+                .expect("unsupported boundary");
+            assert!(format!("{error:#}").contains(diagnostic), "{error:#}");
+        }
+    }
+}
+
+#[test]
+fn browser_require_in_esm_json_ordinary_and_reconstructed_share_default_identity() {
+    for ordinary in [false, true] {
         let dir = TmpDir::new();
-        write(dir.root(), "main.mjs", entry);
-        write(dir.root(), "api.cjs", source);
-        write(dir.root(), "leaf.mjs", extra);
-        write(dir.root(), "other.mjs", "export {};");
+        let external = "data:text/javascript,export{}";
         let mut config = browser_options();
-        config.externals.insert("external-pkg".into());
-        let error = BuildSession::new(dir.root())
+        config.output.min_chunk_bytes = 0;
+        let prefix = if ordinary {
+            config.externals.insert(external.into());
+            format!("import '{external}';")
+        } else {
+            String::new()
+        };
+        write(
+            dir.root(),
+            "main.mjs",
+            &format!(
+                "{prefix}
+            export * from './lib/runtimeCreator.js';
+            import data from './package.json';
+            import * as ns from './leaf.mjs';
+            import cjsLoad from './loader.cjs';
+            export {{data, ns, cjsLoad}};
+            export const dynamic = () => import('./package.json');
+            export const leaf = () => require('./leaf.mjs');
+        "
+            ),
+        );
+        write(dir.root(), "lib/runtimeCreator.js",
+            "const rawChatLoaderVersion = require('../package.json').version; export const chatLoaderVersion = String(rawChatLoaderVersion); export const load = () => (require)(('../package.json'));");
+        write(
+            dir.root(),
+            "package.json",
+            r#"{"version":"26.0.114","nested":{"value":1}}"#,
+        );
+        write(
+            dir.root(),
+            "loader.cjs",
+            "module.exports = () => require('./package.json');",
+        );
+        write(
+            dir.root(),
+            "leaf.mjs",
+            "export let value = 1; export const bump = () => value++;",
+        );
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let result = session.build(&config).unwrap();
+        assert_browser_transport(&result.product.artifacts);
+        assert_eq!(result.counters.source_reparses, 0);
+        assert_eq!(result.counters.fragment_reparses, 0);
+        let retains_native_export = result
+            .product
+            .artifacts
+            .files
+            .values()
+            .any(|source| source.contains("export const chatLoaderVersion"));
+        assert_eq!(retains_native_export, ordinary);
+        assert_eq!(
+            observe_named(
+                &result.product.artifacts,
+                r#"
+const entry = await import('./main.mjs');
+if (entry.chatLoaderVersion !== '26.0.114') throw Error('version');
+if (entry.data !== entry.load() || entry.data !== entry.cjsLoad() ||
+    entry.data !== (await entry.dynamic()).default) throw Error('JSON identity');
+entry.data.nested.value = 7;
+if (entry.load().nested.value !== 7) throw Error('JSON mutation');
+if (entry.leaf() !== entry.ns) throw Error('namespace identity');
+entry.ns.bump();
+if (entry.leaf().value !== 2) throw Error('live namespace');
+console.log(entry.chatLoaderVersion);
+"#
+            ),
+            b"26.0.114\n"
+        );
+        let noop = session.build(&config).unwrap();
+        assert!(Rc::ptr_eq(&result.product, &noop.product));
+        let warm = BuildSession::new(dir.root())
             .unwrap()
             .build(&config)
-            .err()
-            .expect("unsupported boundary");
-        assert!(format!("{error:#}").contains(diagnostic), "{error:#}");
+            .unwrap();
+        assert_eq!(warm.counters.source_parses, 0);
+        assert_eq!(warm.product.artifacts, result.product.artifacts);
+    }
+}
+
+#[test]
+fn browser_require_in_esm_cjs_ordinary_and_reconstructed_defer_cache_and_retry() {
+    for target in [TargetEnv::Browser, TargetEnv::Node] {
+        for ordinary in [false, true] {
+            let dir = TmpDir::new();
+            let mut config = browser_options();
+            config.resolver.target_env = target;
+            let external = "data:text/javascript,export{}";
+            let prefix = if ordinary {
+                config.externals.insert(external.into());
+                format!("import '{external}';")
+            } else {
+                String::new()
+            };
+            write(
+                dir.root(),
+                "main.mjs",
+                &format!(
+                    "{prefix}
+            events.push('entry');
+            export const load = () => require('./value.cjs');
+            export const again = () => (require)(('./value.cjs'));
+            export const retry = () => require('./retry.cjs');
+            export const conditional = flag => flag ? require('./value.cjs') : null;
+            export const dynamic = () => import('./value.cjs');
+        "
+                ),
+            );
+            write(
+                dir.root(),
+                "value.cjs",
+                "events.push('value'); module.exports = {value: 7};",
+            );
+            write(dir.root(), "retry.cjs", "events.push('retry'); if (!globalThis.attempt++) throw Error('first'); module.exports = {ok: true};");
+            let result = BuildSession::new(dir.root())
+                .unwrap()
+                .build(&config)
+                .unwrap();
+            if target == TargetEnv::Browser {
+                assert_browser_transport(&result.product.artifacts);
+            }
+            assert_eq!(
+                observe_named(
+                    &result.product.artifacts,
+                    r#"
+globalThis.events = []; globalThis.attempt = 0;
+const api = await import('./main.mjs');
+if (events.join() !== 'entry' || api.conditional(false) !== null) throw Error('eager');
+events.push('before');
+const value = api.load(); events.push('after');
+if (value !== api.again() || value !== api.conditional(true) || value.value !== 7) throw Error('cache');
+if ((await api.dynamic()).default !== value) throw Error('interop cache');
+try { api.retry(); throw Error('missing throw'); } catch (e) { if (e.message !== 'first') throw e; }
+if (!api.retry().ok || api.retry() !== api.retry()) throw Error('retry cache');
+console.log(JSON.stringify(events));
+"#
+                ),
+                b"[\"entry\",\"before\",\"value\",\"after\",\"retry\",\"retry\"]\n"
+            );
+        }
     }
 }
 

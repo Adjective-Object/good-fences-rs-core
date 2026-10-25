@@ -1,5 +1,6 @@
 //! Concrete links are derived only after segment ownership is fixed.
 use super::*;
+use eyre::WrapErr;
 use segments::{Owner, Placement};
 
 #[derive(Clone)]
@@ -169,6 +170,7 @@ pub(super) struct Connections {
     pub async_facades: BTreeMap<AsyncSiteId, PathBuf>,
     pub native_exports: BTreeMap<SegmentKey, Code>,
     pub native_requests: HashMap<(u32, ast_segmenter::owned::DependencyId), NativeRequest>,
+    pub require_imports: BTreeMap<Owner, Code>,
     pub lazy: BTreeMap<Owner, Vec<LazyInstance>>,
     pub lazy_selectors: BTreeMap<(u32, u32), String>,
     pub lazy_options: BTreeMap<SegmentKey, OptionsConnection>,
@@ -212,6 +214,7 @@ impl Connections {
             async_facades: BTreeMap::new(),
             native_exports: BTreeMap::new(),
             native_requests: HashMap::new(),
+            require_imports: BTreeMap::new(),
             lazy: BTreeMap::new(),
             lazy_selectors: BTreeMap::new(),
             lazy_options: BTreeMap::new(),
@@ -766,6 +769,7 @@ impl Connections {
         cjs: &commonjs::CommonJs,
         plan: &ChunkPlan,
     ) -> eyre::Result<()> {
+        let mut availability = BTreeMap::<Owner, BTreeMap<String, Code>>::new();
         for (&file, module) in modules {
             if cjs.contains(file) {
                 continue;
@@ -790,6 +794,38 @@ impl Connections {
                     .owners
                     .contains_key(&SegmentKey::new(file, index as u32))
                 {
+                    continue;
+                }
+                if dependency.kind() == DependencyKind::Require {
+                    ensure!(
+                        !matches!(graph.dependency_target(file, dependency.id()), Some(DependencyTarget::External(_))),
+                        "{}:{}..{}: native ESM cannot require external {:?}; use an ESM import or bundle the dependency",
+                        graph.file_path(file).unwrap().display(), dependency.span().start, dependency.span().end,
+                        dependency.specifier()
+                    );
+                    let target = target_file(graph, file, dependency)?;
+                    let owner = placement.owners[&SegmentKey::new(file, index as u32)];
+                    let planned = cjs
+                        .require_target(target, &self.namespaces, &owner.path(graph), true)
+                        .wrap_err_with(|| {
+                            format!(
+                                "{}:{}..{}: planning synchronous require of {:?}",
+                                graph.file_path(file).unwrap().display(),
+                                dependency.span().start,
+                                dependency.span().end,
+                                dependency.specifier()
+                            )
+                        })?;
+                    if let Some((name, import)) = planned.availability {
+                        availability.entry(owner).or_default().insert(name, import);
+                    }
+                    self.native_requests.insert(
+                        (file, dependency.id()),
+                        NativeRequest {
+                            code: planned.expression,
+                            whole: true,
+                        },
+                    );
                     continue;
                 }
                 let kind = match dependency.kind() {
@@ -878,6 +914,12 @@ impl Connections {
                 };
                 self.native_requests
                     .insert((file, dependency.id()), request);
+            }
+        }
+        for (owner, imports) in availability {
+            let output = self.require_imports.entry(owner).or_default();
+            for import in imports.into_values() {
+                output.push(import);
             }
         }
         Ok(())

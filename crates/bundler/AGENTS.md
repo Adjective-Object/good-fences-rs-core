@@ -95,6 +95,9 @@ declaration config; retain explicit user overrides and wrapper read contracts.
 Browser emits native ESM only, including lexical lazy CJS availability,
 JSON/asset/global CSS wrappers and finite require/dynamic-import contexts.
 Availability imports never invoke factories; require sites/facades own activation.
+ESM literal requires share CJS expression planning in ordinary and reconstructed
+recipes: typed availability imports plus whole-call replacements, never static
+facade activation or an injected loader. ESM require contexts remain rejected.
 Resolve explicit one-step exact aliases before rejecting Node builtins even as
 externals; local stubs still require checked inventory/graph loading. Never
 provide automatic polyfills/empty stubs; reject native addons and external require.

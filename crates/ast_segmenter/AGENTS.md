@@ -100,6 +100,9 @@ intentionally accept a broader syntax set.
 ESM environment reads of module/exports and typeof require stay unresolved native
 references, not CJS wrapper facts or constant-false guards. Preserve host reads,
 short-circuit aliases and lexical TDZ; keep direct wrapper operations rejected.
+Direct unshadowed literal require calls in ESM retain ESM format and ordinary
+dependency recipes. Reject ESM require contexts, aliases, writes and indirect uses;
+target compatibility and call-site activation remain native linker policy.
 Operation context follows selected conditional branches/final sequence values,
 not tests/discarded prefixes; logical operands remain conservatively checked.
 CommonJS path parameters allow var/function redeclarations and nested shadows;

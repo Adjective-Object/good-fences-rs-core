@@ -904,6 +904,7 @@ fn deterministic_roundtrip_after_parser_arena_drop() {
         ("file.d.ts", "export interface A { value: string }", ModuleFormat::Esm),
         ("empty.cjs", "", ModuleFormat::CommonJs),
         ("file.js", "export * from './a'; export * as ns from './b'; export default 1;", ModuleFormat::Esm),
+        ("mixed.mjs", "const rawChatLoaderVersion = require('../package.json').version; export const chatLoaderVersion = String(rawChatLoaderVersion); export const load = () => (require)(('../package.json'));", ModuleFormat::Esm),
         ("pure.js", "/* @__PURE__ */ object?.method?.(sideEffect(), ...iterable); const value = /*#__PURE__*/ new C(arg());", ModuleFormat::Esm),
         ("async.mjs", "export const value = await Promise.resolve(1); for await (const x of [1]) { await x; } async function deferred() { await 2; }", ModuleFormat::Esm),
         ("recipes.mjs", "import * as ns from './ns'; before; export let before = ns.value; function f(){ return before; } before++; const arrow = () => before; export default function(){ return ns.value; }", ModuleFormat::Esm),
@@ -944,6 +945,39 @@ fn deterministic_roundtrip_after_parser_arena_drop() {
             decoded.config()
         );
     }
+}
+
+#[test]
+fn mixed_esm_require_roundtrips_checked_borrowed_recipes_without_reparsing() {
+    let source = "const rawChatLoaderVersion = require('../package.json').version; \
+        export const chatLoaderVersion = String(rawChatLoaderVersion); \
+        export const load = () => (require)(('../package.json'));";
+    let original = record(source, "runtimeCreator.js", ModuleFormat::CommonJs);
+    let parses = ast_segmenter::module_parse_count();
+    let bytes = original.encode(source).unwrap();
+    let cached = CacheRecord::decode(&bytes, source, original.config()).unwrap();
+    let parsed = cached.to_parsed(source).unwrap();
+    crate::validate_parsed(source, &parsed).unwrap();
+    assert_eq!(parsed.body(), ast_segmenter::ModuleBody::Esm);
+    assert!(!parsed.facts().commonjs());
+    assert!(parsed.owned_facts().is_err());
+    assert!(parsed.owned_segments().is_none());
+    assert_eq!(parsed.facts().dependencies().len(), 2);
+    for dependency in parsed.facts().dependencies().iter() {
+        assert_eq!(
+            dependency.kind(),
+            ast_segmenter::owned::DependencyKind::Require
+        );
+        assert_eq!(dependency.specifier(), "../package.json");
+        assert!(dependency.pattern().is_none());
+    }
+    assert_eq!(
+        parsed.facts().emission(),
+        original.module().facts().emission()
+    );
+    let stale = corrupt(&original, |record| record.set("extractor", 26));
+    assert!(CacheRecord::decode(&stale.envelope(true), source, original.config()).is_err());
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
 }
 
 #[test]

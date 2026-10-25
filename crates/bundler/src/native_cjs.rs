@@ -3,11 +3,17 @@ use super::*;
 use crate::assembly::{Code, RequestKind};
 use ast_segmenter::owned::ImportedName;
 use ast_segmenter::views::ModuleFacts;
+use std::path::Path;
 
 struct Value {
     path: PathBuf,
     name: String,
     exported: String,
+}
+
+pub(super) struct RequireExpression {
+    pub expression: Code,
+    pub availability: Option<(String, Code)>,
 }
 
 pub(super) struct CommonJs {
@@ -315,7 +321,7 @@ impl CommonJs {
                     for target in target_files(graph, file, dependency)? {
                         if result.require_esm.contains_key(&target) {
                             ensure!(
-                                module.parsed.facts().commonjs() && dependency.kind() == DependencyKind::Require,
+                                dependency.kind() == DependencyKind::Require,
                                 "{}:{}..{}: browser synchronous require of {} cannot share a native static/dynamic ESM job",
                                 graph.file_path(file).unwrap().display(), dependency.span().start, dependency.span().end,
                                 graph.file_path(target).unwrap().display()
@@ -325,6 +331,7 @@ impl CommonJs {
                 }
             }
         }
+        result.runtime_required |= !result.require_esm.is_empty();
         Ok(result)
     }
 
@@ -336,6 +343,58 @@ impl CommonJs {
         self.contains(file) || self.eager_esm.contains_key(&file)
     }
 
+    pub fn require_target(
+        &self,
+        target: u32,
+        namespaces: &BTreeMap<u32, PathBuf>,
+        owner: &Path,
+        esm: bool,
+    ) -> eyre::Result<RequireExpression> {
+        if let Some(value) = self
+            .factories
+            .get(&target)
+            .or_else(|| self.require_esm.get(&target))
+        {
+            let availability = (value.path != owner).then(|| {
+                let import = if esm {
+                    Code::request(value.path.clone(), RequestKind::Import)
+                        .surrounded(format!("import {{{}}} from ", value.name), ";\n")
+                } else {
+                    Code::request(value.path.clone(), RequestKind::Require)
+                        .surrounded(format!("const {{{}}} = require(", value.name), ");\n")
+                };
+                (value.name.clone(), import)
+            });
+            return Ok(RequireExpression {
+                expression: format!("{}()", value.name).into(),
+                availability,
+            });
+        }
+        if let Some(name) = self.eager_esm.get(&target) {
+            return Ok(RequireExpression {
+                expression: if self.require_defaults.contains(&target) {
+                    format!("{name}.default").into()
+                } else {
+                    name.clone().into()
+                },
+                availability: Some((
+                    name.clone(),
+                    Code::request(namespaces[&target].clone(), RequestKind::Import)
+                        .surrounded(format!("import * as {name} from "), ";\n"),
+                )),
+            });
+        }
+        ensure!(
+            !esm,
+            "native ESM synchronous require target is unsupported; use import() for this evaluation boundary"
+        );
+        Ok(RequireExpression {
+            expression: Code::request(namespaces[&target].clone(), RequestKind::Require)
+                .surrounded("require(", ")"),
+            availability: None,
+        })
+    }
+
     pub fn add_runtime(
         &self,
         files: &mut BTreeMap<PathBuf, Code>,
@@ -344,7 +403,7 @@ impl CommonJs {
         if !self.runtime_required {
             return Ok(());
         }
-        let esm_only = self.factories.is_empty();
+        let esm_only = self.factories.is_empty() && self.require_esm.is_empty();
         let path = PathBuf::from(if esm_only {
             "native/context-intrinsics.mjs"
         } else if self.browser {
@@ -682,77 +741,14 @@ impl CommonJs {
                 for (request, target) in targets {
                     let replacement = match dependency.kind() {
                         DependencyKind::Require => {
-                            if let Some(other) = self.factories.get(&target) {
-                                if other.path != value.path
-                                    && availability_imports
-                                        .insert((value.path.clone(), other.name.clone()))
-                                {
-                                    imports.insert(
-                                        other.name.clone(),
-                                        if self.browser {
-                                            Code::request(other.path.clone(), RequestKind::Import)
-                                                .surrounded(
-                                                    format!("import {{{}}} from ", other.name),
-                                                    ";\n",
-                                                )
-                                        } else {
-                                            Code::request(other.path.clone(), RequestKind::Require)
-                                                .surrounded(
-                                                    format!("const {{{}}} = require(", other.name),
-                                                    ");\n",
-                                                )
-                                        },
-                                    );
-                                }
-                                Code::from(format!("{}()", other.name))
-                            } else {
-                                if self.browser {
-                                    if let Some(name) = self.eager_esm.get(&target) {
-                                        if availability_imports
-                                            .insert((value.path.clone(), name.clone()))
-                                        {
-                                            imports.insert(
-                                                name.clone(),
-                                                Code::request(
-                                                    namespaces[&target].clone(),
-                                                    RequestKind::Import,
-                                                )
-                                                .surrounded(
-                                                    format!("import * as {name} from "),
-                                                    ";\n",
-                                                ),
-                                            );
-                                        }
-                                        Code::from(if self.require_defaults.contains(&target) {
-                                            format!("{name}.default")
-                                        } else {
-                                            name.clone()
-                                        })
-                                    } else {
-                                        let other = &self.require_esm[&target];
-                                        if availability_imports
-                                            .insert((value.path.clone(), other.name.clone()))
-                                        {
-                                            imports.insert(
-                                                other.name.clone(),
-                                                Code::request(
-                                                    other.path.clone(),
-                                                    RequestKind::Import,
-                                                )
-                                                .surrounded(
-                                                    format!("import {{{}}} from ", other.name),
-                                                    ";\n",
-                                                ),
-                                            );
-                                        }
-                                        Code::from(format!("{}()", other.name))
-                                    }
-                                } else {
-                                    // Native require is intentionally inside the original call site.
-                                    Code::request(namespaces[&target].clone(), RequestKind::Require)
-                                        .surrounded("require(", ")")
+                            let planned =
+                                self.require_target(target, namespaces, &value.path, self.browser)?;
+                            if let Some((name, import)) = planned.availability {
+                                if availability_imports.insert((value.path.clone(), name.clone())) {
+                                    imports.insert(name, import);
                                 }
                             }
+                            planned.expression
                         }
                         DependencyKind::DynamicImport if self.contains(target) => {
                             self.dynamic(graph, target)?

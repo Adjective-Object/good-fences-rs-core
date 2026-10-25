@@ -32,11 +32,28 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
         .iter()
         .filter(|d| d.kind() == DependencyKind::Require)
         .collect();
+    if !policy.commonjs {
+        for dependency in &requires {
+            if dependency.pattern().is_some() {
+                policy.reject(
+                    dependency.span(),
+                    "unsupported ESM require context (expected a literal request)",
+                );
+            }
+        }
+    }
     for reference in facts.references() {
         if reference.binding().is_some() || reference.type_only() {
             continue;
         }
+        let i = requires.partition_point(|d| d.span().start <= reference.span().start);
+        let direct_call = i.checked_sub(1).is_some_and(|i| {
+            let d = requires[i];
+            reference.span().end <= d.specifier_span().start
+                && reference.span().start >= d.span().start
+        });
         match reference.name() {
+            "require" if !reference.write() && direct_call => {}
             "require" | "module" | "exports"
                 if !policy.commonjs
                     && (reference.write()
@@ -47,12 +64,6 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
                 policy.reject(reference.span(), "mixed ESM/CommonJS wrapper reference");
             }
             "require" if policy.commonjs => {
-                let i = requires.partition_point(|d| d.span().start <= reference.span().start);
-                let direct_call = i.checked_sub(1).is_some_and(|i| {
-                    let d = requires[i];
-                    reference.span().end <= d.specifier_span().start
-                        && reference.span().start >= d.span().start
-                });
                 if reference.write() || !direct_call {
                     policy.reject(
                         reference.span(),

@@ -323,7 +323,6 @@ fn esm_environment_probes_do_not_enable_wrapper_operations() {
         "exports.tag`value`;",
         "const load = require;",
         "typeof require.resolve;",
-        "typeof require === 'function' && require('./x');",
         "(module ? module.require : browserImpl)('./x');",
         "(exports ? browserImpl : exports.run)();",
         "(module, exports.run)();",
@@ -349,7 +348,6 @@ fn esm_environment_probes_do_not_enable_wrapper_operations() {
 #[test]
 fn mixed_modules_are_errors_not_partial_records() {
     for (path, source) in [
-        ("test.mjs", "export const x = require('./x');"),
         ("test.mjs", "export const x = 1; module.exports = x;"),
         ("test.mjs", "exports.x = 1;"),
         ("test.cjs", "import x from './x'; module.exports = x;"),
@@ -370,6 +368,74 @@ fn mixed_modules_are_errors_not_partial_records() {
         "shadow.mjs"
     )
     .is_ok());
+}
+
+#[test]
+fn esm_direct_require_preserves_format_occurrences_and_shadows() {
+    let source = "const rawChatLoaderVersion = require('../package.json').version; \
+        export const chatLoaderVersion = String(rawChatLoaderVersion); \
+        export const load = () => (require)(('../package.json')); \
+        function shadow(require) { return require(path); }";
+    let parsed = parse(source, "runtimeCreator.js").unwrap();
+    assert_eq!(parsed.body(), ModuleBody::Esm);
+    let facts = parsed.facts();
+    assert!(!facts.commonjs());
+    assert!(facts.ecco().is_some());
+    assert_eq!(facts.dependencies().len(), 2);
+    for dependency in facts.dependencies().iter() {
+        assert_eq!(dependency.kind(), DependencyKind::Require);
+        assert_eq!(dependency.specifier(), "../package.json");
+        assert!(dependency.pattern().is_none());
+    }
+    assert!(facts
+        .dependencies()
+        .get(0)
+        .unwrap()
+        .enclosing_function()
+        .is_none());
+    assert!(facts
+        .dependencies()
+        .get(1)
+        .unwrap()
+        .enclosing_function()
+        .is_some());
+    assert!(facts
+        .references()
+        .iter()
+        .all(|reference| reference.commonjs().is_none()));
+    assert!(facts
+        .references()
+        .iter()
+        .any(|reference| reference.name() == "require" && reference.binding().is_some()));
+    parse(
+        "typeof require === 'function' && require('./x');",
+        "probe.mjs",
+    )
+    .unwrap();
+}
+
+#[test]
+fn esm_require_rejects_unsupported_loader_forms_and_contexts() {
+    for source in [
+        "require = loader;",
+        "const load = require; load('./x');",
+        "require.resolve('./x');",
+        "(0, require)('./x');",
+        "new require('./x');",
+        "require?.('./x');",
+        "require('./x', effect());",
+        "require(path);",
+        "require(`./parts/${name}.js`);",
+        "require('./parts/' + name);",
+    ] {
+        let error = format!("{:#}", parse(source, "bad.mjs").unwrap_err());
+        assert!(
+            error.contains("bad.mjs") && error.contains("bytes "),
+            "{}: {}",
+            source,
+            error
+        );
+    }
 }
 
 #[test]

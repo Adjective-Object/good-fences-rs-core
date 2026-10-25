@@ -23,7 +23,7 @@ Graph linking, effect policy, Ecco registration, execution constraints and nativ
 recipe rendering consume owned-or-wire AST views. A byte-backed graph retains
 verified owners, including Ecco's nested storage, without unpacking extraction
 trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
-`.seg.fb` records (schema 18/extractor 26); parse fingerprints include both active
+`.seg.fb` records (schema 18/extractor 27); parse fingerprints include both active
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
 
@@ -1976,6 +1976,13 @@ guards with `false`. Host-provided values/getters, short-circuit timing, lexical
 shadowing/TDZ and unguarded ReferenceErrors remain observable. Direct wrapper
 writes, deletes, updates, calls, construction and tags remain unsupported in ESM;
 aliases remain ordinary JavaScript values, not inferred loaders.
+Direct unshadowed literal `require()` calls are supported in ESM without changing
+its format. Ordinary and reconstructed recipes share whole-call expression
+planning: availability imports do not invoke CJS factories; the original call site
+owns cached activation. Browser ESM/resource targets follow the synchronous leaf
+and shared-default rules above. ESM require contexts, loader aliases/mutations and
+external requires remain rejected. On Node, mixed ESM may require bundled CJS
+(including prepared JSON), but synchronous ESM targets remain unsupported there.
 Unused native `module`/`exports` reads and `typeof require` retain their read
 effects through Ecco refinement, including host getters and missing-global errors;
 this includes unused calls to functions and indirect helpers that perform reads.
@@ -1983,11 +1990,10 @@ Uncalled probe functions do not disable refinement. Executed host reads use Ecco
 opaque-execution widening, which can also retain otherwise pure calls whose
 globals or values might be mutated by a getter.
 
-Package format is explicit, not inferred from probes or export syntax. Precompiled
-ESM `.js` in a package without `"type":"module"` is a consumer configuration error:
-add `"type":"module"` to its `package.json`, or use `.mjs` instead of `.js`.
-The diagnostic includes the input path and declaration span; no format override
-is applied.
+Package defaults select the initial format. Static ESM syntax disambiguates
+CommonJS-default `.js`/`.jsx`/`.ts`/`.tsx`; explicit m/c extensions retain their
+format. Environment probes and direct require calls never switch effective ESM
+into a CommonJS wrapper.
 
 Linked opaque JavaScript CJS bodies appear once as real function syntax in pure
 availability chunks (`.cjs` on Node, native `.mjs` on Browser).

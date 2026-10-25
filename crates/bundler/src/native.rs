@@ -868,6 +868,7 @@ struct Values<'s> {
     requests: BTreeMap<u32, Code>,
     dynamic: BTreeMap<u32, Code>,
     dynamic_sites: HashMap<(u32, ast_segmenter::owned::DependencyId), Code>,
+    requires: HashMap<(u32, ast_segmenter::owned::DependencyId), Code>,
     contexts: HashMap<(u32, ast_segmenter::owned::DependencyId), crate::context::Dispatch>,
     native_defaults: BTreeSet<u32>,
     generated: BTreeMap<(u32, u32), Code>,
@@ -885,6 +886,7 @@ impl<'s> Values<'s> {
             requests: BTreeMap::new(),
             dynamic: BTreeMap::new(),
             dynamic_sites: HashMap::new(),
+            requires: HashMap::new(),
             contexts: HashMap::new(),
             native_defaults: BTreeSet::new(),
             generated: BTreeMap::new(),
@@ -1122,6 +1124,14 @@ fn reconstruct(
                     DependencyKind::Import | DependencyKind::ReExport
                 ) {
                     Some(";".into())
+                } else if dependency.kind() == DependencyKind::Require && !dependency.type_only() {
+                    Some(
+                        values
+                            .requires
+                            .get(&(file, dependency.id()))
+                            .ok_or_eyre("missing planned synchronous require expression")?
+                            .clone(),
+                    )
                 } else if dependency.type_only()
                     || dependency.kind() != DependencyKind::DynamicImport
                 {

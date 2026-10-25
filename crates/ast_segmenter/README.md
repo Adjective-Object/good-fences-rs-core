@@ -224,7 +224,8 @@ unchanged.
 | CJS directives/hashbang/top-level return | Preserved; hashbang recorded separately; one opaque body even when empty |
 | CJS wrapper `arguments` access, including arrows capturing it | Diagnostic; ordinary nested functions' own `arguments` supported |
 | ESM environment probes | `typeof require`, read-only `module`/`exports` references and property reads remain native globals, including lodash-style short-circuit aliases; no injected bindings or constant replacement |
-| Mixed-file static ESM/CJS syntax, ESM wrapper writes/deletes/updates/calls/construction/tags, or ESM loader use other than `typeof require` | Diagnostic; detecting ESM never enables CommonJS wrapper operations in it |
+| ESM direct unshadowed literal `require()` | Preserves ESM format and occurrence recipes, including parenthesized calls; target/activation support is a linker check. ESM require contexts remain rejected |
+| Mixed-file static ESM/CJS syntax, ESM wrapper writes/deletes/updates/calls/construction/tags, or other ESM loader use except `typeof require` | Diagnostic; direct require support never enables CommonJS wrapper operations |
 | Unshadowed eval, nested `with`, `import.meta` | Diagnostic; lexically shadowed eval is an ordinary call |
 | Top-level await/for-await | ESM source spans in `facts.top_level_await`, excluding nested functions; CJS diagnostic. Dependency/SCC scheduling belongs to the native bundler host |
 | Import attributes/options/phases (including type import options) | Diagnostic |

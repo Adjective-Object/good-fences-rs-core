@@ -4566,6 +4566,7 @@ import data from './data.json';
 import load from './loader.cjs';
 const dynamic = await import('./data.json');
 data.changed = 3;
+if (require('./data.json') !== data) throw Error('mixed ESM JSON identity');
 console.log(data === load(), data === dynamic.default, load().changed, data.value);
 "#,
     );
@@ -5542,7 +5543,8 @@ fn observe(artifacts: &Artifacts) -> Vec<u8> {
 fn observe_entry(entry: &Path) -> Vec<u8> {
     let output = std::process::Command::new("node")
         .args(["-e", "const {spawnSync}=require('node:child_process'); const r=spawnSync(process.execPath,[process.argv[1]],{timeout:5000,killSignal:'SIGKILL'}); if(r.error||r.status!==0||r.stderr.length) {console.error(r.error||r.stderr.toString());process.exit(1)} process.stdout.write(r.stdout)"])
-        .arg(entry)
+        .arg(entry.file_name().unwrap())
+        .current_dir(entry.parent().unwrap())
         .output().unwrap();
     assert!(
         output.status.success(),

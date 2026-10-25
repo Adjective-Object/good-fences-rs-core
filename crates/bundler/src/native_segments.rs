@@ -2075,7 +2075,10 @@ pub(super) fn emit(
     for (&file, module) in modules {
         for dependency in module.parsed.facts().dependencies().iter().filter(|d| {
             !d.type_only()
-                && d.kind() == DependencyKind::DynamicImport
+                && matches!(
+                    d.kind(),
+                    DependencyKind::DynamicImport | DependencyKind::Require
+                )
                 && live.iter().any(|key| {
                     key.file_id == file
                         && contains(
@@ -2089,6 +2092,18 @@ pub(super) fn emit(
                         )
                 })
         }) {
+            if dependency.kind() == DependencyKind::Require {
+                values.requires.insert(
+                    (file, dependency.id()),
+                    connections
+                        .native_requests
+                        .get(&(file, dependency.id()))
+                        .ok_or_eyre("missing planned synchronous require")?
+                        .code
+                        .clone(),
+                );
+                continue;
+            }
             if let Some(dispatch) =
                 cjs.context_dynamic(graph, file, dependency, &connections.namespaces)?
             {
@@ -2102,6 +2117,9 @@ pub(super) fn emit(
         }
     }
     let mut output = Code::default();
+    if let Some(availability) = connections.require_imports.get(&root) {
+        output.push(availability.clone());
+    }
     if let Owner::Evaluation(file) = root {
         if let Some(name) = values.defaults.iter().find_map(|(key, name)| {
             (key.file_id == file && placement.owners.get(key) == Some(&root)).then_some(name)
