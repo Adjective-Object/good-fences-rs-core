@@ -6,6 +6,7 @@ use test_tmpdir::TmpDir;
 mod source_maps;
 
 mod browser;
+mod contexts;
 mod discovery;
 mod resolution_cache;
 mod sass;

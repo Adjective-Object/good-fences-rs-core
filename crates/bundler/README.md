@@ -40,6 +40,10 @@ inventory and normal script/JSON/CSS/asset policy. Parent/sibling directories an
 reserved output/cache paths are excluded. A source/site warning about broad
 capture and bundle growth appears in build warnings and stderr progress on cold,
 warm and no-op builds. Relative template/concatenation prefixes remain narrower.
+All computed import/require contexts exclude TypeScript declaration files
+(`.d.ts`, `.d.mts`, `.d.cts`) during candidate selection and final match-set
+checks. Explicit declaration imports and entries still fail as non-executable
+inputs; runtime TypeScript siblings remain eligible.
 Attached boolean `webpackIgnore: true` block or line comments leave literal and
 computed imports native, without resolving or capturing dependencies; arguments
 still evaluate normally. JSDoc/unrelated comments and string contents do not

@@ -635,6 +635,8 @@ Root identities use entry IDs or async source occurrences/demands; context candi
 extend that occurrence identity with their target, never replace the source site.
 Capture relative patterns against the bounded inventory and invalidate on
 candidate additions/removals. Expand checked edges without inventing source IDs.
+Shared context request matching excludes `.d.ts`/`.d.mts`/`.d.cts` candidates
+on scans, expansion and rechecks; explicit requests retain declaration-input errors.
 Unprefixed dynamic imports recursively capture only their importing directory
 through the same checked inventory/resource policy. Report one broad-capture
 warning per occurrence on cold/warm/no-op builds, with stderr-only progress events.

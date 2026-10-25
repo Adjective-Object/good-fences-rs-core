@@ -16,6 +16,19 @@ fn candidate_requests(
     dependency: Dependency<'_>,
     extensions: &[String],
 ) -> Vec<String> {
+    // Context enumeration selects runtime inputs, not TypeScript declarations.
+    // Keep explicit requests on the normal resolver/precompiler error path.
+    if target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            [".d.ts", ".d.mts", ".d.cts"]
+                .iter()
+                .any(|suffix| name.ends_with(suffix))
+        })
+    {
+        return Vec::new();
+    }
     if dependency.broad_context()
         && !importer
             .parent()
