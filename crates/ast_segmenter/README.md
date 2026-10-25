@@ -4,6 +4,12 @@ Extracts owned top-level statement segments from OXC-parsed JavaScript and
 TypeScript. Each segment contains module imports/exports, variable declarations
 and references, and its ownership span; the parser arena can then be reset.
 Spans are zero-based UTF-8 byte ranges with an exclusive end.
+Computed dynamic imports retain bounded relative patterns, or a two-empty-piece
+pattern for recursive importing-directory capture when no relative prefix exists.
+Attached `/* webpackIgnore: true */` and line comments leave imports native:
+no dependency is extracted, but argument references and effects remain.
+JSDoc, strings and unrelated comments are not magic annotations; explicit false
+uses normal dependency extraction. Comment values are parsed, never executed.
 Callers supplying a semantic model to `segment_file` must enable
 `SemanticBuilder::with_build_nodes(true)` for reference spans.
 Module requests containing lone UTF-16 surrogates are rejected rather than

@@ -355,9 +355,10 @@ pub(crate) fn validate_module(
                 matches!(
                     d.kind(),
                     DependencyKind::DynamicImport | DependencyKind::Require
-                ) && pattern
-                    .first()
-                    .is_some_and(|p| p.starts_with("./") || p.starts_with("../"))
+                ) && (d.broad_context()
+                    || pattern
+                        .first()
+                        .is_some_and(|p| p.starts_with("./") || p.starts_with("../")))
                     && d.specifier() == pattern.iter().collect::<Vec<_>>().join("*"),
                 "invalid relative dependency pattern"
             );

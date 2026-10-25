@@ -94,6 +94,7 @@ pub(crate) fn extract(program: &Program<'_>, semantic: &Semantic<'_>) -> eyre::R
         .collect();
     let mut visitor = Extractor {
         semantic,
+        program,
         ids,
         binding_indices: bindings
             .iter()
@@ -184,8 +185,73 @@ pub(crate) fn extract(program: &Program<'_>, semantic: &Semantic<'_>) -> eyre::R
     Ok(facts)
 }
 
+fn webpack_ignored(program: &Program<'_>, expression: &ImportExpression<'_>) -> bool {
+    let mut ignored = false;
+    // Match webpack's parseCommentOptions(expr.range)/getComments(range):
+    // nested import/body comments also belong to the enclosing import range.
+    let start = program
+        .comments
+        .partition_point(|comment| comment.span.start < expression.span.start);
+    let end = program
+        .comments
+        .partition_point(|comment| comment.span.end <= expression.span.end);
+    for comment in &program.comments[start..end] {
+        let text = &program.source_text[comment.span.start as usize..comment.span.end as usize];
+        let body = if text.starts_with("/**") {
+            continue;
+        } else if let Some(body) = text.strip_prefix("/*").and_then(|s| s.strip_suffix("*/")) {
+            body
+        } else if let Some(body) = text.strip_prefix("//") {
+            body
+        } else {
+            continue;
+        };
+        if !body.contains("webpackIgnore") {
+            continue;
+        }
+        // Parse comment data as an object; never evaluate comment expressions.
+        let source = format!("({{{body}\n}})");
+        let allocator = oxc_allocator::Allocator::default();
+        let Ok(parsed) = oxc_utils_parse::parse_with_source_type(
+            &allocator,
+            &source,
+            oxc_span::SourceType::mjs(),
+            std::path::Path::new("import-magic-comment.mjs"),
+        ) else {
+            continue;
+        };
+        if parsed.fatal_error || !parsed.diagnostics.is_empty() || parsed.program.body.len() != 1 {
+            continue;
+        }
+        let Statement::ExpressionStatement(statement) = &parsed.program.body[0] else {
+            continue;
+        };
+        let Expression::ObjectExpression(object) = statement.expression.get_inner_expression()
+        else {
+            continue;
+        };
+        for property in &object.properties {
+            let ObjectPropertyKind::ObjectProperty(property) = property else {
+                continue;
+            };
+            if !property.computed
+                && !property.method
+                && property
+                    .key
+                    .static_name()
+                    .is_some_and(|name| name.as_str() == Some("webpackIgnore"))
+            {
+                ignored =
+                    matches!(&property.value, Expression::BooleanLiteral(value) if value.value);
+            }
+        }
+    }
+    ignored
+}
+
 struct Extractor<'s, 'a> {
     semantic: &'s Semantic<'a>,
+    program: &'s Program<'a>,
     ids: HashMap<SymbolId, BindingId>,
     binding_indices: HashMap<BindingId, usize>,
     facts: ModuleFacts,
@@ -228,15 +294,16 @@ impl Extractor<'_, '_> {
             return;
         }
         if !pattern[0].starts_with("./") && !pattern[0].starts_with("../") {
-            self.reject(
-                span,
-                if kind == DependencyKind::Require {
-                    "nonliteral require requires a relative literal prefix"
-                } else {
-                    "nonliteral dynamic import requires a relative literal prefix"
-                },
-            );
-            return;
+            if kind == DependencyKind::Require {
+                self.reject(
+                    span,
+                    "nonliteral require requires a relative literal prefix",
+                );
+                return;
+            }
+            // The empty-prefix wildcard denotes the importing directory, not
+            // an unrestricted filesystem scope. Runtime arguments stay intact.
+            pattern = vec![String::new(), String::new()];
         }
         self.facts.dependencies_mut().push(Dependency::new(
             DependencyId(span.start),
@@ -514,11 +581,14 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
     }
 
     fn visit_import_expression(&mut self, expr: &ImportExpression<'a>) {
-        if let Expression::StringLiteral(source) = expr.source.get_inner_expression() {
+        if webpack_ignored(self.program, expr) {
+            // Still walk inputs: ignoring a dependency never makes it pure.
+        } else if let Expression::StringLiteral(source) = expr.source.get_inner_expression() {
             self.dependency(DependencyKind::DynamicImport, expr.span, source, false);
         } else {
             self.context_dependency(DependencyKind::DynamicImport, expr.span, &expr.source);
         }
+
         walk::walk_import_expression(self, expr);
     }
 

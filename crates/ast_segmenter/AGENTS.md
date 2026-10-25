@@ -74,6 +74,12 @@ position before returning.
 Relative template/concatenation loaders retain one real occurrence, literal
 pieces separated by runtime gaps and the original argument span. Never persist
 resolved candidates or fabricate dependency IDs for closure capture.
+Dynamic expressions without a relative prefix use exactly two empty pattern
+pieces for importing-directory capture. Parser-associated non-JSDoc import
+comments with boolean webpackIgnore true omit only the dependency, not input
+references/effects. No comment expressions execute.
+Comment association follows webpack's complete import-expression range, including
+nested imports/bodies; it is not nearest-import or leading-comment ownership.
 Keep the effective commonjs format in facts so graph/cache consumers never
 infer package format from extension, wrapper references or export syntax.
 Extraction provenance binds source bytes, effective parser config and owned

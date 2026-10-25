@@ -230,6 +230,45 @@ fn context_scans_only_matching_scopes_and_rechecks_additions_before_noop() {
 }
 
 #[test]
+fn broad_dynamic_import_context_keeps_checked_aliases_finite_and_scoped() {
+    let dir = TmpDir::new();
+    let root = dir.root().join("project");
+    let external = dir.root().join("external");
+    write(&root, "main.mjs", "import './folder/loader.mjs';");
+    write(
+        &root,
+        "folder/loader.mjs",
+        "export const load = n => import(n); console.log((await load('./linked/deep/value.mjs')).value);",
+    );
+    write(&root, "outside.mjs", "invalid syntax!");
+    write(&external, "deep/value.mjs", "export const value = 42;");
+    write(&external, ".bundler-output/bad.mjs", "invalid syntax!");
+    directory_link(&external, &root.join("folder/linked"));
+    directory_link(&root, &root.join("folder/cycle"));
+    let mut session = BuildSession::new(&root).unwrap();
+    let broad_warnings = |built: &BuildResult| {
+        built
+            .warnings
+            .iter()
+            .filter(|warning| warning.contains("broad recursive capture"))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let first = session.build(&linked_options()).unwrap();
+    assert_eq!(broad_warnings(&first).len(), 1);
+    assert_eq!(observe(&first.product.artifacts), b"42\n");
+    assert_eq!(first.product.graph.file_count(), 3);
+    let noop = session.build(&linked_options()).unwrap();
+    assert!(Rc::ptr_eq(&first.product, &noop.product));
+    write(&external, "deep/added.mjs", "export const value = 43;");
+    let added = session.build(&linked_options()).unwrap();
+    assert_eq!(added.product.graph.file_count(), 4);
+    assert_eq!(broad_warnings(&added), broad_warnings(&first));
+    remove_directory_link(&root.join("folder/cycle"));
+    remove_directory_link(&root.join("folder/linked"));
+}
+
+#[test]
 fn contexts_settle_late_checked_link_scopes_before_graph_construction() {
     let dir = TmpDir::new();
     let root = dir.root().join("project");

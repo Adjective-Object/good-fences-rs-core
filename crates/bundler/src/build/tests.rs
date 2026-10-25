@@ -4902,6 +4902,167 @@ fn native_external_star_collisions_preserve_cjs_candidates_without_explicit_over
 }
 
 #[test]
+fn webpack_ignored_imports_remain_native_with_input_effects_and_warm_caches() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+import {url} from './url.mjs';
+let calls = 0;
+export const missing = () => import(/* webpackIgnore: true */ './absent.mjs');
+export const load = async () => {
+  const promise = import(/* webpackIgnore: true */ (calls++, url));
+  console.log('promise', promise instanceof Promise, calls);
+  console.log((await promise).value);
+};
+console.log('start', calls);
+await load();
+const nestedUrl = 'data:text/javascript,export default "data:text/javascript,export const value=9"';
+console.log('nested', (await import((await import(/* webpackIgnore: true */ nestedUrl)).default)).value);
+import(/* webpackIgnore: true */ (calls++, 'data:text/javascript,console.log("native")'));
+console.log('after', calls);
+"#,
+    );
+    write(
+        dir.root(),
+        "url.mjs",
+        "export const url = 'data:text/javascript,export const value = 42';",
+    );
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let first = session.build(&options()).unwrap();
+    assert!(first.warnings.is_empty(), "{:?}", first.warnings);
+    assert!(first.product.artifacts.async_facades.is_empty());
+    assert_eq!(
+        observe(&first.product.artifacts),
+        b"start 0\npromise true 1\n42\nnested 9\nafter 2\nnative\n"
+    );
+    let noop = session.build(&options()).unwrap();
+    assert!(Rc::ptr_eq(&first.product, &noop.product));
+    let disk = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options())
+        .unwrap();
+    assert_eq!(disk.counters.source_parses, 0);
+    assert_eq!(disk.product.artifacts, first.product.artifacts);
+    assert!(disk.warnings.is_empty());
+
+    write(dir.root(), "main.mjs", "import './worker.cjs';");
+    write(
+        dir.root(),
+        "worker.cjs",
+        r#"
+let count = 0;
+const url = 'data:text/javascript,export const value = 7';
+const load = () => import(// webpackIgnore: true
+  (count++, url));
+console.log('start', count);
+load().then(ns => console.log(ns.value, count));
+"#,
+    );
+    let cjs = session.build(&options()).unwrap();
+    assert!(cjs.warnings.is_empty());
+    assert_eq!(observe(&cjs.product.artifacts), b"start 0\n7 1\n");
+}
+
+#[test]
+fn broad_dynamic_imports_capture_only_importer_tree_and_recheck_candidates() {
+    let dir = TmpDir::new();
+    write(dir.root(), "main.mjs", "import './folder/loader.mjs';");
+    write(
+        dir.root(),
+        "folder/loader.mjs",
+        r#"
+let calls = 0;
+export const load = url => import((calls++, url));
+console.log('start', calls);
+console.log((await load('./direct.mjs')).value, calls);
+console.log((await load('./deep/nested/value.cjs')).value, calls);
+console.log((await load('./deep/data.json')).default.value);
+console.log((await load('./style.css')).default.endsWith('.css'));
+console.log((await load('./image.svg')).default.startsWith('./assets/'));
+let coercions = 0;
+console.log((await load({toString() { coercions++; return './direct.mjs'; }})).value, coercions);
+for (const bad of [Symbol(), {toString() { throw new Error('coercion'); }}]) {
+  const promise = load(bad);
+  console.log('coercion promise', promise instanceof Promise);
+  try { await promise; } catch (error) { console.log(error.name); }
+}
+try {
+  const promise = load('../outside.mjs');
+  console.log('promise', promise instanceof Promise);
+  await promise;
+} catch (error) { console.log(error.code); }
+"#,
+    );
+    write(
+        dir.root(),
+        "folder/direct.mjs",
+        "console.log('direct'); export const value = 1;",
+    );
+    write(
+        dir.root(),
+        "folder/deep/nested/value.cjs",
+        "console.log('nested'); exports.value = 2;",
+    );
+    write(
+        dir.root(),
+        "folder/deep/unused.mjs",
+        "console.log('unused');",
+    );
+    write(dir.root(), "folder/deep/data.json", r#"{"value":3}"#);
+    write(dir.root(), "folder/style.css", "body { color: red; }");
+    write(dir.root(), "folder/image.svg", "<svg/>");
+    // These would fail parsing if a broad context escaped its importing directory.
+    write(dir.root(), "outside.mjs", "invalid syntax!");
+    write(dir.root(), "sibling/unused.mjs", "invalid syntax!");
+    write(
+        dir.root(),
+        "folder/.bundler-output/unused.mjs",
+        "invalid syntax!",
+    );
+    write(dir.root(), "folder/target/unused.mjs", "invalid syntax!");
+    write(dir.root(), "folder/ignored.seg.fb", "invalid cache");
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let first = session.build(&options()).unwrap();
+    assert_eq!(first.warnings.len(), 1);
+    assert!(first.warnings[0].contains("loader.mjs"));
+    assert!(first.warnings[0].contains("bytes"));
+    assert!(first.warnings[0].contains("broad recursive capture"));
+    assert_eq!(
+        observe(&first.product.artifacts),
+        b"start 0\ndirect\n1 1\nnested\n2 2\n3\ntrue\ntrue\n1 1\ncoercion promise true\nTypeError\ncoercion promise true\nError\npromise true\nERR_MODULE_NOT_FOUND\n"
+    );
+    let noop = session.build(&options()).unwrap();
+    assert!(Rc::ptr_eq(&first.product, &noop.product));
+    assert_eq!(noop.warnings, first.warnings);
+    let disk = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options())
+        .unwrap();
+    assert_eq!(disk.counters.source_parses, 0);
+    assert_eq!(disk.product.artifacts, first.product.artifacts);
+    assert_eq!(disk.warnings, first.warnings);
+    let count = first.product.artifacts.async_facades.len();
+    write(
+        dir.root(),
+        "folder/deep/nested/added.mjs",
+        "export const value = 4;",
+    );
+    let added = session.build(&options()).unwrap();
+    assert_eq!(added.product.artifacts.async_facades.len(), count + 1);
+    assert_eq!(added.warnings, first.warnings);
+    fs::remove_file(dir.root().join("folder/deep/unused.mjs")).unwrap();
+    let removed = session.build(&options()).unwrap();
+    assert_eq!(removed.product.artifacts.async_facades.len(), count);
+    assert_eq!(removed.warnings, first.warnings);
+    assert_eq!(
+        observe(&removed.product.artifacts),
+        observe(&first.product.artifacts)
+    );
+}
+
+#[test]
 fn relative_context_imports_preserve_lazy_namespaces_and_warm_candidate_changes() {
     let dir = TmpDir::new();
     write(

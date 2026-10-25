@@ -16,6 +16,13 @@ fn candidate_requests(
     dependency: Dependency<'_>,
     extensions: &[String],
 ) -> Vec<String> {
+    if dependency.broad_context()
+        && !importer
+            .parent()
+            .is_some_and(|directory| target.starts_with(directory))
+    {
+        return Vec::new();
+    }
     let Some(request) = assembly::relative_request(importer, target, false) else {
         return Vec::new();
     };
@@ -112,6 +119,11 @@ pub(crate) fn may_match_directory(
     directory: &Path,
     dependency: Dependency<'_>,
 ) -> bool {
+    if dependency.broad_context() {
+        return importer
+            .parent()
+            .is_some_and(|base| directory.starts_with(base) || base.starts_with(directory));
+    }
     if importer.starts_with(directory) || directory.to_str().is_none() {
         return true;
     }
@@ -142,7 +154,13 @@ pub(crate) struct Dispatch {
 
 impl Dispatch {
     pub fn emit(&self, argument: Code) -> Code {
-        let mut output = Code::from("((key) => { switch (key) {\n");
+        let mut output = Code::from("((key) => {\n");
+        if self.dynamic {
+            // Native import coerces once and turns coercion failures into
+            // rejected promises rather than synchronous throws.
+            output.push_str("try { key = `${key}`; } catch (error) { return import({toString() { throw error; }}); }\n");
+        }
+        output.push_str("switch (key) {\n");
         for (request, expression) in &self.requests {
             output.push_str(&format!(
                 "case {}: return ",

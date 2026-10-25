@@ -306,7 +306,7 @@ fn default_forms_and_export_destructuring_have_exact_mappings() {
 
 #[test]
 fn nonliteral_dependencies_are_errors_but_shadowed_require_is_ordinary_code() {
-    for source in ["import(path);", "require(path);", "require();"] {
+    for source in ["require(path);", "require();"] {
         assert!(parse_module(
             &logger::StdioLogger::new(),
             source,
@@ -319,6 +319,97 @@ fn nonliteral_dependencies_are_errors_but_shadowed_require_is_ordinary_code() {
     assert!(parse("function f(require) { return require(path); }")
         .dependencies()
         .is_empty());
+}
+
+#[test]
+fn broad_dynamic_imports_and_attached_webpack_ignore_comments() {
+    for source in [
+        "import(path)",
+        "import(`prefix${path}.mjs`)",
+        "import(/* webpackIgnore: false */ path)",
+        "/* webpackIgnore: true */ import(path)",
+        "import(/** webpackIgnore: true */ path)",
+        "import(/* note: 'webpackIgnore: true' */ path)",
+        "import(/* other: {webpackIgnore: true} */ path)",
+        "import(/* webpackIgnore: 'true' */ path)",
+        "import(/* webpackIgnore: (() => true)() */ path)",
+        "import(/* webpackIgnoreSuffix: true */ path)",
+    ] {
+        let facts = parse(source);
+        assert_eq!(facts.dependencies().len(), 1, "{source}");
+        assert_eq!(
+            facts.dependencies()[0].pattern().unwrap(),
+            &["", ""],
+            "{source}"
+        );
+    }
+    for source in [
+        "import(/* webpackIgnore: true */ path)",
+        "import(/*webpackIgnore : \n true, webpackChunkName: 'other'*/ path)",
+        "import(// webpackIgnore: true\n path)",
+        "import(/* webpackIgnore: true */ './absent.mjs')",
+        "import(/* webpackIgnore: true */ (path += '.mjs'))",
+        "import(path /* webpackIgnore: true */)",
+        "import('./' + /* webpackIgnore: true */ path)",
+        "import(/* webpackIgnore: true */ path, {with: {type: 'json'}})",
+    ] {
+        let facts = parse(source);
+        assert!(facts.dependencies().is_empty(), "{}", source);
+        if source.contains("path") {
+            assert!(facts
+                .references()
+                .iter()
+                .any(|reference| reference.name() == "path"));
+        }
+    }
+    assert_eq!(
+        parse("import(/* webpackIgnore: false */ './target.mjs')").dependencies()[0].pattern(),
+        None
+    );
+    let facts = parse("import(/* webpackIgnore: true */ './absent.mjs'); import('./real.mjs');");
+    assert_eq!(facts.dependencies().len(), 1);
+    assert_eq!(facts.dependencies()[0].specifier(), "./real.mjs");
+}
+
+#[test]
+fn webpack_ignore_matches_pinned_webpack_whole_import_comment_ranges() {
+    // Differentially checked against webpack 5.99.9 JavascriptParser::getComments.
+    for (source, expected_dependencies) in [
+        (
+            "import((await import(/* webpackIgnore: true */ url)).default)",
+            0,
+        ),
+        (
+            "import((() => { /* webpackIgnore: true */ return url; })())",
+            0,
+        ),
+        (
+            "import((await import(// webpackIgnore: true\n url)).default)",
+            0,
+        ),
+        (
+            "function f() { /* webpackIgnore: true */ return url; } import(url)",
+            1,
+        ),
+        (
+            "import(/* webpackIgnore: true */ (await import(/* webpackIgnore: false */ url)).default)",
+            2,
+        ),
+    ] {
+        let facts = parse(source);
+        assert_eq!(
+            facts.dependencies().len(),
+            expected_dependencies,
+            "{source}"
+        );
+        assert!(facts
+            .references()
+            .iter()
+            .any(|reference| reference.name() == "url"));
+        for dependency in facts.dependencies() {
+            assert_eq!(dependency.pattern().unwrap(), &["", ""]);
+        }
+    }
 }
 
 #[test]

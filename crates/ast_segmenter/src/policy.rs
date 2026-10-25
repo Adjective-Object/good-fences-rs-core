@@ -11,6 +11,12 @@ use crate::owned::{DependencyKind, ModuleFacts};
 pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<()> {
     let mut policy = Policy {
         commonjs: program.source_type.is_commonjs(),
+        bundled_imports: facts
+            .dependencies()
+            .iter()
+            .filter(|dependency| dependency.kind() == DependencyKind::DynamicImport)
+            .map(|dependency| dependency.id().0)
+            .collect(),
         function_depth: 0,
         arguments_depth: 0,
         wrapper_arguments: HashSet::new(),
@@ -99,6 +105,7 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
 
 struct Policy {
     commonjs: bool,
+    bundled_imports: HashSet<u32>,
     function_depth: usize,
     arguments_depth: usize,
     wrapper_arguments: HashSet<u32>,
@@ -282,7 +289,9 @@ impl<'a> Visit<'a> for Policy {
     }
 
     fn visit_import_expression(&mut self, expression: &ImportExpression<'a>) {
-        if expression.options.is_some() || expression.phase.is_some() {
+        if (expression.options.is_some() || expression.phase.is_some())
+            && self.bundled_imports.contains(&expression.span.start)
+        {
             self.reject(
                 expression.span,
                 "unsupported dynamic import options or phase",

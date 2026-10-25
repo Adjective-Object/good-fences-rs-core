@@ -23,7 +23,7 @@ Graph linking, effect policy, Ecco registration, execution constraints and nativ
 recipe rendering consume owned-or-wire AST views. A byte-backed graph retains
 verified owners, including Ecco's nested storage, without unpacking extraction
 trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
-`.seg.fb` records (schema 18/extractor 25); parse fingerprints include both active
+`.seg.fb` records (schema 18/extractor 26); parse fingerprints include both active
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
 
@@ -33,6 +33,17 @@ once from checked session records after the no-op check; linking borrows the
 settled source owners. Failed attempts retain useful prepared sources without
 replacing the last product. Returned products own their graph records independently
 of the session; no-op builds retain the existing product.
+
+Computed dynamic imports without a static relative prefix recursively capture
+all files in the importing file's directory and descendants, through the checked
+inventory and normal script/JSON/CSS/asset policy. Parent/sibling directories and
+reserved output/cache paths are excluded. A source/site warning about broad
+capture and bundle growth appears in build warnings and stderr progress on cold,
+warm and no-op builds. Relative template/concatenation prefixes remain narrower.
+Attached boolean `webpackIgnore: true` block or line comments leave literal and
+computed imports native, without resolving or capturing dependencies; arguments
+still evaluate normally. JSDoc/unrelated comments and string contents do not
+enable ignoring, and explicit false follows normal bundling.
 
 ### Package-local resolution caches
 

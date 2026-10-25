@@ -194,8 +194,8 @@ pub struct BuildResult {
     pub counters: Counters,
     /// Changed/deleted modules and transitive users from the prior shared graph.
     pub invalidated: BTreeSet<PathBuf>,
-    /// Nonfatal cache-write failures and effect-order cycles. Plan warnings are
-    /// repeated on no-op reuse so diagnostics do not depend on cache state.
+    /// Nonfatal cache failures, broad dynamic captures and effect-order cycles.
+    /// Source/plan warnings repeat on no-op reuse independently of cache state.
     pub warnings: Vec<String>,
 }
 
@@ -640,6 +640,16 @@ impl BuildSession {
                             .get(&path)
                             .or_else(|| previous.get(&path))
                             .expect("loaded source");
+                        for dependency in source.record.module().facts().dependencies() {
+                            if dependency.broad_context() {
+                                let warning = format!(
+                                    "{} at bytes {}..{}: unannotated dynamic import captures all files in the importing directory and below; broad recursive capture may increase bundle size",
+                                    path.display(), dependency.span().start, dependency.span().end,
+                                );
+                                tracing::warn!(target: "bundler::progress", "{warning}");
+                                warnings.push(warning);
+                            }
+                        }
                         if options.output.source_maps
                             && kind == crate::resource::ResourceKind::Script
                         {

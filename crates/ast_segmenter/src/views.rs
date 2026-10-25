@@ -569,6 +569,13 @@ impl<'a> Dependency<'a> {
         }
         true
     }
+    /// An unbounded dynamic expression captures only its importing directory.
+    pub fn broad_context(self) -> bool {
+        self.kind() == o::DependencyKind::DynamicImport
+            && self
+                .pattern()
+                .is_some_and(|parts| parts.len() == 2 && parts.iter().all(|part| part.is_empty()))
+    }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportedName<'a> {
