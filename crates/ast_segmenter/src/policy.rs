@@ -17,6 +17,13 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
             .filter(|dependency| dependency.kind() == DependencyKind::DynamicImport)
             .map(|dependency| dependency.id().0)
             .collect(),
+        resource_urls: facts
+            .dependencies()
+            .iter()
+            .filter(|dependency| dependency.kind() == DependencyKind::Url)
+            .map(|dependency| dependency.span().start)
+            .collect(),
+        resource_url_depth: false,
         function_depth: 0,
         arguments_depth: 0,
         wrapper_arguments: HashSet::new(),
@@ -117,6 +124,8 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
 struct Policy {
     commonjs: bool,
     bundled_imports: HashSet<u32>,
+    resource_urls: HashSet<u32>,
+    resource_url_depth: bool,
     function_depth: usize,
     arguments_depth: usize,
     wrapper_arguments: HashSet<u32>,
@@ -241,6 +250,8 @@ impl<'a> Visit<'a> for Policy {
 
     fn visit_new_expression(&mut self, expression: &NewExpression<'a>) {
         let saved = self.operation;
+        let saved_url = self.resource_url_depth;
+        self.resource_url_depth = self.resource_urls.contains(&expression.span.start);
         self.operation = true;
         self.visit_expression(&expression.callee);
         self.operation = false;
@@ -251,6 +262,7 @@ impl<'a> Visit<'a> for Policy {
             self.visit_ts_type_parameter_instantiation(arguments);
         }
         self.operation = saved;
+        self.resource_url_depth = saved_url;
     }
 
     fn visit_tagged_template_expression(&mut self, expression: &TaggedTemplateExpression<'a>) {
@@ -338,7 +350,9 @@ impl<'a> Visit<'a> for Policy {
     }
 
     fn visit_import_meta(&mut self, property: &ImportMeta) {
-        self.reject(property.span, "unsupported import.meta");
+        if !self.resource_url_depth {
+            self.reject(property.span, "unsupported import.meta");
+        }
     }
 
     fn visit_await_expression(&mut self, expression: &AwaitExpression<'a>) {

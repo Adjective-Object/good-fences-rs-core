@@ -1,5 +1,20 @@
 # bundler
 
+`BuildSession::build_classic_script` is an explicit independent-realm prerequisite:
+one evaluation-only browser root, checked acyclic synchronous ESM lexical closure,
+strict isolated scope, no native requests/exports or namespace routes. Reject
+unsupported boundaries rather than returning module output; keep mode in output
+fingerprints and preserve ordinary cache checks/maps/naming. Typed
+Artifacts.classic_scripts routes survive naming and publication without module
+type metadata; never advertise them as namespace routes. Browser literal URL
+dependencies use checked resolution/inventory and independent classic subbuilds,
+never parent effects or Worker spelling. Preserve original construction/slots;
+typed artifact literals relocate after final owner naming. Include/recheck child
+fingerprints and proofs on success/no-op. Nested URLs, dynamic/namespace/CJS
+script boundaries and other import.meta shapes stay explicit errors.
+Pass checked project-relative entry routes into child builds and their rechecks;
+canonical external targets alone never authorize child admission.
+
 Emit high-level phase/count events on bundler::progress without paths/requests.
 Discovery alone samples root-relative file/directory names on the stderr-only
 bundler::progress::discovery target, at most once per second for each kind.

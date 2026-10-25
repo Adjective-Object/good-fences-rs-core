@@ -36,8 +36,8 @@ use eyre::{ensure, Result};
 use sha2::{Digest, Sha256};
 
 pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
-pub const SCHEMA_VERSION: u32 = 18;
-pub const EXTRACTOR_VERSION: u32 = 27;
+pub const SCHEMA_VERSION: u32 = 19;
+pub const EXTRACTOR_VERSION: u32 = 28;
 pub const MODULE_IDENTIFIER: &str = "GFSM";
 const CHECKSUM_BYTES: usize = 32;
 

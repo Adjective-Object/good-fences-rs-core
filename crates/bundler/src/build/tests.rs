@@ -6,10 +6,12 @@ use test_tmpdir::TmpDir;
 mod source_maps;
 
 mod browser;
+mod classic_script;
 mod contexts;
 mod discovery;
 mod resolution_cache;
 mod sass;
+mod script_urls;
 mod transpile;
 
 #[cfg(any(unix, windows))]

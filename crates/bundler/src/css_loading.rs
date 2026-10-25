@@ -25,9 +25,16 @@ pub(crate) struct PreparedCssModule {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct UrlRelocation {
-    pub operation: Span,
-    pub public_url: String,
+pub(crate) enum UrlRelocation {
+    BuildRoot {
+        operation: Span,
+        public_url: String,
+    },
+    Script {
+        dependency: ast_segmenter::owned::DependencyId,
+        target: PathBuf,
+        base: String,
+    },
 }
 
 pub(crate) trait CssLoadingStrategy {
@@ -99,7 +106,7 @@ impl CssLoadingStrategy for AutoMount {
             source,
             parser_path: input.stylesheet.with_extension("css.mjs"),
             package: ModuleFormat::Esm,
-            relocations: vec![UrlRelocation {
+            relocations: vec![UrlRelocation::BuildRoot {
                 operation,
                 public_url: input.public_url.to_owned(),
             }],

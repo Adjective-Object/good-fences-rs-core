@@ -178,6 +178,8 @@ pub enum DependencyKind {
     DynamicImport,
     Require,
     ImportType,
+    /// Literal relative resource URL; never a module-evaluation dependency.
+    Url,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

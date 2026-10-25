@@ -38,6 +38,87 @@ fn linked_options() -> BuildOptions {
 }
 
 #[test]
+fn script_url_external_directory_link_revalidates_child_entry_routes() {
+    let dir = TmpDir::new();
+    let root = dir.root().join("project");
+    let first_worker = dir.root().join("first-worker");
+    let next_worker = dir.root().join("next-worker");
+    write(
+        &root,
+        "main.mjs",
+        "export const url = new URL('./linked/worker.mjs', import.meta.url);",
+    );
+    for (directory, value) in [(&first_worker, "first"), (&next_worker, "next")] {
+        write(
+            directory,
+            "worker.mjs",
+            "import {value} from './value.mjs'; globalThis.workerValue = value;",
+        );
+        write(
+            directory,
+            "value.mjs",
+            &format!("export const value = '{value}';"),
+        );
+    }
+    let alias = root.join("linked");
+    directory_link(&first_worker, &alias);
+    let mut config = linked_options();
+    config.resolver = NodeModulesResolverOptions::default_for_env(TargetEnv::Browser);
+    config.output.source_maps = true;
+    let mut session = BuildSession::new(&root).unwrap();
+    let first = session.build(&config).unwrap();
+    let script = first.product.artifacts.classic_scripts.first().unwrap();
+    assert_eq!(first.product.artifacts.classic_scripts.len(), 1);
+    assert!(first.product.artifacts.files[script].contains("'first'"));
+    assert!(first.counters.source_parses >= 3);
+    assert!(first
+        .product
+        .graph
+        .file_id(&first_worker.join("worker.mjs").canonicalize().unwrap())
+        .is_none());
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&first.product, &noop.product));
+    assert_eq!(noop.counters.source_parses, 0);
+    assert_eq!(noop.counters.output_parses, 0);
+    let disk = BuildSession::new(&root).unwrap().build(&config).unwrap();
+    assert_eq!(disk.counters.source_parses, 0);
+    assert!(disk.counters.disk_hits >= 3);
+    assert_eq!(disk.product.artifacts, first.product.artifacts);
+
+    // The child route does not make a canonical external entry generally legal.
+    let mut external = config.clone();
+    external.entries.get_mut("main").unwrap().path =
+        first_worker.join("worker.mjs").canonicalize().unwrap();
+    let failure = BuildSession::new(&root)
+        .unwrap()
+        .build(&external)
+        .err()
+        .unwrap();
+    assert!(
+        format!("{failure:#}").contains("outside reachable build inventory"),
+        "{failure:#}"
+    );
+
+    remove_directory_link(&alias);
+    directory_link(&next_worker, &alias);
+    let changed = session.build(&config).unwrap();
+    assert!(!Rc::ptr_eq(&first.product, &changed.product));
+    assert_ne!(first.product.fingerprints, changed.product.fingerprints);
+    assert!(changed
+        .invalidated
+        .contains(&root.join("main.mjs").canonicalize().unwrap()));
+    let changed_script = changed.product.artifacts.classic_scripts.first().unwrap();
+    assert!(changed.product.artifacts.files[changed_script].contains("'next'"));
+    assert!(!changed.product.artifacts.classic_scripts.contains(script));
+    let fresh = BuildSession::new(&root).unwrap().build(&config).unwrap();
+    assert_eq!(fresh.product.artifacts, changed.product.artifacts);
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&changed.product, &noop.product));
+    assert_eq!(noop.counters.source_parses, 0);
+    remove_directory_link(&alias);
+}
+
+#[test]
 fn literal_build_never_enumerates_large_unused_or_broken_node_modules() {
     let dir = TmpDir::new();
     let root = dir.root().join("project");

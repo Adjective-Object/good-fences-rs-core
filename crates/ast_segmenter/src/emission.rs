@@ -38,12 +38,18 @@ impl OperationKind {
                 NamespaceAccess::DirectRead { member, .. } => *member,
                 NamespaceAccess::Native(_) => unreachable!("only direct reads have operations"),
             },
-            Self::Dependency { dependency } => facts
-                .dependencies()
-                .iter()
-                .find(|d| d.id() == *dependency)
-                .expect("validated dependency")
-                .span(),
+            Self::Dependency { dependency } => {
+                let dependency = facts
+                    .dependencies()
+                    .iter()
+                    .find(|d| d.id() == *dependency)
+                    .expect("validated dependency");
+                if dependency.kind() == crate::owned::DependencyKind::Url {
+                    dependency.specifier_span()
+                } else {
+                    dependency.span()
+                }
+            }
             Self::Export { span, .. } => *span,
             Self::SourceHint { span } => *span,
             Self::Invocation { invocation, .. } => facts.invocations()[*invocation as usize].span(),
@@ -421,7 +427,9 @@ fn source_operations(
         contains(span, d.span())
             && matches!(
                 d.kind(),
-                crate::owned::DependencyKind::DynamicImport | crate::owned::DependencyKind::Require
+                crate::owned::DependencyKind::DynamicImport
+                    | crate::owned::DependencyKind::Require
+                    | crate::owned::DependencyKind::Url
             )
     }) {
         recipe.operations_mut().push(Operation::new(

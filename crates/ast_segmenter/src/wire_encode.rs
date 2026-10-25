@@ -47,7 +47,8 @@ enumeration!(
     ReExport,
     DynamicImport,
     Require,
-    ImportType
+    ImportType,
+    Url
 );
 enumeration!(
     effect_reason,

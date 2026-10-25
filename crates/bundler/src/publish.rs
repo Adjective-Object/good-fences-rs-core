@@ -185,6 +185,19 @@ fn validate_artifacts(artifacts: &Artifacts) -> eyre::Result<()> {
             path.display()
         );
     }
+    for path in &artifacts.classic_scripts {
+        ensure!(
+            artifacts.files.contains_key(path)
+                && path.extension().is_some_and(|extension| extension == "js")
+                && !artifacts.modules.values().any(|module| module == path)
+                && !artifacts
+                    .async_facades
+                    .values()
+                    .any(|module| module == path),
+            "classic script must be an owned .js file without a module namespace route: {}",
+            path.display()
+        );
+    }
     for path in artifacts
         .modules
         .values()
@@ -203,7 +216,8 @@ fn validate_artifacts(artifacts: &Artifacts) -> eyre::Result<()> {
             "module route is not an owned executable JavaScript file: {}",
             path.display()
         );
-        if path.extension().is_some_and(|e| e == "js") {
+        if path.extension().is_some_and(|e| e == "js") && !artifacts.classic_scripts.contains(path)
+        {
             let package = path.parent().unwrap().join("package.json");
             let metadata: serde_json::Value =
                 serde_json::from_str(artifacts.files.get(&package).ok_or_else(|| {
