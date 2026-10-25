@@ -32,6 +32,7 @@ missing/invalid files never fall back to discovery.
   "entries": ["src/index.ts"],
   "target": "browser",
   "workers": 4,
+  "resolveExtensions": [".web.js", ".ts", ".tsx", ".js", ".jsx", ".json", ".node", ".jsonc"],
   "output": {"source_maps": true}
 }
 ```
@@ -69,7 +70,19 @@ every level. This is a deliberately limited CLI schema, not serialized
 
 Targets are `node`/`browser`, workers are 1-64, and cache is `read-write`/`disabled`.
 `resolveConditions` adds nonempty conditions to target defaults; `import` and
-`require` cannot be overridden. `lazy_runtimes` accepts at most 16 exact
+`require` cannot be overridden.
+`resolveExtensions` replaces the default extension-probing list in the supplied
+order, after exact files, for file and directory-index requests.
+Omitting it preserves existing resolution: a `.js` fast path for extensionless
+files, then suffixes `ts`, `tsx`, `js`, `jsx`, `json`, `node`, `jsonc`.
+Explicit lists bypass that fast path; `[]` disables extension probing, not
+exact-file imports or explicit TypeScript substitutions.
+Suffixes accept an optional leading dot and may be compound, for example
+`[".web.ts", ".web.tsx", ".web.js", ".ts", ".tsx", ".js", ".jsx", ".json"]`.
+They must have nonempty dot-separated components and contain no whitespace,
+control characters, path separators or reserved filename characters.
+Changing the list or its order changes resolver cache policy.
+`lazy_runtimes` accepts at most 16 exact
 `module`/`import`/`action` objects, each containing `module` (a portable
 root-relative file) and `export` (a nonempty, control-free name, max 256 bytes).
 

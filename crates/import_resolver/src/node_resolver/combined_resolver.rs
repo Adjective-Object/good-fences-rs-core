@@ -219,6 +219,30 @@ mod tests {
     }
 
     #[test]
+    fn package_targets_keep_legacy_js_preference_separate() {
+        let dir = test_tmpdir! {
+            "entry.mjs" => "",
+            "node_modules/pkg/package.json" => r#"{"exports":"./value"}"#,
+            "node_modules/pkg/value.js" => "",
+            "node_modules/pkg/value.ts" => ""
+        };
+        let caches = CombinedResolverCaches::new();
+        for prefer_js_extension in [true, false, true, false] {
+            let mut options = NodeModulesResolverOptions::default_for_env(TargetEnv::Node);
+            options.prefer_js_extension = prefer_js_extension;
+            let resolver = caches.resolver(dir.root(), options);
+            let expected = if prefer_js_extension { "js" } else { "ts" };
+            assert_eq!(
+                resolver
+                    .resolve(&dir.root_join("entry.mjs"), "pkg")
+                    .unwrap()
+                    .path,
+                dir.root_join(&format!("node_modules/pkg/value.{expected}"))
+            );
+        }
+    }
+
+    #[test]
     fn paths_and_base_url_never_create_aliases_or_local_fallbacks() {
         let dir = test_tmpdir! {
             "entry.mjs" => "",

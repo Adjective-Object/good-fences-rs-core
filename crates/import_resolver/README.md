@@ -11,6 +11,11 @@ Default extension probing also accepts `.jsonc`, after the existing extensions;
 explicit `.jsonc` requests resolve normally. Package metadata remains strict JSON.
 Explicit `.mjsx`/`.cjsx` requests also probe `.mtsx`/`.ctsx` sources respectively,
 just as `.mjs`/`.cjs` probe `.mts`/`.cts`; default extension order is unchanged.
+`NodeModulesResolverOptions::prefer_js_extension` preserves the legacy `.js`
+fast path by default. Set it to `false` to probe exact files followed strictly
+by `extensions` in order, including compound suffixes such as `web.js`.
+An empty list then disables suffix probing, not exact files or explicit
+TypeScript substitutions. Both the list and fast-path policy key package targets.
 
 `structural::StructuralResolver` implements `DependencyResolver` with explicit
 import/require conditions and separate caches. Package-target cache keys include

@@ -617,7 +617,7 @@ impl<'scratch, 'a> BuildResolver<'scratch, 'a> {
                 std::env::consts::OS,
                 std::env::consts::ARCH,
                 resolver.target_env,
-                resolver.extensions,
+                (resolver.extensions, resolver.prefer_js_extension),
                 resolver.export_conditions,
                 options.externals,
                 resolver.ignore_node_modules,

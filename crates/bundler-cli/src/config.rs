@@ -22,6 +22,8 @@ pub(crate) struct Config {
     css: Css,
     #[serde(rename = "resolveConditions")]
     resolve_conditions: Vec<String>,
+    #[serde(rename = "resolveExtensions")]
+    resolve_extensions: Option<Vec<String>>,
     cache: Cache,
 }
 
@@ -37,6 +39,7 @@ impl Default for Config {
             output: Output::default(),
             css: Css::default(),
             resolve_conditions: Vec::new(),
+            resolve_extensions: None,
             cache: Cache::default(),
         }
     }
@@ -199,6 +202,25 @@ impl Config {
             .resolver
             .export_conditions
             .extend(config.resolve_conditions);
+        if let Some(extensions) = config.resolve_extensions {
+            options.resolver.prefer_js_extension = false;
+            options.resolver.extensions = extensions
+                .into_iter()
+                .map(|extension| {
+                    let suffix = extension.strip_prefix('.').unwrap_or(&extension);
+                    eyre::ensure!(
+                        suffix.split('.').all(|part| !part.is_empty())
+                            && !suffix.chars().any(|character| {
+                                character.is_whitespace()
+                                    || character.is_control()
+                                    || "/\\:*?\"<>|".contains(character)
+                            }),
+                        "resolveExtensions entries must be nonempty file suffixes without whitespace, path separators or reserved characters: {extension:?}"
+                    );
+                    Ok(suffix.to_owned())
+                })
+                .collect::<eyre::Result<_>>()?;
+        }
         options.output.base_url = config.output.base_url;
         options.output.min_chunk_bytes = config.output.min_chunk_bytes;
         options.output.synthesize_async_boundaries = config.output.synthesize_async_boundaries;

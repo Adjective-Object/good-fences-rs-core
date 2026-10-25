@@ -1697,6 +1697,12 @@ Nearest canonical package metadata determines `.js`
 format; explicit extensions override it. Resolution uses the existing resolver's
 supported package forms, including bare-string root exports and wildcard access
 to arbitrary package files. Export maps still enforce private subpaths.
+Custom suffix order uses `BuildOptions.resolver.extensions` with
+`prefer_js_extension = false`; otherwise legacy `.js` preference is retained.
+The CLI's `resolveExtensions` sets both, accepting optional leading dots and
+compound suffixes such as `.web.js`. Omission preserves defaults; `[]` disables
+suffix probing without disabling exact-file imports or explicit TypeScript
+substitutions. Effective suffix order and preference participate in cache policy.
 Actual requests retain positive/negative probes for package trees, link retargets,
 priority candidates and deleted targets. Package-format selection seals only
 consulted canonical ancestor `package.json` observations, including misses and

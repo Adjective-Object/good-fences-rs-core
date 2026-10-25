@@ -17,3 +17,6 @@ and traversed directories on stderr only; never record those events in Chrome tr
 Trace files are create-new only, outside input/output except reserved
 root-level `.bundler-trace-*` files.
 Project discovery is cwd-only; positional fixture calls never discover config.
+`resolveExtensions` is an ordered replacement for resolver suffixes, not an
+append. Normalize optional leading dots, preserve compound suffixes and defaults
+when omitted, and retain the effective order in resolver cache policy.

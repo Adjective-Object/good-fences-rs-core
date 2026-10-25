@@ -51,6 +51,8 @@ builtin resolution. Do not expand prefixes or recurse through aliases. Resolved
 stubs remain real files subject to consumer inventory/graph validation.
 Explicit .mjsx/.cjsx requests may resolve .mtsx/.ctsx, matching .mjs/.cjs
 TypeScript substitution; do not widen default extension probing implicitly.
+Keep legacy `.js` preference explicit in `prefer_js_extension`; ordered custom
+suffix policies disable it. Include both suffix order and preference in target keys.
 Browser defaults activate browser; structural browser requests reject remaining
 Node builtins even with explicit external policy and native addons, never inject
 polyfills/empty stubs. Preserve original importer/request in errors.

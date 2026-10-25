@@ -162,6 +162,132 @@ fn project_config_resolves_paths_from_its_location_and_supports_discovery() {
 }
 
 #[test]
+fn resolve_extensions_selects_compound_suffixes_in_order_for_project_and_fixture_builds() {
+    let dir = TmpDir::new();
+    let root = dir.root();
+    std::fs::write(
+        root.join("entry.mjs"),
+        "export { value } from './component'; export { value as indexed } from './parts';",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("component.js"),
+        "export const value = 'PLAIN_EXTENSION_SELECTED';",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("component.web.js"),
+        "export const value = 'WEB_EXTENSION_SELECTED';",
+    )
+    .unwrap();
+    std::fs::create_dir(root.join("parts")).unwrap();
+    for (filename, value) in [
+        ("index.js", "PLAIN_EXTENSION_SELECTED"),
+        ("index.web.js", "WEB_EXTENSION_SELECTED"),
+    ] {
+        std::fs::write(
+            root.join("parts").join(filename),
+            format!("export const value = '{value}';"),
+        )
+        .unwrap();
+    }
+    let config_path = root.join("bundler.config.json");
+    let fixture_path = root.join("settings.json");
+    for (extensions, expected, excluded) in [
+        (None, "PLAIN_EXTENSION_SELECTED", "WEB_EXTENSION_SELECTED"),
+        (
+            Some(serde_json::json!([".web.js", ".js"])),
+            "WEB_EXTENSION_SELECTED",
+            "PLAIN_EXTENSION_SELECTED",
+        ),
+        (
+            Some(serde_json::json!(["js", "web.js"])),
+            "PLAIN_EXTENSION_SELECTED",
+            "WEB_EXTENSION_SELECTED",
+        ),
+    ] {
+        let mut settings = serde_json::json!({"target": "browser"});
+        if let Some(extensions) = extensions {
+            settings["resolveExtensions"] = extensions;
+        }
+        std::fs::write(&fixture_path, serde_json::to_vec(&settings).unwrap()).unwrap();
+        settings["entries"] = serde_json::json!(["entry.mjs"]);
+        std::fs::write(&config_path, serde_json::to_vec(&settings).unwrap()).unwrap();
+        for command in [
+            Vec::new(),
+            args(root, &["--fixture-config", "settings.json", "entry.mjs"]),
+        ] {
+            let mut stdout = Vec::new();
+            run_from(root, command, &mut stdout).unwrap();
+            let result: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
+            let entry = PathBuf::from(result["directory"].as_str().unwrap())
+                .join(result["entries"]["entry.mjs"].as_str().unwrap());
+            let emitted = std::fs::read_to_string(entry).unwrap();
+            assert!(emitted.contains(expected), "{emitted}");
+            assert!(!emitted.contains(excluded), "{emitted}");
+        }
+    }
+}
+
+#[test]
+fn resolve_extensions_can_disable_probing_without_disabling_explicit_imports() {
+    let dir = TmpDir::new();
+    let root = dir.root();
+    std::fs::write(
+        root.join("bundler.config.json"),
+        r#"{"entries":["entry.mjs"],"resolveExtensions":[]}"#,
+    )
+    .unwrap();
+    std::fs::write(root.join("component.js"), "export const value = 1;").unwrap();
+    std::fs::write(
+        root.join("entry.mjs"),
+        "export { value } from './component';",
+    )
+    .unwrap();
+    let mut stdout = Vec::new();
+    let error = run_from(root, [], &mut stdout).unwrap_err();
+    assert!(format!("{error:#}").contains("resolving"), "{error:#}");
+    assert!(stdout.is_empty());
+
+    std::fs::write(
+        root.join("entry.mjs"),
+        "export { value } from './component.js';",
+    )
+    .unwrap();
+    run_from(root, [], &mut stdout).unwrap();
+    let result: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
+    assert_eq!(result["backend"], "native");
+}
+
+#[test]
+fn resolve_extensions_rejects_invalid_suffixes_before_building() {
+    let dir = TmpDir::new();
+    let root = dir.root();
+    for suffix in [
+        "", ".", "..js", "web..js", "js.", " ", " js", "j s", "js\n", "../js", "web/js", "web\\js",
+        "C:js", "*.js", "j?s", "j\"s", "j<s", "j>s", "j|s", "js\0",
+    ] {
+        let config = serde_json::json!({
+            "entries": ["entry.mjs"],
+            "resolveExtensions": [suffix]
+        });
+        std::fs::write(
+            root.join("bundler.config.json"),
+            serde_json::to_vec(&config).unwrap(),
+        )
+        .unwrap();
+        let mut stdout = Vec::new();
+        let error = run_from(root, [], &mut stdout).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("resolveExtensions"),
+            "{suffix:?}: {error:#}"
+        );
+        assert!(stdout.is_empty());
+    }
+    assert!(!root.join(".bundler-out").exists());
+}
+
+#[test]
 fn project_defaults_and_legacy_calls_do_not_depend_on_another_config() {
     let dir = TmpDir::new();
     let root = dir.root();

@@ -44,7 +44,7 @@ pub type NodeModulesCache = FileContextCache<
         // Track resolution of paths into each node_modules directory, so
         // we can optimisitcally resolve paths without hitting the filesystem
         AHashMap<
-            (String, Vec<String>, Vec<String>, TargetEnv, bool),
+            (String, Vec<String>, Vec<String>, bool, TargetEnv, bool),
             Arc<parking_lot::Mutex<Option<(CachedResolution, InputProof)>>>,
         >,
     >,
@@ -89,6 +89,7 @@ pub struct CachingNodeModulesResolver<'a> {
 
     // list of extensions to use when resolving files
     extensions: Vec<String>,
+    prefer_js_extension: bool,
     pub(crate) observer: InputObserver,
 }
 
@@ -109,6 +110,9 @@ pub struct NodeModulesResolverOptions {
     pub preserve_symlinks: bool,
     pub ignore_node_modules: bool,
     pub extensions: Vec<String>,
+    /// Preserve legacy `.js` probing before exact extensionless files and suffixes.
+    /// Set false to use only the ordered `extensions` list after exact files.
+    pub prefer_js_extension: bool,
     pub export_conditions: Vec<String>,
 }
 
@@ -120,6 +124,7 @@ impl NodeModulesResolverOptions {
             preserve_symlinks: false,
             ignore_node_modules: false,
             extensions: DEFAULT_EXTENSIONS.iter().map(|s| s.to_string()).collect(),
+            prefer_js_extension: true,
             export_conditions: DEFAULT_EXPORT_CODITIONS
                 .iter()
                 .copied()
@@ -152,6 +157,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             preserve_symlinks: options.preserve_symlinks,
             ignore_node_modules: options.ignore_node_modules,
             extensions: options.extensions,
+            prefer_js_extension: options.prefer_js_extension,
             export_conditions: options.export_conditions,
             observer: InputObserver::default(),
         }
@@ -211,7 +217,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             if self.observer.is_file(path) {
                 return Ok(Some(path.to_path_buf()));
             }
-        } else {
+        } else if self.prefer_js_extension {
             // We try `.js` first.
             let mut path = path.to_path_buf();
             path.set_extension("js");
@@ -220,7 +226,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             }
         }
 
-        // Try exact file after checking .js, for performance
+        // Legacy policy probes .js before an exact extensionless file.
         if !try_exact && self.observer.is_file(path) {
             return Ok(Some(path.to_path_buf()));
         }
@@ -436,6 +442,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             target.to_owned(),
             conditions,
             self.extensions.clone(),
+            self.prefer_js_extension,
             self.target_env,
             self.preserve_symlinks,
         );
