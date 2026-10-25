@@ -45,6 +45,7 @@ fn deserialize_exports<'de, D: serde::Deserializer<'de>>(
     #[serde(untagged)]
     enum Exports {
         Root(String),
+        Fallback(Vec<ExportedPath>),
         Conditions(
             #[serde(deserialize_with = "deserialize_root_conditions")] Vec<(String, ExportedPath)>,
         ),
@@ -66,6 +67,9 @@ fn deserialize_exports<'de, D: serde::Deserializer<'de>>(
                     .into_iter()
                     .collect()
             }
+            Exports::Fallback(targets) => [(".".to_owned(), PackageJsonExport::Fallback(targets))]
+                .into_iter()
+                .collect(),
             Exports::Subpaths(paths) => paths,
         }),
     )
@@ -83,6 +87,7 @@ pub enum PackageJsonExport {
     //   "default": "./main.js"
     // }
     Single(Option<String>),
+    Fallback(Vec<ExportedPath>),
     // An export condition object, kept in declaration order:
     //
     // e.g:
@@ -204,11 +209,27 @@ mod tests {
         let explicit: PackageJson =
             serde_json::from_str(r#"{"exports":{".":"./index.mjs","./*":"./*"}}"#).unwrap();
         assert_eq!(shorthand, explicit);
-        for invalid in ["false", "42", "[]"] {
+        for invalid in ["false", "42"] {
             assert!(
                 serde_json::from_str::<PackageJson>(&format!(r#"{{"exports":{invalid}}}"#))
                     .is_err()
             );
+        }
+    }
+
+    #[test]
+    fn root_fallback_arrays_normalize_without_adding_package_file_access() {
+        for targets in [
+            "[]",
+            r#"["./first.js","./second.js"]"#,
+            r#"[{"import":["./first.js",null]},"./fallback.js"]"#,
+        ] {
+            let shorthand: PackageJson =
+                serde_json::from_str(&format!(r#"{{"exports":{targets}}}"#)).unwrap();
+            let explicit: PackageJson =
+                serde_json::from_str(&format!(r#"{{"exports":{{".":{targets}}}}}"#)).unwrap();
+            assert_eq!(shorthand, explicit);
+            assert_eq!(shorthand.exports.as_ref().unwrap().len(), 1);
         }
     }
 }

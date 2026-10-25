@@ -6,6 +6,10 @@ declaration order; consumers must select the first active condition, including
 `default`, rather than prioritizing their own condition list.
 Nested condition objects preserve order at every level. Root conditional
 shorthand normalizes to an exact `"."` export, without adding wildcard access.
+Fallback arrays retain ordered recursive targets, including condition objects
+and nested arrays. Root array shorthand also exports only `"."`. Invalid scalar
+array entries remain distinct from `null`, so resolution can skip invalid targets
+without losing private/fallback semantics.
 Bare-string `exports` normalizes to a `"."` entry plus `"./*": "./*"`, exposing
 arbitrary files within that package. This is an intentional bundler extension
 to Node's root-only shorthand. Explicit export maps remain encapsulated;

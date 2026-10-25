@@ -399,6 +399,63 @@ mod tests {
     }
 
     #[test]
+    fn exports_arrays_resolve_modes_patterns_and_null_fallbacks_with_checked_cache_hits() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "entry.mjs" => "",
+            "node_modules/pkg/package.json" => r#"{"exports":{".":[{"browser":"./browser.mjs","import":"./import.mjs","require":"./require.cjs"},"./fallback.mjs"],"./helpers/*":[{"browser":"./browser/*.mjs"},false,"./helpers/*.mjs"],"./nullable":[null,"./fallback.mjs"],"./empty":[],"./missing":["./absent.mjs","./fallback.mjs"]}}"#,
+            "node_modules/pkg/browser.mjs" => "",
+            "node_modules/pkg/import.mjs" => "",
+            "node_modules/pkg/require.cjs" => "",
+            "node_modules/pkg/fallback.mjs" => "",
+            "node_modules/pkg/helpers/item.mjs" => "",
+            "node_modules/pkg/browser/item.mjs" => "",
+            "node_modules/pkg/empty.js" => ""
+        };
+        let base = dir.root().join("entry.mjs");
+        for environment in [TargetEnv::Node, TargetEnv::Browser] {
+            let resolver = StructuralResolver::new(
+                dir.root().into(),
+                NodeModulesResolverOptions::default_for_env(environment),
+                BTreeSet::new(),
+            );
+            for _ in 0..2 {
+                for (request, mode, expected) in [
+                    ("pkg", ResolutionMode::Import, "import.mjs"),
+                    ("pkg", ResolutionMode::Require, "require.cjs"),
+                    (
+                        "pkg/helpers/item",
+                        ResolutionMode::Import,
+                        "helpers/item.mjs",
+                    ),
+                    ("pkg/nullable", ResolutionMode::Import, "fallback.mjs"),
+                ] {
+                    let expected = if environment == TargetEnv::Browser {
+                        match expected {
+                            "import.mjs" | "require.cjs" => "browser.mjs",
+                            "helpers/item.mjs" => "browser/item.mjs",
+                            _ => expected,
+                        }
+                    } else {
+                        expected
+                    };
+                    assert_eq!(
+                        tracked(&resolver, &base, request, mode).dependency,
+                        ResolvedDependency::File(
+                            dir.root().join("node_modules/pkg").join(expected)
+                        )
+                    );
+                }
+                for request in ["pkg/empty", "pkg/missing", "pkg/private"] {
+                    let error = resolver
+                        .resolve_dependency(&base, request, ResolutionMode::Import)
+                        .unwrap_err();
+                    assert!(format!("{error:#}").contains(request), "{error:#}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn nested_export_conditions_resolve_and_cache_import_require_and_custom_modes() {
         let dir = test_tmpdir::test_tmpdir! {
             "entry.mjs" => "",

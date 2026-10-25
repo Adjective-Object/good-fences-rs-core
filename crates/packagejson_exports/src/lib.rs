@@ -26,6 +26,56 @@ fn clean_path(p: &str) -> String {
     String::from(clean_path_avoid_alloc(p, &mut store_str))
 }
 
+fn valid_target(target: &str) -> bool {
+    let Some(relative) = target.strip_prefix("./") else {
+        return false;
+    };
+    relative.split(['/', '\\']).all(|segment| {
+        let mut decoded = Vec::new();
+        let bytes = if segment.contains('%') {
+            let mut input = segment.bytes();
+            while let Some(byte) = input.next() {
+                if byte == b'%' {
+                    let high = input.next().and_then(|byte| (byte as char).to_digit(16));
+                    let low = input.next().and_then(|byte| (byte as char).to_digit(16));
+                    let (Some(high), Some(low)) = (high, low) else {
+                        // Malformed escapes fail after selection, not as skippable targets.
+                        return true;
+                    };
+                    decoded.push((high * 16 + low) as u8);
+                } else {
+                    decoded.push(byte);
+                }
+            }
+            decoded.as_slice()
+        } else {
+            segment.as_bytes()
+        };
+        bytes != b"." && bytes != b".." && !bytes.eq_ignore_ascii_case(b"node_modules")
+    })
+}
+
+fn valid_percent_encoding(target: &str) -> bool {
+    let mut bytes = target.bytes();
+    while let Some(byte) = bytes.next() {
+        if byte == b'%'
+            && !(bytes.next().is_some_and(|byte| byte.is_ascii_hexdigit())
+                && bytes.next().is_some_and(|byte| byte.is_ascii_hexdigit()))
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn clean_target(target: &str) -> String {
+    if valid_target(target) {
+        clean_path(target)
+    } else {
+        target.to_owned()
+    }
+}
+
 // Cleans a path, removing any unnecessary characters and normalizing it
 //
 // If the path is already clean, this will return the original path
@@ -186,6 +236,11 @@ fn reverse_match_star_pattern(star_pattern: &str, path: &str) -> bool {
 }
 
 fn matches_exported_path(pattern: &str, target: &ExportedPath, path: &str) -> bool {
+    if let ExportedPath::Fallback(targets) = target {
+        return targets
+            .iter()
+            .any(|target| matches_exported_path(pattern, target, path));
+    }
     if let ExportedPath::Conditional(conditions) = target {
         return conditions
             .iter()
@@ -194,6 +249,9 @@ fn matches_exported_path(pattern: &str, target: &ExportedPath, path: &str) -> bo
     let ExportedPath::Exported(target) = target else {
         return false;
     };
+    if !valid_target(target) {
+        return false;
+    }
     if pattern.contains('*') {
         reverse_match_star_pattern(target, path)
     } else if pattern.ends_with('/') {
@@ -206,7 +264,19 @@ fn matches_exported_path(pattern: &str, target: &ExportedPath, path: &str) -> bo
 fn select_condition<'a, TStr: Into<&'a str>>(
     conditions: &'a [(String, ExportedPath)],
     active: impl Clone + IntoIterator<Item = TStr>,
-) -> Option<(&'a str, &'a ExportedPath)> {
+) -> Result<Option<(&'a str, ExportedPathRef<'a>)>> {
+    if conditions.iter().any(|(condition, _)| {
+        condition
+            .parse::<u32>()
+            .is_ok_and(|value| value < u32::MAX && value.to_string() == *condition)
+    }) {
+        return Err(anyhow::Error::from_boxed(
+            eyre::eyre!(
+                "ERR_INVALID_PACKAGE_CONFIG: exports cannot contain numeric condition keys"
+            )
+            .into(),
+        ));
+    }
     for (condition, target) in conditions {
         if condition != "default"
             && !active
@@ -216,15 +286,49 @@ fn select_condition<'a, TStr: Into<&'a str>>(
         {
             continue;
         }
-        if let ExportedPath::Conditional(nested) = target {
-            if let Some((_, target)) = select_condition(nested, active.clone()) {
-                return Some((condition, target));
-            }
-        } else {
-            return Some((condition, target));
+        if let Some(target) = select_target(target, active.clone())? {
+            return Ok(Some((condition, target)));
         }
     }
-    None
+    Ok(None)
+}
+
+fn select_target<'a, TStr: Into<&'a str>>(
+    target: &'a ExportedPath,
+    active: impl Clone + IntoIterator<Item = TStr>,
+) -> Result<Option<ExportedPathRef<'a>>> {
+    Ok(match target {
+        ExportedPath::Exported(path) => Some(if valid_target(path) {
+            if !valid_percent_encoding(path) {
+                return Err(anyhow::Error::from_boxed(
+                    eyre::eyre!("URIError: invalid percent encoding in export target {path:?}")
+                        .into(),
+                ));
+            }
+            ExportedPathRef::Exported(path)
+        } else {
+            ExportedPathRef::Unrecognized
+        }),
+        ExportedPath::Private => Some(ExportedPathRef::Private),
+        ExportedPath::Unrecognized => Some(ExportedPathRef::Unrecognized),
+        ExportedPath::Conditional(conditions) => {
+            select_condition(conditions, active)?.map(|(_, target)| target)
+        }
+        ExportedPath::Fallback(targets) => {
+            let mut fallback = targets.is_empty().then_some(ExportedPathRef::Private);
+            for target in targets {
+                match select_target(target, active.clone())? {
+                    Some(ExportedPathRef::Exported(path)) => {
+                        return Ok(Some(ExportedPathRef::Exported(path)));
+                    }
+                    // Null and invalid targets are fallbacks, unlike selected paths.
+                    Some(target) => fallback = Some(target),
+                    None => {}
+                }
+            }
+            fallback
+        }
+    })
 }
 
 impl PackageExportRewriteData {
@@ -281,11 +385,17 @@ impl PackageExportRewriteData {
         let Some((pattern, conditions)) = selected else {
             return Ok(None);
         };
-        let Some((condition, target)) = select_condition(conditions, requested_export_conditions)
+        let Some((condition, target)) = select_condition(conditions, requested_export_conditions)?
         else {
             return Ok(None);
         };
-        let rewritten = target.as_ref().map_export(|target| {
+        if matches!(target, ExportedPathRef::Unrecognized) {
+            return Err(anyhow::Error::from_boxed(
+                eyre::eyre!("ERR_INVALID_PACKAGE_TARGET: invalid target for export {pattern:?}")
+                    .into(),
+            ));
+        }
+        let rewritten = target.map_export(|target| {
             if let Some(matched) = match_star_pattern(pattern, clean_relative_import) {
                 rewrite_star_export(matched, target, out);
                 out as &str
@@ -357,11 +467,15 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
             let conditions = match exported {
                 PackageJsonExport::Single(target) => vec![(
                     "default".to_owned(),
-                    ExportedPath::from(target.clone()).map_export(clean_path),
+                    ExportedPath::from(target.clone()).map_export(clean_target),
+                )],
+                PackageJsonExport::Fallback(targets) => vec![(
+                    "default".to_owned(),
+                    ExportedPath::Fallback(targets.clone()).map_export(clean_target),
                 )],
                 PackageJsonExport::Conditional(conditions) => conditions
                     .iter()
-                    .map(|(condition, target)| (condition.clone(), target.map_export(clean_path)))
+                    .map(|(condition, target)| (condition.clone(), target.map_export(clean_target)))
                     .collect(),
             };
             resolution_data
@@ -377,6 +491,113 @@ mod test {
     use super::*;
     use std::collections::{hash_map::HashMap, BTreeMap};
     use test_tmpdir::map2;
+
+    #[test]
+    fn fallback_arrays_distinguish_paths_private_targets_and_unmatched_conditions() {
+        for (target, expected) in [
+            (
+                r#"["./first.mjs","./second.mjs"]"#,
+                Ok(Some(ExportedPathRef::Exported("./first.mjs"))),
+            ),
+            (
+                r#"[{"node":"./node.mjs","import":"./import.mjs"},"./fallback.mjs"]"#,
+                Ok(Some(ExportedPathRef::Exported("./node.mjs"))),
+            ),
+            (
+                r#"[{"browser":"./browser.mjs"},[{"import":"./import.mjs"}],"./fallback.mjs"]"#,
+                Ok(Some(ExportedPathRef::Exported("./import.mjs"))),
+            ),
+            (
+                r#"[false,true,42,"../outside.mjs","./../outside.mjs","./node_modules/x.mjs","./%2e%2e/outside.mjs","./%6eode_modules/x.mjs","./fallback.mjs"]"#,
+                Ok(Some(ExportedPathRef::Exported("./fallback.mjs"))),
+            ),
+            (
+                r#"[null,[],"./fallback.mjs"]"#,
+                Ok(Some(ExportedPathRef::Exported("./fallback.mjs"))),
+            ),
+            ("[]", Ok(Some(ExportedPathRef::Private))),
+            ("[false,null]", Ok(Some(ExportedPathRef::Private))),
+            (r#"[{"browser":"./browser.mjs"}]"#, Ok(None)),
+            ("[null,false]", Err("ERR_INVALID_PACKAGE_TARGET")),
+            ("[false]", Err("ERR_INVALID_PACKAGE_TARGET")),
+            (r#"["./%ZZ.mjs","./fallback.mjs"]"#, Err("URIError")),
+            (
+                r#"{"node":[{"browser":"./browser.mjs"}],"default":"./fallback.mjs"}"#,
+                Ok(Some(ExportedPathRef::Exported("./fallback.mjs"))),
+            ),
+            (
+                r#"{"node":[],"default":"./fallback.mjs"}"#,
+                Ok(Some(ExportedPathRef::Private)),
+            ),
+            (
+                r#"{"node":[false],"default":"./fallback.mjs"}"#,
+                Err("ERR_INVALID_PACKAGE_TARGET"),
+            ),
+            (
+                r#"[{"node":null,"default":"./blocked.mjs"},"./fallback.mjs"]"#,
+                Ok(Some(ExportedPathRef::Exported("./fallback.mjs"))),
+            ),
+            (
+                r#"[{"0":"./numeric.mjs"},"./fallback.mjs"]"#,
+                Err("ERR_INVALID_PACKAGE_CONFIG"),
+            ),
+        ] {
+            let package: packagejson::PackageJson =
+                serde_json::from_str(&format!(r#"{{"exports":{target}}}"#)).unwrap();
+            let rewrites =
+                PackageExportRewriteData::try_from(package.exports.as_ref().unwrap()).unwrap();
+            let mut out = String::new();
+            let actual = rewrites.rewrite_relative_export(".", ["node", "import"], &mut out);
+            match expected {
+                Ok(expected) => assert_eq!(
+                    actual.unwrap().map(|matched| matched.rewritten_export),
+                    expected,
+                    "{target}"
+                ),
+                Err(code) => {
+                    let error = actual.err().expect("invalid target must fail");
+                    assert!(format!("{error:#}").contains(code), "{target}: {error:#}");
+                }
+            }
+            assert!(rewrites
+                .rewrite_relative_export("./unlisted", ["node", "import"], &mut String::new())
+                .unwrap()
+                .is_none());
+        }
+    }
+
+    #[test]
+    fn fallback_patterns_rewrite_selected_leaves_and_preserve_reverse_visibility() {
+        let package: packagejson::PackageJson = serde_json::from_str(
+            r#"{"exports":{"./feature/*":[{"browser":"./browser/*.mjs"},{"import":["../invalid","./esm/*.mjs"]},"./fallback/*.mjs"]}}"#,
+        )
+        .unwrap();
+        let rewrites =
+            PackageExportRewriteData::try_from(package.exports.as_ref().unwrap()).unwrap();
+        for (conditions, expected) in [
+            (vec!["browser", "import"], "./browser/item.mjs"),
+            (vec!["import"], "./esm/item.mjs"),
+            (vec!["node"], "./fallback/item.mjs"),
+        ] {
+            let mut out = String::new();
+            assert_eq!(
+                rewrites
+                    .rewrite_relative_export("./feature/item", conditions, &mut out)
+                    .unwrap()
+                    .unwrap()
+                    .rewritten_export,
+                ExportedPathRef::Exported(expected)
+            );
+        }
+        for target in [
+            "./browser/item.mjs",
+            "./esm/item.mjs",
+            "./fallback/item.mjs",
+        ] {
+            assert!(rewrites.is_exported(target), "{target}");
+            assert_eq!(rewrites.get_exported_conditions(target), vec!["default"]);
+        }
+    }
 
     #[test]
     fn nested_conditions_select_runtime_leaves_before_applying_patterns() {

@@ -6,6 +6,7 @@ pub enum ExportedPath {
     Exported(String),
     Private,
     Conditional(Vec<(String, ExportedPath)>),
+    Fallback(Vec<ExportedPath>),
     // fallback option, see https://github.com/serde-rs/serde/issues/2057#issuecomment-879440712
     //
     // Some packages use non-standard extensions to the "exports" field
@@ -22,6 +23,7 @@ impl ExportedPath {
             ExportedPath::Exported(s) => ExportedPathRef::Exported(s),
             ExportedPath::Private => ExportedPathRef::Private,
             ExportedPath::Conditional(conditions) => ExportedPathRef::Conditional(conditions),
+            ExportedPath::Fallback(targets) => ExportedPathRef::Fallback(targets),
             ExportedPath::Unrecognized => ExportedPathRef::Unrecognized,
         }
     }
@@ -38,6 +40,12 @@ impl ExportedPath {
                 conditions
                     .iter()
                     .map(|(key, target)| (key.clone(), target.map_export_with(f)))
+                    .collect(),
+            ),
+            ExportedPath::Fallback(targets) => ExportedPath::Fallback(
+                targets
+                    .iter()
+                    .map(|target| target.map_export_with(f))
                     .collect(),
             ),
             ExportedPath::Unrecognized => ExportedPath::Unrecognized,
@@ -66,6 +74,7 @@ impl PartialEq for ExportedPath {
             (ExportedPath::Exported(a), ExportedPath::Exported(b)) => a == b,
             (ExportedPath::Private, ExportedPath::Private) => true,
             (ExportedPath::Conditional(a), ExportedPath::Conditional(b)) => a == b,
+            (ExportedPath::Fallback(a), ExportedPath::Fallback(b)) => a == b,
             (ExportedPath::Unrecognized, ExportedPath::Unrecognized) => true,
             _ => false,
         }
@@ -78,6 +87,7 @@ pub enum ExportedPathRef<'a> {
     Exported(&'a str),
     Private,
     Conditional(&'a [(String, ExportedPath)]),
+    Fallback(&'a [ExportedPath]),
     // fallback option, see https://github.com/serde-rs/serde/issues/2057#issuecomment-879440712
     //
     // Some packages use non-standard extensions to the "exports" field
@@ -97,6 +107,7 @@ impl<'a> ExportedPathRef<'a> {
             ExportedPathRef::Exported(s) => ExportedPathRef::Exported(f(s)),
             ExportedPathRef::Private => ExportedPathRef::Private,
             ExportedPathRef::Conditional(conditions) => ExportedPathRef::Conditional(conditions),
+            ExportedPathRef::Fallback(targets) => ExportedPathRef::Fallback(targets),
             ExportedPathRef::Unrecognized => ExportedPathRef::Unrecognized,
         }
     }
@@ -123,6 +134,7 @@ impl PartialEq for ExportedPathRef<'_> {
             (ExportedPathRef::Exported(a), ExportedPathRef::Exported(b)) => a == b,
             (ExportedPathRef::Private, ExportedPathRef::Private) => true,
             (ExportedPathRef::Conditional(a), ExportedPathRef::Conditional(b)) => a == b,
+            (ExportedPathRef::Fallback(a), ExportedPathRef::Fallback(b)) => a == b,
             _ => false,
         }
     }
@@ -134,7 +146,7 @@ impl<'de> serde::de::Visitor<'de> for ExportedPathVisitor {
     type Value = ExportedPath;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        formatter.write_str("a string or null")
+        formatter.write_str("a string, null, ordered condition object or fallback array")
     }
 
     fn visit_none<E>(self) -> Result<Self::Value, E>
@@ -172,15 +184,11 @@ impl<'de> serde::de::Visitor<'de> for ExportedPathVisitor {
         Ok(ExportedPath::Exported(String::from(s)))
     }
 
-    fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
+    fn visit_bool<E>(self, _: bool) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        if !v {
-            Ok(ExportedPath::Private)
-        } else {
-            Ok(ExportedPath::Unrecognized)
-        }
+        Ok(ExportedPath::Unrecognized)
     }
 
     fn visit_i8<E>(self, _: i8) -> Result<Self::Value, E>
@@ -306,8 +314,11 @@ impl<'de> serde::de::Visitor<'de> for ExportedPathVisitor {
     where
         A: serde::de::SeqAccess<'de>,
     {
-        while seq.next_element::<serde::de::IgnoredAny>()?.is_some() {}
-        Ok(ExportedPath::Unrecognized)
+        let mut targets = Vec::new();
+        while let Some(target) = seq.next_element::<ExportedPath>()? {
+            targets.push(target);
+        }
+        Ok(ExportedPath::Fallback(targets))
     }
 
     fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
@@ -356,7 +367,36 @@ mod test {
 
     #[test]
     fn test_deserialize_unrecognized() {
-        let p: ExportedPath = serde_json::from_str(r#"[{"unsupported":"./target.js"}]"#).unwrap();
-        assert_eq!(p, ExportedPath::Unrecognized);
+        for value in ["true", "false", "42"] {
+            let p: ExportedPath = serde_json::from_str(value).unwrap();
+            assert_eq!(p, ExportedPath::Unrecognized);
+        }
+    }
+
+    #[test]
+    fn fallback_arrays_preserve_nested_targets_and_condition_order() {
+        let p: ExportedPath = serde_json::from_str(
+            r#"[{"import":["./first.js",null],"default":"./second.js"},false]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            p,
+            ExportedPath::Fallback(vec![
+                ExportedPath::Conditional(vec![
+                    (
+                        "import".into(),
+                        ExportedPath::Fallback(vec![
+                            ExportedPath::Exported("./first.js".into()),
+                            ExportedPath::Private,
+                        ]),
+                    ),
+                    (
+                        "default".into(),
+                        ExportedPath::Exported("./second.js".into())
+                    ),
+                ]),
+                ExportedPath::Unrecognized,
+            ])
+        );
     }
 }

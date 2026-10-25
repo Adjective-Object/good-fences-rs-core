@@ -13,6 +13,7 @@ path-clean = { workspace = true }
 path-slash = { workspace = true }
 packagejson = { path = "../packagejson" }
 anyhow.workspace = true
+eyre.workspace = true
 
 [dev-dependencies]
 pretty_assertions.workspace = true

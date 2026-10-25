@@ -366,7 +366,9 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                             pkg_path.display(),
                         ));
                     }
-                    ExportedPathRef::Unrecognized | ExportedPathRef::Conditional(_) => {
+                    ExportedPathRef::Unrecognized
+                    | ExportedPathRef::Conditional(_)
+                    | ExportedPathRef::Fallback(_) => {
                         return Err(anyhow::anyhow!(
                             "Index export had an unrecognized format and will be treated as private during resolution",
                         ));
@@ -563,7 +565,8 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                                             ));
                                     }
                                     ExportedPathRef::Unrecognized
-                                    | ExportedPathRef::Conditional(_) => {
+                                    | ExportedPathRef::Conditional(_)
+                                    | ExportedPathRef::Fallback(_) => {
                                         return Err(anyhow::anyhow!(
                                                 "Import '{target}' matched export '{}' in {}, which has an unrecognized export format. It will be treated as private",
                                                 rewritten_to.export_kind,

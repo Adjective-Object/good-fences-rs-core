@@ -2777,6 +2777,7 @@ name = "packagejson_exports"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "eyre",
  "hashbrown 0.14.5",
  "packagejson",
  "path-clean",

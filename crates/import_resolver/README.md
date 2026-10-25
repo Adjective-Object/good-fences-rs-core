@@ -40,6 +40,11 @@ Nested export conditions are evaluated in declaration order at each level,
 including `import`/`require` branches containing `types` and runtime `default`
 targets. Inactive nested branches may fall through to later parent conditions;
 private targets do not.
+Exports fallback arrays support nested arrays and conditional objects, including
+root array shorthand. Invalid targets and inactive branches can fall through;
+Node 22 null-array fallback semantics are retained. Resolve the selected target
+once: missing files never cause retries of later export entries. Checked cache
+proofs retain the complete manifest bytes and only the actual selected probes.
 An exports map is authoritative: unmatched subpaths or inactive conditions fail
 resolution, even when a matching physical file exists. Packages without exports
 retain legacy filesystem resolution. Browser resolution applies a dependency's

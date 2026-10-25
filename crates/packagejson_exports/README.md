@@ -11,6 +11,13 @@ matching descendant resumes its parent's remaining conditions; an explicit
 private leaf still blocks fallback. Wildcard substitution applies only after
 selecting the final leaf. Reverse visibility includes nested target paths and
 reports their outer condition names.
+Fallback arrays recursively try targets in declaration order. Skip inactive
+condition branches and invalid package targets; retain the last null/invalid
+result if no path is selected. Empty arrays are private. Null blocks later
+conditions, but inside arrays it allows later candidates, matching Node 22.
+Invalid condition-object configurations are errors, not skippable targets.
+Selection precedes filesystem probing: a selected missing file never retries
+later array entries. Nested arrays also participate in reverse visibility.
 The package reader normalizes bare-string exports to `"."` plus `"./*": "./*"`,
 intentionally exposing arbitrary package files rather than Node's root-only
 shorthand. Explicit maps retain their declared visibility; more-specific private
