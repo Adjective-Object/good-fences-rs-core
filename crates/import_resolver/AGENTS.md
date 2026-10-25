@@ -78,3 +78,13 @@ manifest bytes across request modes, but keep target/condition/policy results
 distinct. Initialize context and target cells outside DashMap locks; wrap cached
 paths using their original canonical observations. Invalidation replaces the
 snapshot and cache trees together, including relative-file misses.
+
+Resolve effective # requests before cwd/package probes. Nearest observed manifest
+owns imports even when empty; stop scope search at node_modules/root. Share the
+ordered exports target evaluator without its legacy string/directory extensions.
+Local targets bypass public exports; dependency redirects use owning-package
+checked resolution, never aliases again or external escape. Bound # recursion.
+Retain scope misses/manifest bytes and selected target/dependency proofs; no
+separate imports cache or reconstructed provenance.
+Apply the shared browser path rewrite in the imports owner's scope after target
+resolution, retaining redirected dependencies' legacy-entry browser mapping.

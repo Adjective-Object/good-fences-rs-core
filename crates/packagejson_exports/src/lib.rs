@@ -265,6 +265,14 @@ fn select_condition<'a, TStr: Into<&'a str>>(
     conditions: &'a [(String, ExportedPath)],
     active: impl Clone + IntoIterator<Item = TStr>,
 ) -> Result<Option<(&'a str, ExportedPathRef<'a>)>> {
+    select_condition_with(conditions, active, &valid_target)
+}
+
+fn select_condition_with<'a, TStr: Into<&'a str>>(
+    conditions: &'a [(String, ExportedPath)],
+    active: impl Clone + IntoIterator<Item = TStr>,
+    valid: &impl Fn(&str) -> bool,
+) -> Result<Option<(&'a str, ExportedPathRef<'a>)>> {
     if conditions.iter().any(|(condition, _)| {
         condition
             .parse::<u32>()
@@ -286,19 +294,20 @@ fn select_condition<'a, TStr: Into<&'a str>>(
         {
             continue;
         }
-        if let Some(target) = select_target(target, active.clone())? {
+        if let Some(target) = select_target_with(target, active.clone(), valid)? {
             return Ok(Some((condition, target)));
         }
     }
     Ok(None)
 }
 
-fn select_target<'a, TStr: Into<&'a str>>(
+fn select_target_with<'a, TStr: Into<&'a str>>(
     target: &'a ExportedPath,
     active: impl Clone + IntoIterator<Item = TStr>,
+    valid: &impl Fn(&str) -> bool,
 ) -> Result<Option<ExportedPathRef<'a>>> {
     Ok(match target {
-        ExportedPath::Exported(path) => Some(if valid_target(path) {
+        ExportedPath::Exported(path) => Some(if valid(path) {
             if !valid_percent_encoding(path) {
                 return Err(anyhow::Error::from_boxed(
                     eyre::eyre!("URIError: invalid percent encoding in export target {path:?}")
@@ -312,12 +321,12 @@ fn select_target<'a, TStr: Into<&'a str>>(
         ExportedPath::Private => Some(ExportedPathRef::Private),
         ExportedPath::Unrecognized => Some(ExportedPathRef::Unrecognized),
         ExportedPath::Conditional(conditions) => {
-            select_condition(conditions, active)?.map(|(_, target)| target)
+            select_condition_with(conditions, active, valid)?.map(|(_, target)| target)
         }
         ExportedPath::Fallback(targets) => {
             let mut fallback = targets.is_empty().then_some(ExportedPathRef::Private);
             for target in targets {
-                match select_target(target, active.clone())? {
+                match select_target_with(target, active.clone(), valid)? {
                     Some(ExportedPathRef::Exported(path)) => {
                         return Ok(Some(ExportedPathRef::Exported(path)));
                     }
@@ -329,6 +338,104 @@ fn select_target<'a, TStr: Into<&'a str>>(
             fallback
         }
     })
+}
+
+/// Select a package import without exports' legacy directory/string extensions.
+pub fn rewrite_package_import<'a>(
+    imports: &'a packagejson::PackageJsonImports,
+    request: &str,
+    active: impl Clone + IntoIterator<Item = &'a str>,
+) -> Result<String> {
+    if !valid_import_request(request) {
+        return Err(anyhow::Error::from_boxed(
+            eyre::eyre!("ERR_INVALID_MODULE_SPECIFIER: invalid package import {request:?}").into(),
+        ));
+    }
+    if imports.keys().any(|key| !valid_import_request(key)) {
+        return Err(anyhow::Error::from_boxed(
+            eyre::eyre!("ERR_INVALID_PACKAGE_CONFIG: invalid imports key").into(),
+        ));
+    }
+    let selected = imports
+        .get_key_value(request)
+        .filter(|(key, _)| !key.contains('*'))
+        .or_else(|| {
+            imports
+                .iter()
+                .filter(|(key, _)| {
+                    key.matches('*').count() == 1 && match_star_pattern(key, request).is_some()
+                })
+                .max_by_key(|(key, _)| (key.find('*').unwrap(), key.len()))
+        });
+    if let Some((key, target)) = selected {
+        let substitute = |target: &str| match match_star_pattern(key, request) {
+            Some(capture) => target.replace('*', capture),
+            None => target.to_owned(),
+        };
+        match select_target_with(target, active, &|target| {
+            valid_import_target(&substitute(target))
+        })? {
+            Some(ExportedPathRef::Exported(target)) => return Ok(substitute(target)),
+            Some(ExportedPathRef::Unrecognized) => {
+                return Err(anyhow::Error::from_boxed(
+                    eyre::eyre!(
+                        "ERR_INVALID_PACKAGE_TARGET: invalid target for import {request:?}"
+                    )
+                    .into(),
+                ));
+            }
+            _ => {}
+        }
+        return Err(anyhow::Error::from_boxed(
+            eyre::eyre!(
+                "ERR_PACKAGE_IMPORT_NOT_DEFINED: blocked or inactive target for {request:?}"
+            )
+            .into(),
+        ));
+    }
+    Err(anyhow::Error::from_boxed(
+        eyre::eyre!("ERR_PACKAGE_IMPORT_NOT_DEFINED: {request:?}").into(),
+    ))
+}
+
+fn valid_import_request(request: &str) -> bool {
+    request.starts_with('#') && request.len() > 1 && !request.starts_with("#/")
+}
+
+fn valid_import_target(target: &str) -> bool {
+    if target.is_empty() || target.contains('\\') || !valid_percent_encoding(target) {
+        return false;
+    }
+    let relative = target.strip_prefix("./");
+    if relative.is_none()
+        && (target.starts_with(['.', '/'])
+            || (target.contains(':') && !target.starts_with("node:"))
+            || (target.starts_with('#') && !valid_import_request(target)))
+    {
+        return false;
+    }
+    relative
+        .unwrap_or_else(|| target.strip_prefix("node:").unwrap_or(target))
+        .split('/')
+        .all(|segment| {
+            let mut decoded = Vec::new();
+            let mut bytes = segment.bytes();
+            while let Some(byte) = bytes.next() {
+                decoded.push(if byte == b'%' {
+                    let high = (bytes.next().unwrap() as char).to_digit(16).unwrap();
+                    let low = (bytes.next().unwrap() as char).to_digit(16).unwrap();
+                    (high * 16 + low) as u8
+                } else {
+                    byte
+                });
+            }
+            decoded != b"."
+                && decoded != b".."
+                && !decoded.eq_ignore_ascii_case(b"node_modules")
+                && !decoded
+                    .iter()
+                    .any(|byte| matches!(byte, b'/' | b'\\' | b':' | 0))
+        })
 }
 
 impl PackageExportRewriteData {

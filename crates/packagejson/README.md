@@ -15,6 +15,10 @@ arbitrary files within that package. This is an intentional bundler extension
 to Node's root-only shorthand. Explicit export maps remain encapsulated;
 unmatched or private subpaths do not gain a filesystem fallback.
 
+`imports` retains an explicit `#`-keyed map of the same recursive ordered target
+trees (conditions, arrays, strings and null). It never receives exports'
+bare-string wildcard extension; the resolver validates import keys and targets.
+
 Run `cargo test -p packagejson`.
 
 Filesystem reads parse raw buffered bytes with `serde_json::from_slice`, never

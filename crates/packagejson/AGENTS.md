@@ -8,3 +8,5 @@ Retain ordered recursive condition trees, including root conditional shorthand;
 do not flatten nested conditions or treat objects as unsupported leaf targets.
 Preserve recursive fallback arrays and distinguish invalid scalar targets from
 null. Root array shorthand exports only ".", unlike the bare-string extension.
+Keep imports as explicit maps of recursive ordered targets; never normalize
+imports using exports' bare-string wildcard extension.

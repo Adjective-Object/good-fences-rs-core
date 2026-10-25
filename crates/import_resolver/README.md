@@ -62,6 +62,23 @@ Bare-string exports intentionally expose
 the selected root plus arbitrary files within that package, equivalent to adding
 `"./*": "./*"`; unlike explicit maps, this shorthand is not Node-encapsulated.
 
+Effective `#` requests resolve package.json `imports` after the one-step alias,
+before cwd or node_modules probing. The nearest observed manifest defines the
+scope, even when it is `{}`; searching stops at node_modules and the resolver
+root. Undefined/private imports never fall back to packages or externals.
+Imports share ordered recursive conditions/arrays with exports, but allow only
+exact keys or single-star patterns (no directory-prefix/string extension).
+Relative targets resolve inside the owning package, bypassing public exports,
+with the existing suffix/symlink policy. Bare redirects resolve dependencies
+from that package through normal checked exports, without reapplying aliases.
+Resolved imports also use the owning package's browser path mappings; dependency
+redirects retain the dependency's legacy-entry mapping before the owner's mapping.
+Browser builtin, native-addon and external restrictions still apply. Recursive
+`#` redirects fail after 64 mappings rather than overflowing. Selected missing
+files never retry later array targets. Scope misses, exact manifest bytes,
+selected target probes and dependency redirects all retain scoped input proofs;
+new nearer manifests, manifest edits/removals and target changes invalidate reuse.
+
 Resolvers never discover, parse or validate `tsconfig.json`. Compiler
 `customConditions`/`customSourceConditions`, `extends`, `references`, `baseUrl`
 and `paths` have no effect on runtime resolution. Supply additional conditions

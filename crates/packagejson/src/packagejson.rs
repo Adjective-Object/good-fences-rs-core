@@ -34,9 +34,12 @@ pub struct PackageJson {
     pub browser: Option<Browser>,
     #[serde(default, deserialize_with = "deserialize_exports")]
     pub exports: Option<PackageJsonExports>,
+    #[serde(default)]
+    pub imports: Option<PackageJsonImports>,
 }
 
 pub type PackageJsonExports = AHashMap<String, PackageJsonExport>;
+pub type PackageJsonImports = AHashMap<String, crate::exported_path::ExportedPath>;
 
 fn deserialize_exports<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
@@ -190,6 +193,26 @@ impl ContextData for PackageJson {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn imports_retain_recursive_targets_without_exports_shorthand() {
+        let package: PackageJson = serde_json::from_str(
+            r##"{"imports":{"#value":{"node":[false,null,{"import":"node:path"}],"default":"./browser.js"}}}"##,
+        ).unwrap();
+        let imports = package.imports.unwrap();
+        assert_eq!(imports.len(), 1);
+        let crate::exported_path::ExportedPath::Conditional(conditions) = &imports["#value"] else {
+            panic!("expected ordered import conditions");
+        };
+        assert_eq!(conditions[0].0, "node");
+        assert_eq!(conditions[1].0, "default");
+        for invalid in [r#""./value.js""#, "[]", "false"] {
+            assert!(
+                serde_json::from_str::<PackageJson>(&format!(r#"{{"imports":{invalid}}}"#))
+                    .is_err()
+            );
+        }
+    }
 
     #[test]
     fn root_conditions_normalize_to_an_ordered_exact_root_export() {

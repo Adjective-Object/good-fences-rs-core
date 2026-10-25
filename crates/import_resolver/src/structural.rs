@@ -137,7 +137,11 @@ impl StructuralResolver {
             base.display()
         );
         // Browser bare builtins must prove a real package, never escape as externals.
-        if replacement.is_none() && self.externals.contains(specifier) && !(browser && builtin) {
+        if replacement.is_none()
+            && !target.starts_with('#')
+            && self.externals.contains(specifier)
+            && !(browser && builtin)
+        {
             return Ok(ResolvedDependency::External(specifier.to_owned()));
         }
 
@@ -225,6 +229,491 @@ mod tests {
             .unwrap();
         result.inputs.validate().unwrap();
         result
+    }
+
+    #[test]
+    fn package_imports_vfile_conditions_and_one_step_aliases() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "package.json" => r##"{"exports":{},"imports":{
+                "#minpath":{"node":"node:path","default":"./lib/minpath.browser.js"},
+                "#minproc":{"node":"node:process","default":"./lib/minproc.browser.js"},
+                "#minurl":{"node":"node:url","default":"./lib/minurl.browser.js"},
+                "#mode":{"custom":"./custom.js","import":"./import.js","require":"./require.js"},
+                "#early":{"default":"./default.js","browser":"./missing.js"},
+                "#nested":{"browser":{"inactive":"./missing.js"},"default":"./default.js"}
+            }}"##,
+            "entry.js" => "",
+            "lib/minpath.browser.js" => "",
+            "lib/minproc.browser.js" => "",
+            "lib/minurl.browser.js" => "",
+            "custom.js" => "",
+            "import.js" => "",
+            "require.js" => "",
+            "default.js" => ""
+        };
+        let base = dir.root_join("entry.js");
+        let caches = crate::node_resolver::combined_resolver::CombinedResolverCaches::new();
+        for environment in [TargetEnv::Node, TargetEnv::Browser] {
+            let resolver = caches.resolver(
+                dir.root(),
+                NodeModulesResolverOptions::default_for_env(environment),
+            );
+            for (request, builtin, file) in [
+                ("#minpath", "node:path", "lib/minpath.browser.js"),
+                ("#minproc", "node:process", "lib/minproc.browser.js"),
+                ("#minurl", "node:url", "lib/minurl.browser.js"),
+            ] {
+                use crate::resolve::PathResolver;
+                assert_eq!(
+                    resolver.resolve(&base, request).unwrap().path,
+                    if environment == TargetEnv::Node {
+                        PathBuf::from(builtin)
+                    } else {
+                        dir.root_join(file)
+                    }
+                );
+            }
+        }
+        for environment in [TargetEnv::Node, TargetEnv::Browser] {
+            let mut options = NodeModulesResolverOptions::default_for_env(environment);
+            options.alias.insert("aliased".into(), "#minpath".into());
+            options.alias.insert("#minpath".into(), "#minurl".into());
+            let mut resolver =
+                StructuralResolver::new(dir.root().into(), options.clone(), BTreeSet::new());
+            for name in ["minpath", "minproc", "minurl"] {
+                let request = format!("#{name}");
+                if environment == TargetEnv::Browser {
+                    let expected = if name == "minpath" { "minurl" } else { name };
+                    for mode in [ResolutionMode::Import, ResolutionMode::Require] {
+                        let cold = tracked(&resolver, &base, &request, mode);
+                        let warm = tracked(&resolver, &base, &request, mode);
+                        assert_eq!(cold.inputs, warm.inputs);
+                        assert_eq!(
+                            cold.dependency,
+                            ResolvedDependency::File(
+                                dir.root_join(&format!("lib/{expected}.browser.js"))
+                            )
+                        );
+                    }
+                } else {
+                    let error = resolver
+                        .resolve_dependency(&base, &request, ResolutionMode::Import)
+                        .unwrap_err();
+                    assert!(format!("{error:#}").contains(&request));
+                }
+            }
+            if environment == TargetEnv::Browser {
+                assert_eq!(
+                    tracked(&resolver, &base, "aliased", ResolutionMode::Import).dependency,
+                    ResolvedDependency::File(dir.root_join("lib/minpath.browser.js"))
+                );
+            }
+            for (mode, file) in [
+                (ResolutionMode::Import, "import.js"),
+                (ResolutionMode::Require, "require.js"),
+            ] {
+                assert_eq!(
+                    tracked(&resolver, &base, "#mode", mode).dependency,
+                    ResolvedDependency::File(dir.root_join(file))
+                );
+            }
+            for request in ["#early", "#nested"] {
+                assert_eq!(
+                    tracked(&resolver, &base, request, ResolutionMode::Import).dependency,
+                    ResolvedDependency::File(dir.root_join("default.js"))
+                );
+            }
+            options.export_conditions.push("custom".into());
+            resolver.set_policy(options, BTreeSet::new());
+            assert_eq!(
+                tracked(&resolver, &base, "#mode", ResolutionMode::Require).dependency,
+                ResolvedDependency::File(dir.root_join("custom.js"))
+            );
+        }
+    }
+
+    #[test]
+    fn package_imports_patterns_fallbacks_and_errors() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "package.json" => r##"{"imports":{
+                "#ok":"./ok.js",
+                "#array":[false,42,"../outside.js","./%2e%2e/out.js",{"inactive":"./missing.js"},["./ok.js"]],
+                "#nullarray":[null,"./ok.js"],
+                "#null":{"import":null,"default":"./ok.js"},
+                "#missing":["./missing.js","./ok.js"],
+                "#inactive":{"inactive":"./ok.js"},
+                "#empty":[],
+                "#pattern/*":"./general/*.js",
+                "#pattern/specific*":"./specific/*.js",
+                "#pattern/*.js":"./suffix/*.js",
+                "#pattern/exact":"./ok.js",
+                "#repeat/*":"./*/*.js",
+                "#prefix/":"./general/",
+                "#escape/*":"./general/*",
+                "#bad":"./node_modules/x.js",
+                "#encoded":"./%6eode_modules/x.js",
+                "#slash":"./x%2fy.js",
+                "#backslash":"./x%5cy.js",
+                "#absolute":"/outside.js",
+                "#url":"https://example.org/file.js",
+                "#malformed":"./%zz.js",
+                "#numeric":{"0":"./ok.js","default":"./ok.js"},
+                "#chain":"#ok",
+                "#cycle":"#cycle2",
+                "#cycle2":"#cycle"
+            }}"##,
+            "entry.js" => "",
+            "ok.js" => "",
+            "general/value.js" => "",
+            "specific/value.js" => "",
+            "suffix/value.js" => "",
+            "value/value.js" => ""
+        };
+        let resolver = StructuralResolver::new(
+            dir.root().into(),
+            NodeModulesResolverOptions::default_for_env(TargetEnv::Browser),
+            ["#undefined".to_owned()].into_iter().collect(),
+        );
+        let base = dir.root_join("entry.js");
+        for (request, expected) in [
+            ("#ok", "ok.js"),
+            ("#array", "ok.js"),
+            ("#nullarray", "ok.js"),
+            ("#chain", "ok.js"),
+            ("#pattern/exact", "ok.js"),
+            ("#pattern/value", "general/value.js"),
+            ("#pattern/specificvalue", "specific/value.js"),
+            ("#pattern/value.js", "suffix/value.js"),
+            ("#repeat/value", "value/value.js"),
+        ] {
+            assert_eq!(
+                tracked(&resolver, &base, request, ResolutionMode::Import).dependency,
+                ResolvedDependency::File(dir.root_join(expected))
+            );
+        }
+        for request in [
+            "#",
+            "#/",
+            "#undefined",
+            "#null",
+            "#missing",
+            "#inactive",
+            "#empty",
+            "#prefix/value",
+            "#escape/../../ok.js",
+            "#escape/%2e%2e/ok.js",
+            "#bad",
+            "#encoded",
+            "#slash",
+            "#backslash",
+            "#absolute",
+            "#url",
+            "#malformed",
+            "#numeric",
+            "#cycle",
+        ] {
+            let error = resolver
+                .resolve_dependency_with_inputs(&base, request, ResolutionMode::Import)
+                .unwrap_err();
+            let chain = format!("{error:#}");
+            assert!(chain.contains(request), "{chain}");
+            if request == "#cycle" {
+                assert!(chain.contains("CYCLE"), "{chain}");
+            }
+        }
+    }
+
+    #[test]
+    fn package_imports_scope_proofs_and_invalidation() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "package.json" => r##"{"imports":{"#value":"./old.js"}}"##,
+            "old.js" => "",
+            "new.js" => "",
+            "nested/entry.js" => "",
+            "nested/local.js" => "",
+            "empty/package.json" => "{}",
+            "empty/entry.js" => "",
+            "node_modules/unscoped/entry.js" => "",
+            "node_modules/@scope/unscoped/entry.js" => ""
+        };
+        let mut resolver = StructuralResolver::new(
+            dir.root().into(),
+            NodeModulesResolverOptions::default_for_env(TargetEnv::Browser),
+            BTreeSet::new(),
+        );
+        let base = dir.root_join("nested/entry.js");
+        let cold = tracked(&resolver, &base, "#value", ResolutionMode::Import);
+        assert_eq!(
+            cold.inputs,
+            tracked(&resolver, &base, "#value", ResolutionMode::Import).inputs
+        );
+        for entry in [
+            "empty/entry.js",
+            "node_modules/unscoped/entry.js",
+            "node_modules/@scope/unscoped/entry.js",
+        ] {
+            assert!(resolver
+                .resolve_dependency_with_inputs(
+                    &dir.root_join(entry),
+                    "#value",
+                    ResolutionMode::Import
+                )
+                .is_err());
+        }
+        std::fs::write(
+            dir.root_join("package.json"),
+            r##"{"imports":{"#value":"./new.js"}}"##,
+        )
+        .unwrap();
+        let stale = resolver
+            .resolve_dependency_with_inputs(&base, "#value", ResolutionMode::Import)
+            .unwrap();
+        assert_eq!(cold.inputs, stale.inputs);
+        assert!(stale.inputs.validate().is_err());
+        resolver.invalidate();
+        let edited = tracked(&resolver, &base, "#value", ResolutionMode::Import);
+        assert_eq!(
+            edited.dependency,
+            ResolvedDependency::File(dir.root_join("new.js"))
+        );
+        std::fs::write(
+            dir.root_join("nested/package.json"),
+            r##"{"imports":{"#value":"./local.js"}}"##,
+        )
+        .unwrap();
+        assert!(edited.inputs.validate().is_err());
+        resolver.invalidate();
+        let nearer = tracked(&resolver, &base, "#value", ResolutionMode::Import);
+        assert_eq!(
+            nearer.dependency,
+            ResolvedDependency::File(dir.root_join("nested/local.js"))
+        );
+        std::fs::remove_file(dir.root_join("nested/package.json")).unwrap();
+        assert!(nearer.inputs.validate().is_err());
+        resolver.invalidate();
+        let restored = tracked(&resolver, &base, "#value", ResolutionMode::Import);
+        std::fs::remove_file(dir.root_join("new.js")).unwrap();
+        assert!(restored.inputs.validate().is_err());
+        resolver.invalidate();
+        assert!(resolver
+            .resolve_dependency_with_inputs(&base, "#value", ResolutionMode::Import)
+            .is_err());
+    }
+
+    #[test]
+    fn package_imports_apply_owning_browser_path_mapping() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "package.json" => r##"{"imports":{"#impl":"./server.js","#alias":"#impl","#disabled":"./disabled.js"},"browser":{"./server.js":"./browser.js","./disabled.js":false}}"##,
+            "nested/entry.js" => "",
+            "server.js" => "",
+            "browser.js" => "",
+            "disabled.js" => ""
+        };
+        for target in [TargetEnv::Browser, TargetEnv::Node] {
+            let mut resolver = StructuralResolver::new(
+                dir.root().into(),
+                NodeModulesResolverOptions::default_for_env(target),
+                BTreeSet::new(),
+            );
+            let base = dir.root_join("nested/entry.js");
+            for mode in [ResolutionMode::Import, ResolutionMode::Require] {
+                let direct = tracked(&resolver, &base, "../server.js", mode);
+                for request in ["#impl", "#alias"] {
+                    let first = tracked(&resolver, &base, request, mode);
+                    assert_eq!(first.dependency, direct.dependency);
+                    assert_eq!(
+                        first.dependency,
+                        ResolvedDependency::File(dir.root_join(if target == TargetEnv::Browser {
+                            "browser.js"
+                        } else {
+                            "server.js"
+                        }))
+                    );
+                    assert_eq!(
+                        first.inputs,
+                        tracked(&resolver, &base, request, mode).inputs
+                    );
+                }
+                assert_eq!(
+                    tracked(&resolver, &base, "#disabled", mode).dependency,
+                    ResolvedDependency::File(dir.root_join("disabled.js"))
+                );
+                // A directory base must retain its own manifest's browser scope.
+                assert_eq!(
+                    tracked(&resolver, dir.root(), "#impl", mode).dependency,
+                    direct.dependency
+                );
+            }
+            if target == TargetEnv::Browser {
+                let first = tracked(&resolver, &base, "#impl", ResolutionMode::Import);
+                std::fs::remove_file(dir.root_join("browser.js")).unwrap();
+                assert!(first.inputs.validate().is_err());
+                let stale = resolver
+                    .resolve_dependency_with_inputs(&base, "#impl", ResolutionMode::Import)
+                    .unwrap();
+                assert_eq!(first.inputs, stale.inputs);
+                assert!(stale.inputs.validate().is_err());
+                resolver.invalidate();
+                assert_eq!(
+                    tracked(&resolver, &base, "#impl", ResolutionMode::Import).dependency,
+                    ResolvedDependency::File(dir.root_join("server.js"))
+                );
+                std::fs::write(dir.root_join("browser.js"), "").unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn package_imports_dependency_browser_mappings_keep_scopes_and_proofs() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "package.json" => r#"{"browser":{"./node_modules/owner/override.js":"./wrong.js"}}"#,
+            "wrong.js" => "",
+            "node_modules/owner/package.json" => r##"{"imports":{"#impl":"dep"},"browser":{"./node_modules/dep/browser.js":"./override.js"}}"##,
+            "node_modules/owner/nested/entry.js" => "",
+            "node_modules/owner/override.js" => "",
+            "node_modules/owner/node_modules/dep/package.json" => r#"{"main":"server.js","browser":{"./server.js":"./browser.js"}}"#,
+            "node_modules/owner/node_modules/dep/server.js" => "",
+            "node_modules/owner/node_modules/dep/browser.js" => ""
+        };
+        let base = dir.root_join("node_modules/owner/nested/entry.js");
+        for target in [TargetEnv::Browser, TargetEnv::Node] {
+            let mut resolver = StructuralResolver::new(
+                dir.root().into(),
+                NodeModulesResolverOptions::default_for_env(target),
+                BTreeSet::new(),
+            );
+            for mode in [ResolutionMode::Import, ResolutionMode::Require] {
+                let first = tracked(&resolver, &base, "#impl", mode);
+                assert_eq!(
+                    first.dependency,
+                    ResolvedDependency::File(dir.root_join(if target == TargetEnv::Browser {
+                        "node_modules/owner/override.js"
+                    } else {
+                        "node_modules/owner/node_modules/dep/server.js"
+                    }))
+                );
+                assert_eq!(
+                    first.dependency,
+                    tracked(&resolver, &base, "dep", mode).dependency
+                );
+                let warm = tracked(&resolver, &base, "#impl", mode);
+                assert_eq!(first.dependency, warm.dependency);
+                assert_eq!(warm.inputs, tracked(&resolver, &base, "#impl", mode).inputs);
+            }
+            if target == TargetEnv::Browser {
+                let first = tracked(&resolver, &base, "#impl", ResolutionMode::Import);
+                std::fs::write(
+                    dir.root_join("node_modules/owner/node_modules/dep/package.json"),
+                    r#"{"main":"server.js","browser":{"./server.js":"./server.js"}}"#,
+                )
+                .unwrap();
+                let stale = resolver
+                    .resolve_dependency_with_inputs(&base, "#impl", ResolutionMode::Import)
+                    .unwrap();
+                assert_eq!(first.inputs, stale.inputs);
+                assert!(stale.inputs.validate().is_err());
+                resolver.invalidate();
+                let changed = tracked(&resolver, &base, "#impl", ResolutionMode::Import);
+                assert_eq!(
+                    changed.dependency,
+                    ResolvedDependency::File(
+                        dir.root_join("node_modules/owner/node_modules/dep/server.js")
+                    )
+                );
+                std::fs::write(
+                    dir.root_join("node_modules/owner/package.json"),
+                    r##"{"imports":{"#impl":"dep"},"browser":{"./node_modules/dep/server.js":"./override.js"}}"##,
+                )
+                .unwrap();
+                assert!(changed.inputs.validate().is_err());
+                resolver.invalidate();
+                assert_eq!(
+                    tracked(&resolver, &base, "#impl", ResolutionMode::Import).dependency,
+                    ResolvedDependency::File(dir.root_join("node_modules/owner/override.js"))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn package_imports_dependency_redirects_keep_exports_and_browser_restrictions() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "entry.js" => "",
+            "package.json" => r##"{"imports":{"#value":"./wrong.js"}}"##,
+            "wrong.js" => "",
+            "node_modules/owner/package.json" => r##"{"imports":{
+                "#value":"dep/value","#private":"dep/private","#fs":"fs","#node":"node:fs","#native":"./addon.node"
+            }}"##,
+            "node_modules/owner/entry.js" => "",
+            "node_modules/owner/addon.node" => "",
+            "node_modules/owner/node_modules/dep/package.json" => r#"{"exports":{"./value":{"import":"./import.js","require":"./require.js"}}}"#,
+            "node_modules/owner/node_modules/dep/import.js" => "",
+            "node_modules/owner/node_modules/dep/require.js" => "",
+            "node_modules/owner/node_modules/dep/private.js" => "",
+            "node_modules/owner/node_modules/fs/package.json" => r#"{"exports":"./browser.js"}"#,
+            "node_modules/owner/node_modules/fs/browser.js" => ""
+        };
+        let mut resolver = StructuralResolver::new(
+            dir.root().into(),
+            NodeModulesResolverOptions::default_for_env(TargetEnv::Browser),
+            ["fs".to_owned(), "node:fs".to_owned()]
+                .into_iter()
+                .collect(),
+        );
+        let base = dir.root_join("node_modules/owner/entry.js");
+        for (mode, expected) in [
+            (ResolutionMode::Import, "import.js"),
+            (ResolutionMode::Require, "require.js"),
+        ] {
+            let first = tracked(&resolver, &base, "#value", mode);
+            assert_eq!(
+                first.dependency,
+                ResolvedDependency::File(
+                    dir.root_join(&format!("node_modules/owner/node_modules/dep/{expected}"))
+                )
+            );
+            assert_eq!(
+                first.inputs,
+                tracked(&resolver, &base, "#value", mode).inputs
+            );
+        }
+        let original = tracked(&resolver, &base, "#value", ResolutionMode::Import);
+        std::fs::write(
+            dir.root_join("node_modules/owner/node_modules/dep/package.json"),
+            r#"{"exports":{"./value":"./require.js"}}"#,
+        )
+        .unwrap();
+        let stale = resolver
+            .resolve_dependency_with_inputs(&base, "#value", ResolutionMode::Import)
+            .unwrap();
+        assert_eq!(original.inputs, stale.inputs);
+        assert!(stale.inputs.validate().is_err());
+        resolver.invalidate();
+        assert_eq!(
+            tracked(&resolver, &base, "#value", ResolutionMode::Import).dependency,
+            ResolvedDependency::File(
+                dir.root_join("node_modules/owner/node_modules/dep/require.js")
+            )
+        );
+        for request in ["#private", "#node", "#native"] {
+            assert!(resolver
+                .resolve_dependency_with_inputs(&base, request, ResolutionMode::Import)
+                .is_err());
+        }
+        let builtin = tracked(&resolver, &base, "#fs", ResolutionMode::Import);
+        assert_eq!(
+            builtin.dependency,
+            ResolvedDependency::File(
+                dir.root_join("node_modules/owner/node_modules/fs/browser.js")
+            )
+        );
+        std::fs::remove_file(dir.root_join("node_modules/owner/node_modules/fs/browser.js"))
+            .unwrap();
+        assert!(builtin.inputs.validate().is_err());
+        resolver.invalidate();
+        assert!(resolver
+            .resolve_dependency_with_inputs(&base, "#fs", ResolutionMode::Import)
+            .is_err());
     }
 
     #[test]

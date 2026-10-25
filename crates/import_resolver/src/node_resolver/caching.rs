@@ -616,6 +616,131 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
         Ok(None)
     }
 
+    fn resolve_package_import(
+        &self,
+        base_dir: &Path,
+        request: &str,
+        depth: usize,
+    ) -> Result<PathBuf> {
+        let result = (|| {
+            if request == "#" || request.starts_with("#/") {
+                return Err(Error::from_boxed(
+                    eyre::eyre!("ERR_INVALID_MODULE_SPECIFIER: invalid package import {request:?}")
+                        .into(),
+                ));
+            }
+            if depth >= 64 {
+                return Err(Error::from_boxed(
+                    eyre::eyre!("ERR_PACKAGE_IMPORT_CYCLE: package import recursion limit reached")
+                        .into(),
+                ));
+            }
+            let absolute = join_abspath(self.monorepo_root, base_dir)?;
+            for directory in absolute.ancestors() {
+                if directory
+                    .file_name()
+                    .is_some_and(|name| name == NODE_MODULES)
+                {
+                    break;
+                }
+                let entry = self
+                    .pkg_json_cache
+                    .check_dir_with_inputs(directory, Some(&self.observer))
+                    .with_context(|| {
+                        format!(
+                            "reading package import scope manifest {}",
+                            directory.join(PACKAGE).display()
+                        )
+                    })?;
+                if let Some(package) = entry.value().as_ref() {
+                    let imports = package.inner().imports.as_ref().with_context(|| {
+                        format!(
+                            "ERR_PACKAGE_IMPORT_NOT_DEFINED: {request:?} in {}",
+                            directory.join(PACKAGE).display()
+                        )
+                    })?;
+                    let target = packagejson_exports::rewrite_package_import(
+                        imports,
+                        request,
+                        self.export_conditions.iter().map(String::as_str),
+                    )
+                    .with_context(|| {
+                        format!(
+                            "selecting import {request:?} in {}",
+                            directory.join(PACKAGE).display()
+                        )
+                    })?;
+                    if target.starts_with('#') {
+                        return self.resolve_package_import(directory, &target, depth + 1);
+                    }
+                    if let Some(relative) = target.strip_prefix("./") {
+                        let path = directory.join(relative).clean();
+                        if !path.starts_with(directory) {
+                            return Err(Error::from_boxed(
+                                eyre::eyre!(
+                                    "ERR_INVALID_PACKAGE_TARGET: target escapes package root"
+                                )
+                                .into(),
+                            ));
+                        }
+                        let resolved = self.resolve_as_file(&path)?;
+                        let resolved = match resolved {
+                            Some(path) => Some(path),
+                            None => self.resolve_as_directory(&path, false)?,
+                        };
+                        let resolved = self.wrap(resolved).with_context(|| {
+                            format!(
+                                "resolving package import target {target:?} at {}",
+                                path.display()
+                            )
+                        })?;
+                        return self.rewrite_browser_path(
+                            &directory.join(PACKAGE),
+                            resolved,
+                            request,
+                        );
+                    }
+                    if target.starts_with("node:") || is_core_module(&target) {
+                        if self.target_env == TargetEnv::Node {
+                            return Ok(PathBuf::from(if target.starts_with("node:") {
+                                target
+                            } else {
+                                format!("node:{target}")
+                            }));
+                        }
+                        if target.starts_with("node:") {
+                            return Err(Error::from_boxed(
+                                eyre::eyre!("Node builtin {target:?} is unsupported for the browser target; no polyfills are provided").into(),
+                            ));
+                        }
+                    }
+                    let resolved = self
+                        .resolve_node_modules(directory, &target)
+                        .and_then(|resolved| self.wrap(resolved))
+                        .with_context(|| {
+                            format!(
+                                "resolving package import dependency {target:?} from {}",
+                                directory.display()
+                            )
+                        })?;
+                    return self.rewrite_browser_path(&directory.join(PACKAGE), resolved, request);
+                }
+                if directory == self.monorepo_root {
+                    break;
+                }
+            }
+            Err(Error::from_boxed(
+                eyre::eyre!("ERR_PACKAGE_IMPORT_NOT_DEFINED: {request:?}").into(),
+            ))
+        })();
+        result.with_context(|| {
+            format!(
+                "resolving package import {request:?} from {}",
+                base_dir.display()
+            )
+        })
+    }
+
     fn resolve_filename(&self, base: &Path, module_specifier: &str) -> Result<PathBuf, Error> {
         debug!(
             "Resolving {} from {:#?} for {:#?}",
@@ -628,6 +753,15 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             .get(module_specifier)
             .map(String::as_str)
             .unwrap_or(module_specifier);
+
+        if target.starts_with('#') {
+            let base_dir = if self.observer.is_file(base) {
+                base.parent().unwrap_or(base)
+            } else {
+                base
+            };
+            return self.resolve_package_import(base_dir, target, 0);
+        }
 
         // Handle builtin modules for nodejs, including aliased requests.
         if let TargetEnv::Node = self.target_env {
@@ -734,33 +868,39 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                 }
             }
         }
-        .and_then(|v| {
-            // Handle path references for the `browser` package config
-            if let TargetEnv::Browser = self.target_env {
-                let path = &v;
-                // probe for a package.json file
-                if let Some((pkg_path, browser_cache)) =
-                    self.pkg_json_cache.probe_path_with_inputs(self.monorepo_root, base, Some(&self.observer))?
-                {
-                    let cache_entry_lock = browser_cache.try_get_cached_or_init(|pkgjson| {
-                        PackageJsonRewriteData::create(self, pkg_path, pkgjson)
-                    })?;
-                    self.observer.replay(&cache_entry_lock.inputs);
-
-                    let as_abspath = join_abspath(self.monorepo_root, path)?;
-                    let rewrite = (*cache_entry_lock).rewrite_browser(&as_abspath)?;
-                    return self.wrap(Some(rewrite.to_path_buf())).with_context(|| {
-                        format!(
-                            "failed to rewrite browser path {:#?} for {:#?}",
-                            path, module_specifier,
-                        )
-                    });
-                }
-            }
-            Ok(v)
-        });
+        .and_then(|path| self.rewrite_browser_path(base, path, module_specifier));
 
         file_name
+    }
+
+    fn rewrite_browser_path(
+        &self,
+        base: &Path,
+        path: PathBuf,
+        module_specifier: &str,
+    ) -> Result<PathBuf, Error> {
+        if let TargetEnv::Browser = self.target_env {
+            if let Some((pkg_path, browser_cache)) = self.pkg_json_cache.probe_path_with_inputs(
+                self.monorepo_root,
+                base,
+                Some(&self.observer),
+            )? {
+                let cache_entry = browser_cache.try_get_cached_or_init(|pkgjson| {
+                    PackageJsonRewriteData::create(self, pkg_path, pkgjson)
+                })?;
+                self.observer.replay(&cache_entry.inputs);
+
+                let as_abspath = join_abspath(self.monorepo_root, &path)?;
+                let rewrite = cache_entry.rewrite_browser(&as_abspath)?;
+                return self.wrap(Some(rewrite.to_path_buf())).with_context(|| {
+                    format!(
+                        "failed to rewrite browser path {:#?} for {:#?}",
+                        path, module_specifier,
+                    )
+                });
+            }
+        }
+        Ok(path)
     }
 }
 

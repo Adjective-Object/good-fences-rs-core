@@ -24,4 +24,11 @@ shorthand. Explicit maps retain their declared visibility; more-specific private
 patterns still block access. Rewritten request subpaths cannot escape the package
 root through parent traversal.
 
+`rewrite_package_import` shares the recursive condition/array evaluator but uses
+imports-specific validation and matching: exact keys, then single-star patterns
+by longest prefix/full key, with no legacy directory-prefix access. Substitute
+every target star and reject traversal, encoded prohibited segments, absolute
+paths and URL targets. Imports may redirect to bare dependencies or other `#`
+requests; resolving those requests and bounding cycles belongs to the resolver.
+
 Run `cargo test -p packagejson_exports` for rewrite and visibility regressions.
