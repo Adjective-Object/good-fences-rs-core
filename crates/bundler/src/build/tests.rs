@@ -456,6 +456,8 @@ struct PreparationObserver;
 impl Drop for PreparationObserver {
     fn drop(&mut self) {
         prepare::AFTER_PREPARE.with(|observer| *observer.borrow_mut() = None);
+        prepare::AFTER_DEPENDENCIES.with(|observer| *observer.borrow_mut() = None);
+        prepare::EARLY_CHILDREN.with(|observer| *observer.borrow_mut() = None);
     }
 }
 
@@ -465,44 +467,153 @@ fn observe_preparation(observer: impl Fn(&Path) + Send + Sync + 'static) -> Prep
 }
 
 #[test]
-fn parallel_preparation_discovers_a_child_while_an_earlier_sibling_is_blocked() {
-    let dir = TmpDir::new();
-    write(
-        dir.root(),
-        "main.mjs",
-        "import './slow.mjs'; import './fast.mjs';",
-    );
-    write(dir.root(), "fast.mjs", "import './child.mjs';");
-    write(dir.root(), "child.mjs", "import './slow.mjs';");
-    write(dir.root(), "slow.mjs", "export const value = 1;");
-    for workers in [2, 4] {
+fn early_dependencies_schedule_children_before_extraction_despite_queued_cold_sources() {
+    let _reset = PreparationObserver;
+    for (workers, broad) in [2, 4]
+        .into_iter()
+        .flat_map(|workers| [(workers, false), (workers, true)])
+    {
+        let dir = TmpDir::new();
+        let mut source = String::from(
+            r#"
+            import type { Absent } from './missing-types';
+            import './literal.mjs';
+            export const load = (name: string) => import(`./pages/${name}.mjs`);
+            export const worker = () => new Worker(new URL('./worker.mjs', import.meta.url), {type:'module'});
+            export const ignored = () => import(/* webpackIgnore: true */ './missing.mjs');
+        "#,
+        );
+        if broad {
+            source.push_str("export const broad = (request: string) => import(request);");
+        }
+        write(dir.root(), "node_modules/capture/main.mts", &source);
+        for path in [
+            "node_modules/capture/literal.mjs",
+            "node_modules/capture/pages/a.mjs",
+            "node_modules/capture/worker.mjs",
+        ] {
+            write(dir.root(), path, "export const value = 1;");
+        }
         let (release, wait) = std::sync::mpsc::channel();
         let wait = std::sync::Mutex::new(wait);
-        let siblings = std::sync::Barrier::new(2);
-        let observer = observe_preparation(move |path| {
-            let name = path.file_name().unwrap();
-            if name == "fast.mjs" || name == "slow.mjs" {
-                siblings.wait();
-            }
-            if name == "slow.mjs" {
-                wait.lock()
-                    .unwrap()
-                    .recv_timeout(std::time::Duration::from_secs(30))
-                    .expect("dependency discovery must not wait for a whole sibling batch");
-            } else if name == "child.mjs" {
-                release.send(()).unwrap();
-            }
+        let finished = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let parent_finished = finished.clone();
+        prepare::AFTER_DEPENDENCIES.with(|slot| {
+            *slot.borrow_mut() = Some(std::sync::Arc::new(move |path| {
+                if path.file_name().unwrap() == "main.mts" {
+                    wait.lock()
+                        .unwrap()
+                        .recv_timeout(Duration::from_secs(30))
+                        .expect("resolution and child enqueue must precede expensive extraction");
+                    parent_finished.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+            }));
+        });
+        prepare::EARLY_CHILDREN.with(|slot| {
+            *slot.borrow_mut() = Some(std::sync::Arc::new(move |path, children| {
+                if path.file_name().unwrap() == "main.mts" {
+                    assert!(!finished.load(std::sync::atomic::Ordering::SeqCst));
+                    assert_eq!(
+                        children, 3,
+                        "literal, finite context and worker must use the early frontier"
+                    );
+                    release.send(()).unwrap();
+                }
+            }));
         });
         let mut config = options();
+        config.entries.get_mut("main").unwrap().path = "node_modules/capture/main.mts".into();
+        config.resolver.target_env = TargetEnv::Browser;
+        config.cache = CacheMode::Disabled;
+        for index in 0..20 {
+            let path = format!("queued-{index:02}.mjs");
+            write(dir.root(), &path, "export const queued = 1;");
+            config.entries.insert(
+                format!("queued-{index:02}"),
+                Entry {
+                    path: path.into(),
+                    output_name: None,
+                    namespace: false,
+                },
+            );
+        }
         config.execution =
             crate::execution::ExecutionOptions::new(std::num::NonZeroUsize::new(workers).unwrap());
         let built = BuildSession::new(dir.root())
             .unwrap()
             .build(&config)
             .unwrap();
-        drop(observer);
-        assert_eq!(built.counters.source_parses + built.counters.disk_hits, 4);
+        assert_eq!(built.counters.source_parses, 24);
+        assert_eq!(built.counters.resolutions, 3 + usize::from(broad));
+        if !broad {
+            assert_eq!(built.counters.resolution_cache_hits, 0);
+        }
+        assert_eq!(
+            built.warnings.len(),
+            usize::from(broad),
+            "{:?}",
+            built.warnings
+        );
     }
+}
+
+#[test]
+fn early_dependencies_do_not_publish_a_parent_that_fails_its_final_source_check() {
+    let dir = TmpDir::new();
+    write(dir.root(), "main.mjs", "export const value = 1;");
+    write(
+        dir.root(),
+        "node_modules/child.mjs",
+        "export const value = 2;",
+    );
+    let mut config = options();
+    config.cache = CacheMode::Disabled;
+    config.execution =
+        crate::execution::ExecutionOptions::new(std::num::NonZeroUsize::new(2).unwrap());
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let valid = session.build(&config).unwrap();
+    let next = "export { value } from './node_modules/child.mjs';";
+    write(dir.root(), "main.mjs", next);
+    let (release, wait) = std::sync::mpsc::channel();
+    let wait = std::sync::Mutex::new(wait);
+    prepare::AFTER_DEPENDENCIES.with(|slot| {
+        *slot.borrow_mut() = Some(std::sync::Arc::new(move |path| {
+            if path.file_name().unwrap() == "main.mjs" {
+                wait.lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(30))
+                    .unwrap();
+                fs::write(path, "invalid late edit").unwrap();
+            }
+        }));
+    });
+    prepare::EARLY_CHILDREN.with(|slot| {
+        *slot.borrow_mut() = Some(std::sync::Arc::new(move |path, count| {
+            if path.file_name().unwrap() == "main.mjs" {
+                assert_eq!(count, 1);
+                release.send(()).unwrap();
+            }
+        }));
+    });
+    let reset = PreparationObserver;
+    let error = format!("{:#}", session.build(&config).err().unwrap());
+    drop(reset);
+    assert!(
+        error.contains("source changed during cache operation"),
+        "{error}"
+    );
+    assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &valid.product));
+    let child = dir.root().join("node_modules/child.mjs");
+    assert!(!session.sources.contains_key(&child));
+    assert!(!session.resolutions.contains_key(&child));
+    write(dir.root(), "main.mjs", next);
+    let repaired = session.build(&config).unwrap();
+    assert!(!Rc::ptr_eq(&repaired.product, &valid.product));
+    assert!(repaired
+        .product
+        .graph
+        .file_id(&dir.root().join("node_modules/child.mjs"))
+        .is_some());
 }
 
 #[test]
@@ -689,7 +800,7 @@ fn parallel_preparation_corrupt_stale_caches_and_source_errors_are_deterministic
         let (release, wait) = std::sync::mpsc::channel();
         let wait = std::sync::Mutex::new(wait);
         let observer = observe_preparation(move |path| {
-            if workers > 1 && path.file_name().unwrap() == "a.mjs" {
+            if workers > 2 && path.file_name().unwrap() == "a.mjs" {
                 wait.lock()
                     .unwrap()
                     .recv_timeout(std::time::Duration::from_secs(30))
@@ -7791,6 +7902,13 @@ fn wide_expression_builds_are_identical_in_single_and_shared_caller_pools() {
             .build()
             .unwrap();
         assert_eq!(caller.install(build), built);
+        if workers > 1 {
+            let single = rayon::ThreadPoolBuilder::new()
+                .num_threads(1)
+                .build()
+                .unwrap();
+            assert_eq!(single.install(build), built);
+        }
         baseline = Some(built);
     }
 }

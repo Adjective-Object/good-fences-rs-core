@@ -99,6 +99,48 @@ fn cold_warm_and_cache_modes() {
 }
 
 #[test]
+fn early_dependencies_are_cold_only_and_hits_do_not_parse() {
+    let (_dir, path) = setup();
+    let declarations =
+        ast_segmenter::PreparedDeclarations::new(ecco::LocalFacts::default()).unwrap();
+    for (mode, expected) in [
+        (CacheMode::ReadWrite, 1),
+        (CacheMode::ReadOnly, 0),
+        (CacheMode::Disabled, 1),
+    ] {
+        let mut observations = 0;
+        let before = ast_segmenter::module_parse_count();
+        let loaded = load_prepared_with_dependencies(
+            &logger::StdioLogger::new(),
+            &path,
+            PreparedSource {
+                source: SOURCE,
+                original: SOURCE.as_bytes(),
+                parser_path: &path,
+                package: ModuleFormat::Esm,
+            },
+            mode,
+            &declarations,
+            |dependencies| {
+                observations += 1;
+                assert_eq!(dependencies.len(), 1);
+                assert_eq!(dependencies[0].specifier(), "./dep");
+            },
+        )
+        .unwrap();
+        assert_eq!(observations, expected);
+        assert_eq!(ast_segmenter::module_parse_count(), before + expected);
+        if expected == 0 {
+            assert_eq!(loaded.status, CacheStatus::Hit);
+            assert!(matches!(
+                loaded.record.module().facts(),
+                ast_segmenter::views::ModuleFacts::Wire(_)
+            ));
+        }
+    }
+}
+
+#[test]
 fn prepared_sources_cache_generated_coordinates_and_recheck_original_bytes() {
     let dir = TmpDir::new();
     let path = dir.root_join("data.json");
@@ -150,6 +192,7 @@ fn prepared_sources_cache_generated_coordinates_and_recheck_original_bytes() {
             fs::write(&path, b"changed input")?;
             Ok(())
         },
+        |_| {},
     )
     .unwrap_err();
     assert!(format!("{error:#}").contains("source changed"));

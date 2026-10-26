@@ -476,7 +476,20 @@ The coordinator deduplicates canonical paths and replenishes script jobs after
 each completion; outstanding reads/results together never exceed the worker bound.
 Workers read/check caches/extract owned facts with private arenas and shared
 PreparedDeclarations. Pending frontiers contain paths, never source buffers.
-Resolution and graph mutation stay serial. Resource/CSS processing uses a canonical
+Fresh checked syntax emits one bounded owned dependency event before effects,
+recipes/Ecco/encoding, keeping AST/arena on its worker. Intermediate events
+never release job slots. Priority resolver continuations precede preparations;
+at most min(configured,pool)-1 preparations run when capacity>1, with nested
+preparation Ecco inline to preserve resolver capacity, bounding loaded continuations
+too. Join early resolutions with final checked owners exactly once; hits and
+speculation retain borrowed checked fallback. Contexts switch provisional syntax
+owners to checked records before fixed-point/recheck; only final owners register
+worker roots/diagnostics. Early children prepare privately until complete parent
+integration confirms demand, including map checks; promotion reuses running/ready
+results and never leaks child errors over a failed parent. Private early reads
+inherit only their already admitted canonical file membership, not arbitrary
+external/tree authority. Graph mutation stays
+serial. Resource/CSS processing uses a canonical
 serial frontier after scripts drain; do not serially pre-read ordinary scripts.
 Select source errors by canonical path, sort cache warnings and stop resource
 processing at its first serial failure. Drain/join workers on spawn/panic errors.

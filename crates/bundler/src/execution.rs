@@ -107,6 +107,11 @@ pub(crate) enum WorkStage {
     Lockfile,
 }
 
+pub(crate) enum PreparationEvent<R, E> {
+    Early(E),
+    Complete(R),
+}
+
 impl WorkStage {
     fn name(self) -> &'static str {
         match self {
@@ -132,6 +137,148 @@ impl Default for ExecutionOptions {
 }
 
 impl ExecutionOptions {
+    /// Two messages may belong to one preparation slot. Only final completion
+    /// releases it; reserve CPU capacity for priority resolution continuations.
+    pub(crate) fn prepare_events<J: Send, R: Send, E: Send>(
+        self,
+        jobs: impl IntoIterator<Item = J>,
+        work: impl Fn(J, &dyn Fn(E)) -> R + Sync,
+        mut integrate: impl FnMut(PreparationEvent<R, E>) -> eyre::Result<(Vec<J>, bool)>,
+        priority: impl Fn(&J) -> usize,
+        preparation: impl Fn(&J) -> bool,
+    ) -> eyre::Result<()> {
+        use std::collections::VecDeque;
+        use std::sync::mpsc;
+        enum Message<R, E> {
+            Early(E),
+            Complete(
+                std::thread::Result<R>,
+                crate::rewrite::ParseCounts,
+                usize,
+                bool,
+                bool,
+            ),
+        }
+        let mut queues: [VecDeque<J>; 4] = std::array::from_fn(|_| VecDeque::new());
+        for job in jobs {
+            queues[priority(&job)].push_back(job);
+        }
+        if queues[0].is_empty() && queues[1].is_empty() {
+            return Ok(());
+        }
+        let workers = self.workers.get();
+        let dispatch = tracing::dispatcher::get_default(Clone::clone);
+        let parent = tracing::Span::current();
+        let origin = std::thread::current().id();
+        self.cpu_scope(|scope| {
+            let capacity = owned_pool()
+                .map_or_else(rayon::current_num_threads, |pool| {
+                    pool.current_num_threads()
+                })
+                .min(workers);
+            let preparation_limit = capacity.saturating_sub(1).max(1);
+            // A sole caller-pool worker may execute a whole job inside yield_now.
+            // Both its early event and final result must fit before it returns.
+            let (send, receive_events) = mpsc::sync_channel(workers * 2);
+            let mut available: Vec<_> = (0..workers).rev().collect();
+            let (mut outstanding, mut preparing, mut precise) = (0, 0, 0);
+            let mut waiting = false;
+            let mut error: Option<eyre::Report> = None;
+            loop {
+                if error.is_none() {
+                    while outstanding < workers {
+                        let rank = (0..4).find(|&rank| {
+                            (rank < 2 || precise > 0 || waiting)
+                                && queues[rank].front().is_some_and(|job| {
+                                    !preparation(job) || preparing < preparation_limit
+                                })
+                        });
+                        let Some(rank) = rank else { break };
+                        let job = queues[rank].pop_front().expect("nonempty priority queue");
+                        let is_preparation = preparation(&job);
+                        let is_precise = rank < 2;
+                        let worker_id = available.pop().expect("bounded worker slot");
+                        let send = send.clone();
+                        let work = &work;
+                        let (dispatch, parent) = (dispatch.clone(), parent.clone());
+                        scope.spawn(move |_| {
+                            let reported = std::cell::Cell::new(false);
+                            let limit = if is_preparation {
+                                NonZeroUsize::MIN
+                            } else {
+                                self.workers
+                            };
+                            let (result, counts) = run_job(origin, limit, || {
+                                tracing::dispatcher::with_default(&dispatch, || {
+                                    WorkStage::Preparation
+                                        .span(&parent, worker_id)
+                                        .in_scope(|| {
+                                            work(job, &|event| {
+                                                assert!(
+                                                    !reported.replace(true),
+                                                    "duplicate early dependency event"
+                                                );
+                                                let _ = send.send(Message::Early(event));
+                                            })
+                                        })
+                                })
+                            });
+                            let _ = send.send(Message::Complete(
+                                result,
+                                counts,
+                                worker_id,
+                                is_preparation,
+                                is_precise,
+                            ));
+                        });
+                        outstanding += 1;
+                        preparing += usize::from(is_preparation);
+                        precise += usize::from(is_precise);
+                    }
+                }
+                if outstanding == 0 {
+                    break;
+                }
+                let event = match receive(&receive_events).expect("scoped job completion") {
+                    Message::Early(event) => Some(PreparationEvent::Early(event)),
+                    Message::Complete(result, counts, worker_id, is_preparation, is_precise) => {
+                        crate::rewrite::record_worker_parses(counts);
+                        outstanding -= 1;
+                        preparing -= usize::from(is_preparation);
+                        precise -= usize::from(is_precise);
+                        available.push(worker_id);
+                        match result {
+                            Ok(result) => Some(PreparationEvent::Complete(result)),
+                            Err(payload) => {
+                                let panic = worker_panic(payload)
+                                    .wrap_err("module preparation worker panicked");
+                                error = Some(match error.take() {
+                                    Some(error) => error.wrap_err(format!("{panic:#}")),
+                                    None => panic,
+                                });
+                                None
+                            }
+                        }
+                    }
+                };
+                if error.is_none() {
+                    if let Some(event) = event {
+                        match integrate(event) {
+                            Ok((jobs, required)) => {
+                                waiting = required;
+                                for job in jobs {
+                                    queues[priority(&job)].push_back(job);
+                                }
+                            }
+                            Err(failure) => error = Some(failure),
+                        }
+                    }
+                }
+            }
+            error.map_or(Ok(()), Err)
+        })?
+    }
+
     pub(crate) fn scoped_pool<R>(self, work: impl FnOnce() -> R) -> eyre::Result<R> {
         struct ResetLimit(usize);
         impl Drop for ResetLimit {
@@ -601,7 +748,13 @@ mod tests {
                         barrier.wait();
                     };
                     execution
-                        .replenish(0..workers, |_| work(), |_| vec![])
+                        .prepare_events(
+                            0..workers,
+                            |_, _: &dyn Fn(())| work(),
+                            |_| Ok((vec![], false)),
+                            |_| 0,
+                            |_| false,
+                        )
                         .unwrap();
                     execution
                         .replenish_stage(
@@ -689,6 +842,93 @@ mod tests {
             .unwrap();
         completed.sort();
         assert_eq!(completed, [0, 1, 2]);
+    }
+
+    #[test]
+    fn early_frontier_bounds_slots_and_drains_events_on_errors_and_panics() {
+        #[derive(Clone, Copy)]
+        enum Job {
+            Prepare(usize),
+            Resolve,
+        }
+        for workers in [1, 2, 4] {
+            let exercise = || {
+                let started = AtomicUsize::new(0);
+                let integrated = AtomicUsize::new(0);
+                let mut resolutions = 0;
+                ExecutionOptions::new(NonZeroUsize::new(workers).unwrap())
+                    .prepare_events(
+                        (0..40).map(Job::Prepare),
+                        |job, report| {
+                            if let Job::Prepare(id) = job {
+                                let starts = started.fetch_add(1, Ordering::SeqCst) + 1;
+                                let capacity = workers.min(rayon::current_num_threads());
+                                assert!(
+                                    starts
+                                        <= integrated.load(Ordering::SeqCst)
+                                            + capacity.saturating_sub(1).max(1)
+                                );
+                                report(id);
+                            }
+                            job
+                        },
+                        |event| {
+                            let jobs = match event {
+                                PreparationEvent::Early(_) => vec![Job::Resolve],
+                                PreparationEvent::Complete(Job::Prepare(_)) => {
+                                    integrated.fetch_add(1, Ordering::SeqCst);
+                                    vec![]
+                                }
+                                PreparationEvent::Complete(Job::Resolve) => {
+                                    resolutions += 1;
+                                    vec![]
+                                }
+                            };
+                            Ok((jobs, false))
+                        },
+                        |job| usize::from(matches!(job, Job::Prepare(_))),
+                        |job| matches!(job, Job::Prepare(_)),
+                    )
+                    .unwrap();
+                assert_eq!(integrated.load(Ordering::SeqCst), 40);
+                assert_eq!(resolutions, 40);
+                for panic in [false, true] {
+                    let completed = AtomicUsize::new(0);
+                    let error = ExecutionOptions::new(NonZeroUsize::new(workers).unwrap())
+                        .prepare_events(
+                            0..40,
+                            |_, report| {
+                                report(0);
+                                completed.fetch_add(1, Ordering::SeqCst);
+                                if panic {
+                                    panic!("early worker panic");
+                                }
+                            },
+                            |_| Err(eyre::eyre!("early integration error")),
+                            |_| 1,
+                            |_| true,
+                        )
+                        .unwrap_err();
+                    assert!(completed.load(Ordering::SeqCst) > 0);
+                    let error = format!("{error:#}");
+                    assert!(error.contains("early integration error"), "{error}");
+                    if panic {
+                        assert!(error.contains("early worker panic"), "{error}");
+                    }
+                }
+            };
+            exercise();
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(1)
+                .build()
+                .unwrap()
+                .install(exercise);
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(2)
+                .build()
+                .unwrap()
+                .install(exercise);
+        }
     }
 
     #[test]

@@ -49,6 +49,11 @@ conservatively. Concise-arrow results are returned, not discarded;
 Target export surfaces, retention and placement remain linker decisions.
 `module_parse_count()` reports source-module parser invocations on the current
 thread, distinguishing extraction from accidental re-extraction.
+`parse_module_with_dependencies` observes exact dependency occurrences
+after parser, semantic and support checks, before effects/recipes/Ecco extraction.
+It reuses the same AST classifier and keeps the arena on the calling worker;
+the callback borrows the syntax slice and may copy provisional observations.
+No dependency copy is needed when callers do not request an owned event.
 
 `facts().emission().lazy_modules()` and `lazy_selectors()` expose syntax-only
 construction candidates through borrowed owned-or-wire sequences. Module candidates

@@ -65,7 +65,8 @@ fn speculative_inventory_shares_reads_without_authorizing_unused_observations() 
 
 #[test]
 fn precise_demand_reuses_a_still_running_speculative_preparation() {
-    for workers in [2, 4] {
+    // Two simultaneous preparations plus the reserved resolver capacity.
+    for workers in [3, 4] {
         let dir = TmpDir::new();
         write(
             dir.root(),

@@ -642,18 +642,42 @@ Single-worker fingerprinting and emission stay inline. Emission is additionally 
 each batch's actual owner count. No environment variable or global pool selects concurrency.
 
 Module preparation uses a replenished, deduplicated canonical-path frontier:
-the coordinator integrates each completed job and enqueues separate preparation
-and resolution jobs without waiting for sibling jobs. Workers read source
+the coordinator integrates dependency events as well as completed jobs. Fresh
+generated-JS parses report owned exact dependency syntax after semantic/support
+checks, before effects, recipes, Ecco and cache encoding, retaining the AST on
+the preparing worker. Priority resolver continuations admit/enqueue children
+while parent extraction continues. Final integration joins those resolutions
+with the checked source owner exactly once; failures never become graph facts.
+Early children prepare privately until the parent's complete integration
+(including upstream maps) confirms demand. Their observations, warnings and
+errors cannot replace a failing parent's diagnostics; promotion reuses the same
+in-flight or checked result.
+Cache hits use borrowed checked occurrences without an extra parse.
+Workers read source
 bytes and validate sidecars or extract owned facts using private Oxc arenas and
 the session's shared immutable `PreparedDeclarations`. At most the configured
-number of jobs, including completed results, are outstanding. Resolution jobs
-retain prepared source owners; pending speculative resolution retains immutable
-records rather than reparsing. Cycles/shared dependencies are scheduled once.
+number of jobs, including completed results, are outstanding. With multiple
+workers, at most min(configured workers, pool size) minus one preparations are live,
+with nested preparation Ecco transfers inline, reserving capacity
+for resolution; intermediate events do not recycle preparation slots. The
+bounded result channel drains on errors/panics too. Resolution continuations
+overtake fresh preparations, bounding retained loaded owners as well as jobs.
+Progress distinguishes prepared sources, source parses, resolved modules and
+completed modules.
+Resolution jobs
+retain prepared source owners; speculative resolution queues retain paths and
+borrow bounded ready owners only after dequeue, skipping evicted/promoted
+results without reparsing. Cycles/shared dependencies are scheduled once.
 Precise jobs overtake speculative jobs; in-flight candidates are reused, completed
 speculative preparations are bounded to twice the worker count, and unused queued
 work is abandoned when the precise frontier settles. Evicted results can be
 prepared again on demand. `Counters.speculative_parses` separates unused eager
 extraction from emission reparsing.
+Early context owners are provisional syntax only; successful final integration
+replaces their retained owner with the checked record for fixed-point expansion
+and final match-set validation. Worker URL roots/diagnostics remain final-owner
+decisions. Provisional children and undemanded speculative sources use the checked completion fallback,
+keeping speculative observations/errors private.
 Resolution, proof checks and route admission run on workers; graph mutation and
 Ecco graph construction stay serial. Resolver maps use short guards, with package loading and
 borrowed disk-proof validation outside them. Stateful resources

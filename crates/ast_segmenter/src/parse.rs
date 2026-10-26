@@ -73,6 +73,21 @@ pub fn parse_module_with_prepared_declarations(
     package_format: ModuleFormat,
     declarations: &crate::PreparedDeclarations,
 ) -> eyre::Result<ParsedModule> {
+    parse_module_with_dependencies(logger, source, path, package_format, declarations, |_| {})
+}
+
+/// Observe checked syntax before effects, recipes and Ecco extraction.
+///
+/// Copied observations are provisional until the returned module succeeds.
+/// The AST and semantic arena remain on this thread throughout extraction.
+pub fn parse_module_with_dependencies(
+    logger: &impl logger::Logger,
+    source: &str,
+    path: &Path,
+    package_format: ModuleFormat,
+    declarations: &crate::PreparedDeclarations,
+    dependencies: impl FnOnce(&[crate::owned::Dependency]),
+) -> eyre::Result<ParsedModule> {
     let allocator = Allocator::default();
     MODULE_PARSES.with(|count| count.set(count.get() + 1));
     let parsed = oxc_utils_parse::parse_bundler_file(&allocator, source, path, package_format)
@@ -87,10 +102,12 @@ pub fn parse_module_with_prepared_declarations(
         path.display(),
         semantic.diagnostics
     );
-    let mut facts = crate::owned::extract(&parsed.program, &semantic.semantic)
+    let mut facts = crate::owned::extract_syntax(&parsed.program, &semantic.semantic)
         .wrap_err_with(|| format!("{}: occurrence extraction failed", path.display()))?;
     crate::policy::check(&parsed.program, &facts)
         .wrap_err_with(|| format!("{}: unsupported bundler syntax", path.display()))?;
+    dependencies(facts.dependencies());
+    crate::owned::extract_recipes(&parsed.program, &mut facts);
     *facts.ecco_declarations_hash_mut() = declarations.fingerprint();
     let (body, segments) = if parsed.program.source_type.is_commonjs() {
         let span = Span::new(
@@ -186,6 +203,68 @@ pub fn parse_module_with_prepared_declarations(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn early_dependencies_match_final_occurrences_and_reject_invalid_inputs() {
+        let declarations = crate::PreparedDeclarations::new(ecco::LocalFacts::default()).unwrap();
+        for (path, source) in [
+            (
+                "file.mts",
+                r#"
+                import type { Type } from "types";
+                import json from "./data.json" with { type: "json" };
+                export { value } from "./reexport.mjs";
+                export const load = name => import(`./pages/${name}.mjs`);
+                export const broad = request => import(request);
+                export const ignored = () => import(/* webpackIgnore: true */ "ignored");
+                export const worker = () => new Worker(new URL("./worker.mjs", import.meta.url));
+            "#,
+            ),
+            (
+                "file.cjs",
+                r#"
+                const dep = require("./dep.cjs");
+                exports.load = name => require("./pages/" + name + ".cjs");
+                exports.async = () => import("./async.mjs");
+            "#,
+            ),
+        ] {
+            let mut early = None;
+            let before = module_parse_count();
+            let parsed = parse_module_with_dependencies(
+                &logger::StdioLogger::new(),
+                source,
+                Path::new(path),
+                ModuleFormat::Esm,
+                &declarations,
+                |dependencies| {
+                    assert_eq!(module_parse_count(), before + 1);
+                    early = Some(dependencies.to_vec());
+                },
+            )
+            .unwrap();
+            assert_eq!(early.unwrap(), parsed.owned_facts().unwrap().dependencies());
+            assert_eq!(module_parse_count(), before + 1);
+        }
+        for source in [
+            "import './dep.mjs'; const = ;",
+            "import './dep.mjs'; let duplicate; let duplicate;",
+            "import './dep.mjs'; eval('unsupported');",
+            "import './dep.mjs'; import('options', {});",
+        ] {
+            let mut observed = false;
+            assert!(parse_module_with_dependencies(
+                &logger::StdioLogger::new(),
+                source,
+                Path::new("bad.mjs"),
+                ModuleFormat::Esm,
+                &declarations,
+                |_| observed = true,
+            )
+            .is_err());
+            assert!(!observed, "{}", source);
+        }
+    }
 
     #[test]
     fn prepared_declarations_filter_by_source_without_changing_contracts_or_order() {

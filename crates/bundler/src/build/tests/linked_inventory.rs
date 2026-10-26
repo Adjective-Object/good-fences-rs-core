@@ -38,6 +38,54 @@ fn linked_options() -> BuildOptions {
 }
 
 #[test]
+fn early_linked_children_prepare_privately_with_checked_canonical_membership() {
+    let dir = TmpDir::new();
+    let root = dir.root().join("project");
+    let package = dir.root().join("linked-package");
+    write(
+        &root,
+        "main.mjs",
+        "export {value} from './node_modules/dependency/index.mjs';",
+    );
+    write(&package, "package.json", r#"{"type":"module"}"#);
+    write(&package, "index.mjs", "export {value} from './value.mjs';");
+    write(&package, "value.mjs", "export const value = 42;");
+    let alias = root.join("node_modules/dependency");
+    directory_link(&package, &alias);
+    let (release, wait) = std::sync::mpsc::channel();
+    let wait = std::sync::Mutex::new(wait);
+    prepare::AFTER_DEPENDENCIES.with(|slot| {
+        *slot.borrow_mut() = Some(std::sync::Arc::new(move |path| {
+            if path.file_name().unwrap() == "main.mjs" {
+                wait.lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(30))
+                    .expect("checked linked child must prepare while parent extraction is paused");
+            }
+        }));
+    });
+    let observer = observe_preparation(move |path| {
+        if path.file_name().unwrap() == "index.mjs" {
+            release.send(()).unwrap();
+        }
+    });
+    let mut config = linked_options();
+    config.cache = CacheMode::Disabled;
+    config.execution =
+        crate::execution::ExecutionOptions::new(std::num::NonZeroUsize::new(4).unwrap());
+    let built = BuildSession::new(&root).unwrap().build(&config).unwrap();
+    drop(observer);
+    assert_eq!(built.counters.source_parses, 3);
+    assert_eq!(built.counters.speculative_parses, 0);
+    assert!(built
+        .product
+        .graph
+        .file_id(&package.join("value.mjs"))
+        .is_some());
+    remove_directory_link(&alias);
+}
+
+#[test]
 fn literal_build_never_enumerates_large_unused_or_broken_node_modules() {
     let dir = TmpDir::new();
     let root = dir.root().join("project");

@@ -72,8 +72,29 @@ pub fn load_prepared_with_declarations(
     mode: CacheMode,
     declarations: &ast_segmenter::PreparedDeclarations,
 ) -> eyre::Result<CacheOutcome> {
-    load_prepared_inner(logger, path, prepared, mode, declarations, || Ok(()))
-        .wrap_err_with(|| format!("loading prepared source cache for {}", path.display()))
+    load_prepared_with_dependencies(logger, path, prepared, mode, declarations, |_| {})
+}
+
+/// Report fresh checked dependency syntax only; cache hits retain borrowed facts.
+/// Observations must not be published unless the complete load succeeds.
+pub fn load_prepared_with_dependencies(
+    logger: &impl logger::Logger,
+    path: &Path,
+    prepared: PreparedSource<'_>,
+    mode: CacheMode,
+    declarations: &ast_segmenter::PreparedDeclarations,
+    dependencies: impl FnOnce(&[ast_segmenter::owned::Dependency]),
+) -> eyre::Result<CacheOutcome> {
+    load_prepared_inner(
+        logger,
+        path,
+        prepared,
+        mode,
+        declarations,
+        || Ok(()),
+        dependencies,
+    )
+    .wrap_err_with(|| format!("loading prepared source cache for {}", path.display()))
 }
 
 pub fn sidecar_path(source: &Path) -> PathBuf {
@@ -181,6 +202,7 @@ fn load(
         mode,
         declarations,
         before_publish,
+        |_| {},
     )
 }
 
@@ -191,6 +213,7 @@ fn load_prepared_inner(
     mode: CacheMode,
     declarations: &ast_segmenter::PreparedDeclarations,
     before_publish: impl FnOnce() -> eyre::Result<()>,
+    dependencies: impl FnOnce(&[ast_segmenter::owned::Dependency]),
 ) -> eyre::Result<CacheOutcome> {
     let source = prepared.source;
     let _span = tracing::info_span!("cache.load", bytes = source.len()).entered();
@@ -217,12 +240,13 @@ fn load_prepared_inner(
         Ok(record) => (record, CacheStatus::Hit, CacheWrite::NotRequested),
         Err(reason) => {
             let extraction_span = tracing::info_span!("cache.extract").entered();
-            let parsed = ast_segmenter::parse_module_with_prepared_declarations(
+            let parsed = ast_segmenter::parse_module_with_dependencies(
                 logger,
                 source,
                 prepared.parser_path,
                 prepared.package,
                 declarations,
+                dependencies,
             )
             .wrap_err_with(|| format!("extracting source facts for {}", path.display()))?;
             let record = CacheRecord::from_parsed(source, &parsed).wrap_err_with(|| {

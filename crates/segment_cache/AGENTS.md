@@ -6,6 +6,9 @@
 - Production `.seg.fb` records retain verified immutable FlatBuffers. Construction
   runs full borrowed semantic validation once; adapters recheck exact source
   identity and share owners, never unpack or re-encode for canonical comparison.
+- Cold preparation can forward provisional owned dependencies before expensive
+  extraction; hits emit none and remain borrowed. Final load/rechecks still gate
+  success and publication; the event is never persisted solved state.
 
 - Persist `ast_segmenter::owned::ModuleFacts`, body and ordered statement ranges;
   never legacy tracker tags, resolved paths, arena IDs or derived graph/effects.

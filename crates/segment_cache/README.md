@@ -3,6 +3,10 @@
 Per-file Ecco precursors include owned user-function contracts inferred during
 shared-AST extraction. Warm sidecar loads reuse those contracts; linked symbol
 resolution and fixed-point effect solving remain build-local.
+`load_prepared_with_dependencies` observes provisional dependency syntax
+only on cold extraction, before expensive recipes/Ecco/encoding. Hits retain
+checked borrowed facts and never parse or materialize dependency trees for events.
+Callers must join observations with successful final checked records.
 
 Standard `tracing` spans cover sidecar reads, decode/encode, validation, owned
 fact extraction, adapters, source rechecks and publication. They inherit the

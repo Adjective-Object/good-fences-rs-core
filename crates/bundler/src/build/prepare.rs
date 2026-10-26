@@ -2,23 +2,77 @@
 use super::*;
 
 #[cfg(test)]
+type SourceObserver = std::sync::Arc<dyn Fn(&Path) + Send + Sync>;
+#[cfg(test)]
+type FrontierObserver = std::sync::Arc<dyn Fn(&Path, usize) + Send + Sync>;
+
+#[cfg(test)]
 thread_local! {
-    pub(super) static AFTER_PREPARE: std::cell::RefCell<Option<std::sync::Arc<dyn Fn(&Path) + Send + Sync>>> =
+    pub(super) static AFTER_PREPARE: std::cell::RefCell<Option<SourceObserver>> =
+        const { std::cell::RefCell::new(None) };
+    pub(super) static AFTER_DEPENDENCIES: std::cell::RefCell<Option<SourceObserver>> =
+        const { std::cell::RefCell::new(None) };
+    pub(super) static EARLY_CHILDREN: std::cell::RefCell<Option<FrontierObserver>> =
         const { std::cell::RefCell::new(None) };
 }
 
 pub(super) enum Job {
     Prepare(PathBuf),
+    PrepareEarly(PathBuf),
     Speculate(PathBuf),
     ResolveSpeculative {
         path: PathBuf,
-        record: CacheRecord,
     },
     Resolve {
         path: PathBuf,
         loaded: Loaded,
         css_identity: Option<PathBuf>,
     },
+    ResolveEarly {
+        path: PathBuf,
+        dependencies: Dependencies,
+    },
+}
+
+impl Job {
+    pub(super) fn priority(&self) -> usize {
+        match self {
+            Self::Resolve { .. } | Self::ResolveEarly { .. } => 0,
+            Self::Prepare(_) | Self::PrepareEarly(_) => 1,
+            Self::ResolveSpeculative { .. } => 2,
+            Self::Speculate(_) => 3,
+        }
+    }
+
+    pub(super) fn preparation(&self) -> bool {
+        matches!(
+            self,
+            Self::Prepare(_) | Self::PrepareEarly(_) | Self::Speculate(_)
+        )
+    }
+}
+
+/// Provisional syntax or a checked borrowed owner, never solved cache state.
+#[derive(Clone)]
+pub(super) enum Dependencies {
+    Early(std::sync::Arc<[ast_segmenter::owned::Dependency]>),
+    Checked(CacheRecord),
+}
+
+impl Dependencies {
+    pub(super) fn iter(
+        &self,
+    ) -> ast_segmenter::views::Sequence<'_, ast_segmenter::views::Dependency<'_>> {
+        match self {
+            Self::Early(dependencies) => ast_segmenter::views::Sequence::Owned(dependencies),
+            Self::Checked(record) => record.module().facts().dependencies(),
+        }
+    }
+}
+
+pub(super) struct Early {
+    pub path: PathBuf,
+    pub dependencies: Dependencies,
 }
 
 pub(super) type Completion = (
@@ -34,7 +88,7 @@ pub(super) enum Claim {
 }
 
 pub(super) struct Speculation {
-    claims: BTreeMap<PathBuf, std::sync::atomic::AtomicBool>,
+    claims: parking_lot::Mutex<BTreeMap<PathBuf, bool>>,
     ready: parking_lot::Mutex<BTreeMap<PathBuf, Completion>>,
     limit: usize,
     parses: std::sync::atomic::AtomicUsize,
@@ -44,10 +98,9 @@ pub(super) struct Speculation {
 impl Speculation {
     pub(super) fn new(paths: &BTreeSet<PathBuf>, workers: usize) -> Self {
         Self {
-            claims: paths
-                .iter()
-                .map(|path| (path.clone(), false.into()))
-                .collect(),
+            claims: parking_lot::Mutex::new(
+                paths.iter().map(|path| (path.clone(), false)).collect(),
+            ),
             ready: Default::default(),
             limit: workers.saturating_mul(2),
             parses: 0.into(),
@@ -71,14 +124,13 @@ impl Speculation {
     }
 
     pub(super) fn claim(&self, path: &Path) -> Claim {
-        if let Some(ready) = self.ready.lock().remove(path) {
+        let mut ready = self.ready.lock();
+        if let Some(ready) = ready.remove(path) {
             return Claim::Ready(ready);
         }
-        if self
-            .claims
-            .get(path)
-            .is_some_and(|claimed| claimed.swap(true, std::sync::atomic::Ordering::AcqRel))
-        {
+        let mut claims = self.claims.lock();
+        let claimed = claims.entry(path.into()).or_default();
+        if std::mem::replace(claimed, true) {
             Claim::Waiting
         } else {
             Claim::Read
@@ -90,12 +142,28 @@ impl Speculation {
         ready.insert(path, result);
         while ready.len() > self.limit {
             let (path, _) = ready.pop_first().expect("nonempty speculative cache");
-            self.claims[&path].store(false, std::sync::atomic::Ordering::Release);
+            *self.claims.lock().get_mut(&path).expect("claimed source") = false;
         }
+    }
+
+    pub(super) fn record(&self, path: &Path, previous: Option<&Source>) -> Option<CacheRecord> {
+        let ready = self.ready.lock();
+        let (Ok(Prepared::Script(loaded)), _, _) = ready.get(path)? else {
+            return None;
+        };
+        loaded
+            .source
+            .as_ref()
+            .or(previous)
+            .map(|source| source.record.clone())
     }
 }
 
 pub(super) enum Prepared {
+    Dependencies(Dependencies),
+    EarlyResolved {
+        resolutions: eyre::Result<HashMap<ast_segmenter::owned::DependencyId, DependencyTarget>>,
+    },
     Script(Loaded),
     Resource {
         input: Vec<u8>,
@@ -110,14 +178,14 @@ pub(super) enum Prepared {
 
 pub(super) fn resolve(
     path: &Path,
-    record: &CacheRecord,
+    dependencies: &Dependencies,
     inventory: &Inventory,
     options: &BuildOptions,
     resolver: &impl DependencyResolver,
 ) -> eyre::Result<HashMap<ast_segmenter::owned::DependencyId, DependencyTarget>> {
     let _span = tracing::info_span!("build.resolve").entered();
     let mut resolved = HashMap::new();
-    for dependency in record.module().facts().dependencies() {
+    for dependency in dependencies.iter() {
         if dependency.type_only() {
             continue;
         }
@@ -133,7 +201,12 @@ pub(super) fn resolve(
                     inventory.root(),
                     path,
                     dependency,
-                    inventory.candidates(path, record, dependency, &options.resolver.extensions)?,
+                    inventory.candidates(
+                        path,
+                        dependencies,
+                        dependency,
+                        &options.resolver.extensions,
+                    )?,
                     &options.resolver.extensions,
                     resolver,
                 )
@@ -166,6 +239,9 @@ pub(super) fn resolve(
                 ResolvedDependency::External(name) => DependencyTarget::External(name),
             }
         };
+        if dependency.kind() == DependencyKind::Url {
+            worker_entries::target(path, dependency, Some(&target), options)?;
+        }
         if dependency.json_attribute().is_some() {
             ensure!(
                 matches!(&target, DependencyTarget::File(target)
@@ -221,6 +297,7 @@ pub(super) fn read(
     options: &BuildOptions,
     declarations: &PreparedDeclarations,
     base: &crate::output_url::PublicBase,
+    dependencies: &dyn Fn(&[ast_segmenter::owned::Dependency]),
 ) -> eyre::Result<Prepared> {
     let _span = tracing::info_span!("prepare.read").entered();
     ensure!(
@@ -260,6 +337,7 @@ pub(super) fn read(
                 Some(previous),
                 options.cache,
                 declarations,
+                dependencies,
             )?;
             if loaded.source.is_some() {
                 loaded.transpiled = previous.transpiled.clone();
@@ -281,6 +359,7 @@ pub(super) fn read(
             previous,
             options.cache,
             declarations,
+            dependencies,
         )?;
         loaded.transpiled = Some(Transpiled {
             config,
@@ -303,6 +382,7 @@ pub(super) fn read(
         previous,
         options.cache,
         declarations,
+        dependencies,
     )?))
 }
 
@@ -315,6 +395,7 @@ pub(super) fn load(
     previous: Option<&Source>,
     cache: CacheMode,
     declarations: &PreparedDeclarations,
+    dependencies: &dyn Fn(&[ast_segmenter::owned::Dependency]),
 ) -> eyre::Result<Loaded> {
     let _span = tracing::info_span!("prepare.load", bytes = input.len()).entered();
     let config = ParserConfig::for_path(parser_path, package)?;
@@ -334,7 +415,7 @@ pub(super) fn load(
             transpiled: None,
         });
     }
-    let loaded = segment_cache::load_prepared_with_declarations(
+    let loaded = segment_cache::load_prepared_with_dependencies(
         &logger::StdioLogger::new(),
         path,
         segment_cache::PreparedSource {
@@ -345,6 +426,7 @@ pub(super) fn load(
         },
         cache,
         declarations,
+        dependencies,
     )
     .wrap_err_with(|| format!("loading source facts for {}", path.display()))?;
     let warning = if let CacheWrite::Failed(message) = loaded.write {

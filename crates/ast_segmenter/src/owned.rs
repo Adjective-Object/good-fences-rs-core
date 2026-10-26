@@ -68,7 +68,17 @@ pub mod span_serde {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn extract(program: &Program<'_>, semantic: &Semantic<'_>) -> eyre::Result<ModuleFacts> {
+    let mut facts = extract_syntax(program, semantic)?;
+    extract_recipes(program, &mut facts);
+    Ok(facts)
+}
+
+pub(crate) fn extract_syntax(
+    program: &Program<'_>,
+    semantic: &Semantic<'_>,
+) -> eyre::Result<ModuleFacts> {
     let scoping = semantic.scoping();
     let ids: HashMap<_, _> = scoping
         .symbol_ids()
@@ -150,7 +160,11 @@ pub(crate) fn extract(program: &Program<'_>, semantic: &Semantic<'_>) -> eyre::R
     facts
         .exports_mut()
         .sort_by_key(|e| (e.span().start, e.name_span().map(|s| s.start)));
-    let (effects, invocations) = crate::effects::extract(program, &facts);
+    Ok(facts)
+}
+
+pub(crate) fn extract_recipes(program: &Program<'_>, facts: &mut ModuleFacts) {
+    let (effects, invocations) = crate::effects::extract(program, facts);
     *facts.effects_mut() = effects;
     *facts.invocations_mut() = invocations;
     let segments = if facts.commonjs() {
@@ -181,8 +195,7 @@ pub(crate) fn extract(program: &Program<'_>, semantic: &Semantic<'_>) -> eyre::R
             }
         }
     }
-    *facts.emission_mut() = crate::emission::extract(program, &facts, &segments);
-    Ok(facts)
+    *facts.emission_mut() = crate::emission::extract(program, facts, &segments);
 }
 
 fn webpack_ignored(program: &Program<'_>, expression: &ImportExpression<'_>) -> bool {

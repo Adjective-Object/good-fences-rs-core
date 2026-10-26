@@ -21,7 +21,7 @@ struct State {
 #[derive(Clone)]
 struct Context {
     importer: PathBuf,
-    record: CacheRecord,
+    owner: prepare::Dependencies,
     dependency: ast_segmenter::owned::DependencyId,
     extensions: Vec<String>,
     candidates: BTreeMap<PathBuf, PathBuf>,
@@ -148,6 +148,17 @@ impl Inventory {
             state: Mutex::new(State::default()),
             snapshot: self.snapshot.clone(),
         }
+    }
+
+    /// Inherit one already checked canonical file, not its linked-tree authority.
+    pub(super) fn inherit_admitted(&self, owner: &Self, path: &Path) -> eyre::Result<PathBuf> {
+        ensure!(
+            owner.contains(path),
+            "preparing unadmitted provisional source: {}",
+            path.display()
+        );
+        self.state.lock().unwrap().files.insert(path.into());
+        Ok(path.into())
     }
 
     pub(super) fn observations(&self) -> Vec<PathInput> {
@@ -400,19 +411,27 @@ impl Inventory {
     pub(super) fn candidates(
         &self,
         importer: &Path,
-        record: &CacheRecord,
+        owner: &prepare::Dependencies,
         dependency: ast_segmenter::views::Dependency<'_>,
         extensions: &[String],
     ) -> eyre::Result<std::collections::btree_map::IntoKeys<PathBuf, PathBuf>> {
         let candidates = self.scan(importer, dependency, extensions, false)?;
         self.state.lock().unwrap().contexts.push(Context {
             importer: importer.into(),
-            record: record.clone(),
+            owner: owner.clone(),
             dependency: dependency.id(),
             extensions: extensions.into(),
             candidates: candidates.clone(),
         });
         Ok(candidates.into_keys())
+    }
+
+    pub(super) fn seal_context_owner(&self, importer: &Path, record: &CacheRecord) {
+        for context in &mut self.state.lock().unwrap().contexts {
+            if context.importer == importer {
+                context.owner = prepare::Dependencies::Checked(record.clone());
+            }
+        }
     }
 
     fn scan(
@@ -473,10 +492,8 @@ impl Inventory {
         let mut changed = Vec::new();
         for context in contexts {
             let dependency = context
-                .record
-                .module()
-                .facts()
-                .dependencies()
+                .owner
+                .iter()
                 .iter()
                 .find(|dependency| dependency.id() == context.dependency)
                 .expect("retained context occurrence");
@@ -640,10 +657,8 @@ impl Inventory {
         };
         for context in contexts {
             let dependency = context
-                .record
-                .module()
-                .facts()
-                .dependencies()
+                .owner
+                .iter()
                 .iter()
                 .find(|dependency| dependency.id() == context.dependency)
                 .expect("retained context occurrence");

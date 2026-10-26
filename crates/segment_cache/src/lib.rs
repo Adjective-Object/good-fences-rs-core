@@ -6,7 +6,8 @@ mod validate_emission;
 pub use sidecar::{
     is_cache_artifact, load_or_parse, load_or_parse_with_declarations,
     load_or_parse_with_prepared_declarations, load_prepared, load_prepared_with_declarations,
-    sidecar_path, CacheMode, CacheOutcome, CacheStatus, CacheWrite, MissReason, PreparedSource,
+    load_prepared_with_dependencies, sidecar_path, CacheMode, CacheOutcome, CacheStatus,
+    CacheWrite, MissReason, PreparedSource,
 };
 
 #[cfg(test)]

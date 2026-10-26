@@ -63,6 +63,9 @@ to reconstruct split declarations. Keep destructuring and CJS bodies indivisible
 modes; validate parser and semantic diagnostics before extraction. It returns
 owned records or an error, never a skipped/partial executable program. Keep the
 legacy unused-tracker adapter separate. TS/JSX parsing is not transformation.
+The early dependency callback follows semantic/support validation of the shared
+syntax extraction and precedes effects/recipes/Ecco. Its owned occurrences are
+provisional until final extraction succeeds; never reparse or independently scan.
 Static ESM syntax disambiguates CommonJS-default .js/.jsx/.ts/.tsx only;
 explicit m/c extensions (including JSX variants) retain their format.
 Seal the effective mode together with the detection policy in provenance;

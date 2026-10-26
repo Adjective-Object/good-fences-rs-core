@@ -1,5 +1,35 @@
 use super::*;
 
+pub(super) fn target<'a>(
+    path: &Path,
+    dependency: ast_segmenter::views::Dependency<'_>,
+    resolved: Option<&'a DependencyTarget>,
+    options: &BuildOptions,
+) -> eyre::Result<&'a PathBuf> {
+    ensure!(
+        options.resolver.target_env == TargetEnv::Browser,
+        "{}: module worker URLs require the browser target at bytes {}..{}",
+        path.display(),
+        dependency.span().start,
+        dependency.span().end
+    );
+    let Some(DependencyTarget::File(target)) = resolved else {
+        eyre::bail!(
+            "{}: module worker URL must resolve to a checked local file at bytes {}..{}",
+            path.display(),
+            dependency.span().start,
+            dependency.span().end
+        );
+    };
+    ensure!(
+        crate::resource::kind(target, &options.css) == crate::resource::ResourceKind::Script,
+        "{}: module worker URL requires a script target: {}",
+        path.display(),
+        target.display()
+    );
+    Ok(target)
+}
+
 pub(super) fn discover(
     path: &Path,
     source: &Source,
@@ -18,27 +48,7 @@ pub(super) fn discover(
         .iter()
         .filter(|dependency| dependency.kind() == DependencyKind::Url)
     {
-        ensure!(
-            options.resolver.target_env == TargetEnv::Browser,
-            "{}: module worker URLs require the browser target at bytes {}..{}",
-            path.display(),
-            dependency.span().start,
-            dependency.span().end
-        );
-        let Some(DependencyTarget::File(target)) = resolved.get(&dependency.id()) else {
-            eyre::bail!(
-                "{}: module worker URL must resolve to a checked local file at bytes {}..{}",
-                path.display(),
-                dependency.span().start,
-                dependency.span().end
-            );
-        };
-        ensure!(
-            crate::resource::kind(target, &options.css) == crate::resource::ResourceKind::Script,
-            "{}: module worker URL requires a script target: {}",
-            path.display(),
-            target.display()
-        );
+        let target = target(path, dependency, resolved.get(&dependency.id()), options)?;
         let name = if let Some((name, _)) = entries.iter().find(|(_, (entry, _))| entry == target) {
             name.clone()
         } else {
