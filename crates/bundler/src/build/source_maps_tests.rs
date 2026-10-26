@@ -535,6 +535,58 @@ fn upstream_source_maps_report_bad_missing_remote_and_out_of_bounds_maps_only_wh
 }
 
 #[test]
+fn upstream_source_maps_require_explicit_repair_of_dangling_package_directives() {
+    let dir = TmpDir::new();
+    let source = "module.exports = 'SHIPPED_JS';\n";
+    write(
+        dir.root(),
+        "main.mjs",
+        "import value from './node_modules/bridge/index.js'; console.log(value);",
+    );
+    write(
+        dir.root(),
+        "node_modules/bridge/package.json",
+        r#"{"name":"bridge","main":"index.js"}"#,
+    );
+    write(
+        dir.root(),
+        "node_modules/bridge/index.js",
+        &format!("{source}//# sourceMappingURL=index.js.map\n"),
+    );
+    let mut config = options();
+    config.output.source_maps = true;
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let error = session.build(&config).err().unwrap();
+    let report = format!("{error:#}");
+    assert!(report.contains("upstream source map"), "{report}");
+    assert!(report.contains("index.js.map"), "{report}");
+    assert!(report.contains("missing or unsupported"), "{report}");
+
+    // A maintained package patch removes only the unpublished map reference.
+    write(dir.root(), "node_modules/bridge/index.js", source);
+    let repaired = session.build(&config).unwrap();
+    assert_origin(
+        &repaired.product.artifacts,
+        &dir.root().join("node_modules/bridge/index.js"),
+        source,
+        "'SHIPPED_JS'",
+    );
+    let cold = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(repaired.product.artifacts, cold.product.artifacts);
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&repaired.product, &noop.product));
+    config.cache = CacheMode::Disabled;
+    let uncached = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(repaired.product.artifacts, uncached.product.artifacts);
+}
+
+#[test]
 fn source_maps_reserve_case_insensitive_resource_and_parent_paths() {
     let dir = TmpDir::new();
     write(dir.root(), "main.mjs", "export const value = 1;");

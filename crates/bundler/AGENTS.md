@@ -81,6 +81,8 @@ Resolve sourceRoot at map location; never fetch sources/network links or replace
 unmapped upstream segments with compiled-source mappings.
 Local map targets must belong to the checked canonical inventory, including
 explicit linked trees; never read arbitrary external map files.
+Missing package maps remain errors; repair dangling directives explicitly in
+maintained package patches, never synthesize original mappings or silently fall back.
 Keep immutable AST/Ecco owners alive through graph and worker reads; never
 unpack cached facts for linking, validation, execution constraints or recipes.
 Precompile TS/TSX/JSX with pinned Oxc before extraction/resolution. Preserve

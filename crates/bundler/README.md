@@ -142,6 +142,10 @@ explicit linked trees. Remote
 links, missing files, malformed maps and unsupported encodings are errors, not
 fallbacks. No original source or network URL is fetched. Disabled maps discover
 directive spans during extraction but do not load or validate map contents.
+If a dependency ships a directive but omits its map, repair the package explicitly:
+restore the authentic map or maintain a package-manager patch removing only the
+stale directive. The latter maps output to the shipped JavaScript, not unavailable
+original sources; it does not disable source maps or relax validation.
 
 Original names and nullable `sourcesContent` survive composition. `sourceRoot`
 and source paths resolve from the linked map location (or script location for
