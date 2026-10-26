@@ -539,6 +539,8 @@ impl<'a> Dependency<'a> {
     scalar!(type_only, bool);
     scalar!(enclosing_function, Option<Span>, |v: Option<&w::Span>| v
         .map(span));
+    scalar!(json_attribute, Option<Span>, |v: Option<&w::Span>| v
+        .map(span));
     pub fn pattern(self) -> Option<Sequence<'a, &'a str>> {
         match self {
             Self::Owned(v) => v.pattern().map(Sequence::Owned),

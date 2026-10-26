@@ -140,7 +140,8 @@ fn dependency(v: &o::Dependency) -> w::DependencyT {
         pattern: v.pattern().map(<[String]>::to_vec),
         specifier_span: span(v.specifier_span()),
         type_only: v.type_only(),
-        enclosing_function: v.enclosing_function().map(span)
+        enclosing_function: v.enclosing_function().map(span),
+        json_attribute: v.json_attribute().map(span)
     })
 }
 fn imported(v: &o::ImportedName) -> w::ImportedNameT {

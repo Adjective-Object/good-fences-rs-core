@@ -371,6 +371,40 @@ pub(crate) fn validate_module(
                 && contains(d.span(), d.specifier_span()),
             "invalid dependency site"
         );
+        if let Some(attribute) = d.json_attribute() {
+            span(source, attribute)?;
+            ensure!(
+                !facts.commonjs()
+                    && d.kind() == DependencyKind::Import
+                    && d.pattern().is_none()
+                    && attribute.start < attribute.end
+                    && d.specifier_span().end == attribute.start
+                    && contains(d.span(), attribute),
+                "invalid JSON import attribute"
+            );
+            let text = crate::validate_emission::trivia(
+                &source[attribute.start as usize..attribute.end as usize],
+            );
+            ensure!(
+                text.is_some_and(
+                    |text| (text.starts_with("with") || text.starts_with("assert"))
+                        && text.ends_with('}')
+                ),
+                "invalid JSON import attribute clause"
+            );
+        }
+        if d.kind() == DependencyKind::Import {
+            let end = d
+                .json_attribute()
+                .map_or(d.specifier_span().end, |span| span.end);
+            ensure!(
+                matches!(
+                    crate::validate_emission::trivia(&source[end as usize..d.span().end as usize]),
+                    Some("" | ";")
+                ),
+                "missing or incomplete JSON import attribute clause"
+            );
+        }
         if d.kind() == DependencyKind::Url {
             let call = facts
                 .invocations()

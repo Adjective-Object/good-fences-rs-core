@@ -7,6 +7,171 @@ fn browser_options() -> BuildOptions {
 }
 
 #[test]
+fn json_import_attributes_share_native_values_and_checked_cache_hits() {
+    let dir = TmpDir::new();
+    write(dir.root(), "data.json", r#"{"primitives":{"fog":7}}"#);
+    write(
+        dir.root(),
+        "reader.cjs",
+        "module.exports = () => require('./data.json');",
+    );
+    write(
+        dir.root(),
+        "main.mjs",
+        "import mappings from 'theme-data' with {type: 'json'};
+         import {default as attributed} from './data.json' with {'type': 'json'};
+         import {default as plain} from './data.json';
+         import read from './reader.cjs';
+         const dynamic = await import('./data.json');
+         mappings.changed = 3;
+         console.log(mappings === attributed, mappings === plain,
+             mappings === read(), mappings === dynamic.default,
+             read().changed, mappings.primitives.fog);",
+    );
+    for target in [TargetEnv::Browser, TargetEnv::Node] {
+        let mut config = browser_options();
+        config.resolver.target_env = target;
+        config
+            .resolver
+            .alias
+            .insert("theme-data".into(), "./data.json".into());
+        config.output.source_maps = true;
+        config.entries.get_mut("main").unwrap().output_name = Some("nested/theme.mjs".into());
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let cold = session.build(&config).unwrap();
+        assert_eq!(cold.product.artifacts.backend, crate::link::Backend::Native);
+        assert_eq!(
+            observe(&cold.product.artifacts),
+            b"true true true true 3 7\n"
+        );
+        assert!(cold
+            .product
+            .artifacts
+            .files
+            .keys()
+            .any(|path| path.to_string_lossy().ends_with(".map")));
+        assert!(cold
+            .product
+            .artifacts
+            .files
+            .iter()
+            .filter(|(path, _)| path
+                .extension()
+                .is_some_and(|ext| ext == "mjs" || ext == "cjs"))
+            .all(|(_, text)| !text.contains("with {")));
+        let noop = session.build(&config).unwrap();
+        assert!(Rc::ptr_eq(&cold.product, &noop.product));
+        let warm = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&config)
+            .unwrap();
+        assert_eq!(warm.counters.source_parses, 0);
+        assert_eq!(warm.counters.disk_hits, 3);
+        assert_eq!(warm.product.artifacts, cold.product.artifacts);
+        config.cache = CacheMode::Disabled;
+        let uncached = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&config)
+            .unwrap();
+        assert_eq!(uncached.product.artifacts, cold.product.artifacts);
+        write(dir.root(), "data.json", r#"{"primitives":{"fog":9}}"#);
+        let edited = session.build(&config).unwrap();
+        assert_eq!(
+            observe(&edited.product.artifacts),
+            b"true true true true 3 9\n"
+        );
+        write(dir.root(), "data.json", r#"{"primitives":{"fog":7}}"#);
+    }
+}
+
+#[test]
+fn json_import_attributes_reject_non_json_aliases_externals_and_css_overrides() {
+    let dir = TmpDir::new();
+    write(dir.root(), "data.json", r#"{"value":7}"#);
+    write(dir.root(), "script.mjs", "export default {value: 7};");
+    write(dir.root(), "data.css", ".value { color: red; }");
+    write(dir.root(), "data.bin", "opaque");
+    write(
+        dir.root(),
+        "main.mjs",
+        "import data from 'theme-data' with {type: 'json'}; export default data;",
+    );
+    let mut config = browser_options();
+    config
+        .resolver
+        .alias
+        .insert("theme-data".into(), "./data.json".into());
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let good = session.build(&config).unwrap();
+    for target in ["./script.mjs", "./data.css", "./data.bin"] {
+        config
+            .resolver
+            .alias
+            .insert("theme-data".into(), target.into());
+        let error = format!("{:#}", session.build(&config).err().unwrap());
+        assert!(
+            error.contains("requires a bundled JSON resource"),
+            "{error}"
+        );
+        assert!(
+            error.contains("main.mjs")
+                && error.contains("theme-data")
+                && error.contains("bytes 0.."),
+            "{error}"
+        );
+        assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &good.product));
+    }
+    config.resolver.alias.clear();
+    config.externals.insert("theme-data".into());
+    let error = format!("{:#}", session.build(&config).err().unwrap());
+    assert!(
+        error.contains("requires a bundled JSON resource"),
+        "{error}"
+    );
+    config.externals.clear();
+    config
+        .resolver
+        .alias
+        .insert("theme-data".into(), "./data.json".into());
+    config.css.css_modules = CssModules::Extension(".json".into());
+    let error = format!("{:#}", session.build(&config).err().unwrap());
+    assert!(
+        error.contains("requires a bundled JSON resource"),
+        "{error}"
+    );
+}
+
+#[test]
+fn json_import_attributes_scope_hoist_without_changing_native_source_results() {
+    let dir = TmpDir::new();
+    write(dir.root(), "data.json", r#"{"primitives":{"fog":7}}"#);
+    write(
+        dir.root(),
+        "main.mjs",
+        "import mappings from './data.json' /* keep coordinates */ with {type: 'json'};
+         import './data.json' with {'type': 'json'};
+         export const theme = Object.fromEntries(Object.entries(mappings.primitives));
+         console.log(JSON.stringify(theme));",
+    );
+    let original = observe_entry(&dir.root().join("main.mjs"));
+    assert_eq!(original, b"{\"fog\":7}\n");
+    let mut config = browser_options();
+    config.output.source_maps = true;
+    config.cache = CacheMode::Disabled;
+    let result = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(
+        result.product.artifacts.backend,
+        crate::link::Backend::Native
+    );
+    assert_eq!(observe(&result.product.artifacts), original);
+    assert_eq!(result.counters.source_reparses, 0);
+    assert_eq!(result.counters.fragment_reparses, 0);
+}
+
+#[test]
 fn browser_eval_identity_tables_preserve_native_values_and_cache_reuse() {
     let dir = TmpDir::new();
     write(

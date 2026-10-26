@@ -15,6 +15,11 @@ Callers supplying a semantic model to `segment_file` must enable
 Module requests containing lone UTF-16 surrogates are rejected rather than
 lossily resolved. Such computed property names retain unknown property metadata;
 their original source is preserved.
+Static imports with only `with { type: "json" }` retain `json_attribute()` on
+the borrowed dependency; the bundler must validate a prepared JSON target before
+consuming the clause. Default and side-effect forms are supported.
+Other attributes, import phases, attributed reexports and dynamic options remain
+unsupported; namespace forms and named JSON properties are not supported.
 Line-comment annotation matching is ASCII-case-insensitive and tolerates
 arbitrary Unicode comment text without slicing across UTF-8 boundaries.
 Top-level multi-declarator `const`/`let`/`var` declarations, including named

@@ -13,6 +13,48 @@ fn parse(source: &str, path: &str) -> eyre::Result<ParsedModule> {
 }
 
 #[test]
+fn json_import_attributes_preserve_static_dependency_evidence() {
+    for source in [
+        "import data from './data.json' with { type: 'json' }; export default data;",
+        "import {default as data} from './data' with {'type': 'json'}; export default data;",
+        "import './data.json' with {type: 'json'};",
+        "import data from './data.json'; export default data;",
+    ] {
+        let parsed = parse(source, "entry.mjs").unwrap();
+        let dependency = parsed.facts().dependencies().get(0).unwrap();
+        assert_eq!(dependency.kind(), DependencyKind::Import);
+        assert_eq!(
+            dependency.json_attribute().is_some(),
+            source.contains("with")
+        );
+        if let Some(span) = dependency.json_attribute() {
+            assert!(source[span.start as usize..span.end as usize]
+                .trim_start()
+                .starts_with("with"));
+            assert_eq!(span.start, dependency.specifier_span().end);
+        }
+        assert_eq!(
+            &source[dependency.span().start as usize..dependency.span().end as usize],
+            &source[..source.find(';').unwrap() + 1]
+        );
+    }
+    for source in [
+        "import data from './data.json' with {};",
+        "import data from './data.json' with {type: 'css'};",
+        "import data from './data.json' with {type: 'json', other: 'value'};",
+        "import data from './data.json' with {'\\uD800': 'json'};",
+        "import {value} from './data.json' with {type: 'json'};",
+        "import * as data from './data.json' with {type: 'json'};",
+        "export {default} from './data.json' with {type: 'json'};",
+        "export * from './data.json' with {type: 'json'};",
+        "import('./data.json', {with: {type: 'json'}});",
+        "import source data from './data.json' with {type: 'json'};",
+    ] {
+        assert!(parse(source, "entry.mjs").is_err(), "{}", source);
+    }
+}
+
+#[test]
 fn opaque_body_preserves_directives_reassignment_and_nested_sites() {
     let source = "#!/usr/bin/env node\n'use strict';\n\
         const café = require('./same');\n\
@@ -724,7 +766,7 @@ fn unsupported_transforms_and_execution_features_are_diagnostics() {
         ("test.cjs", "(0, eval)('code');", "unshadowed eval"),
         (
             "test.mjs",
-            "import x from './x' with {type: 'json'};",
+            "import x from './x' with {type: 'css'};",
             "import attributes",
         ),
         ("test.mjs", "import source x from './x';", "import phase"),

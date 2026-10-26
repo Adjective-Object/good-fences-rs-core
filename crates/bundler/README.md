@@ -23,7 +23,7 @@ Graph linking, effect policy, Ecco registration, execution constraints and nativ
 recipe rendering consume owned-or-wire AST views. A byte-backed graph retains
 verified owners, including Ecco's nested storage, without unpacking extraction
 trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
-`.seg.fb` records (schema 20/extractor 33); parse fingerprints include both active
+`.seg.fb` records (schema 21/extractor 34); parse fingerprints include both active
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
 
@@ -767,8 +767,14 @@ Browser static and dynamic defaults share the same mutable value.
 Computed object keys preserve own `__proto__`
 properties, duplicate-key semantics, negative zero, large numbers and escaped
 surrogates without consulting mutable `JSON.parse`. UTF-8 BOMs are accepted.
-Named JSON exports and import attributes remain unsupported; use a default import
-or `require`. A JSON entry defaults to `.cjs` on Node and `.mjs` on Browser.
+Static imports support `with { type: "json" }` (including a quoted `type` key)
+for default and side-effect imports of bundled JSON/JSONC resources.
+Resolution validates the actual resource kind, including aliases and CSS selection;
+external targets and unprepared low-level inputs are rejected, never silently
+stripped. Native connections consume the clause because output is JavaScript.
+Other attributes, namespace forms, attributed reexports, dynamic import options
+and named JSON properties remain unsupported. A JSON entry defaults to `.cjs` on Node and `.mjs`
+on Browser.
 
 Resource preparation separates original input bytes from generated JavaScript.
 Graph identities remain original resource paths, while cached spans and sealed

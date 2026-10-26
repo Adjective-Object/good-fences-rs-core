@@ -221,6 +221,9 @@ parser paths. Graph paths retain input identity; spans/provenance describe only
 generated text. Recheck original bytes on reuse and return. JSON uses a shared
 native ESM default value for Browser and opaque CJS initializer for Node, both
 with computed object keys, never mutable runtime JSON.parse.
+Static type:json imports must resolve to prepared JSON resources before the
+native connection consumes their clauses. Reject other resource kinds, external
+targets and unprepared low-level inputs, including on borrowed cache hits.
 JSONC alone normalizes parser-identified comments/trailing commas before strict
 JSON validation; preserve original lexemes, and keep JSON/package metadata strict.
 Assets export validated public-base URL strings (output-root-relative by default)

@@ -35,8 +35,8 @@ use std::{ops::Range, sync::Arc};
 use eyre::{ensure, Result};
 
 pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
-pub const SCHEMA_VERSION: u32 = 20;
-pub const EXTRACTOR_VERSION: u32 = 33;
+pub const SCHEMA_VERSION: u32 = 21;
+pub const EXTRACTOR_VERSION: u32 = 34;
 pub const MODULE_IDENTIFIER: &str = "GFSM";
 const CHECKSUM_BYTES: usize = 16;
 

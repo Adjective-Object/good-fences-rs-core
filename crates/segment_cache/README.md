@@ -18,7 +18,10 @@ module body and ordered statement ranges, not lossy legacy dependency/name sets.
 `CacheRecord` and `CachedModule` have private storage. Consumers and validators
 use borrowed accessors such as `record.module().facts()` and
 `record.module().segments()`; no mutable view of sealed records is exposed.
-Production loading/publication uses typed FlatBuffers, schema 20/extractor 33.
+Production loading/publication uses typed FlatBuffers, schema 21/extractor 34.
+Static JSON import attributes persist as typed borrowed dependency clause spans;
+semantic validation restricts them to static ESM imports. Target JSON-resource
+compatibility is checked by the bundler after resolution, not cached.
 Schema 20/extractor 33 replace source/provenance seals and framing checksums
 with 16-byte big-endian XXH3-128; earlier sidecars miss/rebuild.
 Extractor 32 restricts worker URLs to the first argument of new Worker and

@@ -100,6 +100,9 @@ function containment is syntax metadata, not eager evaluation permission.
 `policy` is the checked source-local support gate; target format, assets and
 externals remain resolver/linker checks. Low-level parsing and legacy adapters
 intentionally accept a broader syntax set.
+Static imports accept only a single type:json attribute, retained as a typed
+dependency clause span. Target JSON-resource validation belongs to the build/linker;
+other attributes, phases, attributed reexports and dynamic options stay rejected.
 Read-only unshadowed eval values remain native identity reads in ESM/CJS.
 Reject invocation/construction/tag and mutation contexts; never synthesize an
 evaluator or rewrite source code strings.

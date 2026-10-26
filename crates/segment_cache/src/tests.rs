@@ -18,6 +18,48 @@ fn envelope(record: &FixtureRecord) -> Vec<u8> {
 }
 
 #[test]
+fn json_import_attributes_roundtrip_as_borrowed_checked_facts() {
+    let source = "import data from './data.json' with {type: 'json'}; export default data;";
+    let original = record(source, "entry.mjs", ModuleFormat::Esm);
+    let parses = ast_segmenter::module_parse_count();
+    let cached =
+        CacheRecord::decode(&original.encode(source).unwrap(), source, original.config()).unwrap();
+    let parsed = cached.to_parsed(source).unwrap();
+    assert!(matches!(
+        parsed.facts(),
+        ast_segmenter::views::ModuleFacts::Wire(_)
+    ));
+    assert!(parsed
+        .facts()
+        .dependencies()
+        .get(0)
+        .unwrap()
+        .json_attribute()
+        .is_some());
+    assert_eq!(
+        parsed.facts().dependencies(),
+        original.module().facts().dependencies()
+    );
+    for edit in [
+        |v: &mut serde_json::Value| v.set("module.facts.dependencies.0.kind", "Require"),
+        |v: &mut serde_json::Value| {
+            v.set(
+                "module.facts.dependencies.0.json_attribute",
+                Option::<u32>::None,
+            )
+        },
+        |v: &mut serde_json::Value| {
+            v.set("module.facts.dependencies.0.json_attribute.end", u32::MAX)
+        },
+    ] {
+        let damaged = corrupt(&original, edit);
+        assert!(damaged.encode(source).is_err());
+        assert!(CacheRecord::decode(&damaged.envelope(true), source, original.config()).is_err());
+    }
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+}
+
+#[test]
 fn commonjs_module_detectors_roundtrip_without_reparse_or_loader_dependencies() {
     let source = "function detect() {
         var i = typeof exports == 'object' && exports && !exports.nodeType && exports;

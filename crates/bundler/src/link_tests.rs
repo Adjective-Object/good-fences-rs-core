@@ -106,6 +106,41 @@ fn sources(items: &[(&str, &str)]) -> BTreeMap<PathBuf, String> {
         .collect()
 }
 
+#[test]
+fn json_import_attributes_reject_unprepared_low_level_targets() {
+    let sources = sources(&[
+        (
+            "entry.mjs",
+            "import data from './data.mjs' with {type: 'json'}; export default data;",
+        ),
+        ("data.mjs", "export default {value: 7};"),
+    ]);
+    for wire in [false, true] {
+        let graph = graph_with_storage(&sources, false, ModuleFormat::Esm, wire);
+        let file = graph.file_id(Path::new("entry.mjs")).unwrap();
+        let policy = EffectPolicy::default();
+        let plan = partition(
+            &graph,
+            &[RootSeed {
+                id: RootId::Entry("main".into()),
+                evaluation_roots: vec![file],
+                binding_roots: vec![GraphNode::Module(file)],
+            }],
+            &policy,
+        )
+        .unwrap();
+        let error = format!("{:#}", esm(&graph, &plan, &policy, &sources).unwrap_err());
+        assert!(
+            error.contains("requires a checked prepared JSON resource"),
+            "{error}"
+        );
+        assert!(
+            error.contains("entry.mjs") && error.contains("bytes 0.."),
+            "{error}"
+        );
+    }
+}
+
 fn build(
     sources: &BTreeMap<PathBuf, String>,
     entries: &[(&str, bool)],

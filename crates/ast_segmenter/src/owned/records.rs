@@ -198,6 +198,13 @@ pub struct Dependency {
     /// Lexical containment only, not a claim that a module-level site runs eagerly.
     #[serde(with = "span_serde::optional")]
     enclosing_function: Option<Span>,
+    /// Suffix after the request literal through the JSON attribute clause, including trivia.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "span_serde::optional"
+    )]
+    json_attribute: Option<Span>,
 }
 
 impl Dependency {
@@ -220,7 +227,13 @@ impl Dependency {
             specifier_span,
             type_only,
             enclosing_function,
+            json_attribute: None,
         }
+    }
+
+    pub(crate) fn with_json_attribute(mut self, json_attribute: Option<Span>) -> Self {
+        self.json_attribute = json_attribute;
+        self
     }
 }
 
@@ -255,6 +268,10 @@ impl Dependency {
 
     pub fn enclosing_function(&self) -> Option<Span> {
         self.enclosing_function
+    }
+
+    pub fn json_attribute(&self) -> Option<Span> {
+        self.json_attribute
     }
 }
 

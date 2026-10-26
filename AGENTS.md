@@ -34,7 +34,7 @@ syntax/emission/execution records and Ecco precursors. Keep storage fields
 private in record modules; scoped construction APIs are for extraction before
 provenance sealing, not consumer mutation. Owned adapter moves are explicit.
 Scalar IDs/spans and enum discriminants/payload matching remain value APIs.
-Production source sidecars are typed FlatBuffers, schema 20/extractor 33.
+Production source sidecars are typed FlatBuffers, schema 21/extractor 34.
 Source/preparation identities, extraction seals and cache framing use big-endian
 XXH3-128; checksums detect corruption, not authentication. Publication/content
 integrity and resource names remain SHA-256.

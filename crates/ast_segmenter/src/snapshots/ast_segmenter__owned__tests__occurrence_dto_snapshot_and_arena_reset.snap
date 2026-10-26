@@ -1160,6 +1160,7 @@ ModuleFacts {
             },
             type_only: false,
             enclosing_function: None,
+            json_attribute: None,
         },
         Dependency {
             id: DependencyId(
@@ -1178,6 +1179,7 @@ ModuleFacts {
             },
             type_only: false,
             enclosing_function: None,
+            json_attribute: None,
         },
         Dependency {
             id: DependencyId(
@@ -1196,6 +1198,7 @@ ModuleFacts {
             },
             type_only: false,
             enclosing_function: None,
+            json_attribute: None,
         },
         Dependency {
             id: DependencyId(
@@ -1214,6 +1217,7 @@ ModuleFacts {
             },
             type_only: false,
             enclosing_function: None,
+            json_attribute: None,
         },
         Dependency {
             id: DependencyId(
@@ -1232,6 +1236,7 @@ ModuleFacts {
             },
             type_only: false,
             enclosing_function: None,
+            json_attribute: None,
         },
         Dependency {
             id: DependencyId(
@@ -1255,6 +1260,7 @@ ModuleFacts {
                     end: 403,
                 },
             ),
+            json_attribute: None,
         },
         Dependency {
             id: DependencyId(
@@ -1273,6 +1279,7 @@ ModuleFacts {
             },
             type_only: false,
             enclosing_function: None,
+            json_attribute: None,
         },
     ],
     imports: [

@@ -335,6 +335,7 @@ impl Extractor<'_, '_> {
         span: Span,
         source: &StringLiteral<'_>,
         type_only: bool,
+        json_attribute: Option<Span>,
     ) -> DependencyId {
         let id = DependencyId(span.start);
         let Some(request) = source.value.as_str() else {
@@ -344,16 +345,19 @@ impl Extractor<'_, '_> {
             );
             return id;
         };
-        self.facts.dependencies_mut().push(Dependency::new(
-            id,
-            kind,
-            span,
-            request.to_owned(),
-            None,
-            source.span,
-            type_only,
-            self.enclosing_function,
-        ));
+        self.facts.dependencies_mut().push(
+            Dependency::new(
+                id,
+                kind,
+                span,
+                request.to_owned(),
+                None,
+                source.span,
+                type_only,
+                self.enclosing_function,
+            )
+            .with_json_attribute(json_attribute),
+        );
         id
     }
 
@@ -412,7 +416,7 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
                         .scoping()
                         .get_reference(callee.reference_id.get().expect("validated URL reference"));
                     if reference.symbol_id().is_none() {
-                        self.dependency(DependencyKind::Url, url.span, source, false);
+                        self.dependency(DependencyKind::Url, url.span, source, false, None);
                     }
                 }
             }
@@ -492,6 +496,7 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
             decl.span,
             &decl.source,
             decl.import_kind.is_type(),
+            crate::policy::json_import_attribute(decl),
         );
         if let Some(specifiers) = &decl.specifiers {
             for specifier in specifiers {
@@ -553,6 +558,7 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
             decl.span,
             &decl.source,
             decl.export_kind.is_type(),
+            None,
         );
         for specifier in &decl.specifiers {
             self.facts.exports_mut().push(Export::new(
@@ -623,6 +629,7 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
             decl.span,
             &decl.source,
             decl.export_kind.is_type(),
+            None,
         );
         self.facts.exports_mut().push(Export::new(
             decl.exported.as_ref().map(|n| n.name().to_string()),
@@ -641,7 +648,13 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
         if webpack_ignored(self.program, expr) {
             // Still walk inputs: ignoring a dependency never makes it pure.
         } else if let Expression::StringLiteral(source) = expr.source.get_inner_expression() {
-            self.dependency(DependencyKind::DynamicImport, expr.span, source, false);
+            self.dependency(
+                DependencyKind::DynamicImport,
+                expr.span,
+                source,
+                false,
+                None,
+            );
         } else {
             self.context_dependency(DependencyKind::DynamicImport, expr.span, &expr.source);
         }
@@ -667,7 +680,7 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
                     .and_then(Argument::as_expression)
                     .map(Expression::get_inner_expression)
                 {
-                    self.dependency(DependencyKind::Require, expr.span, source, false);
+                    self.dependency(DependencyKind::Require, expr.span, source, false, None);
                 } else if let Some(source) =
                     expr.arguments.first().and_then(Argument::as_expression)
                 {
@@ -681,7 +694,13 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
     }
 
     fn visit_ts_import_type(&mut self, expr: &TSImportType<'a>) {
-        self.dependency(DependencyKind::ImportType, expr.span, &expr.source, true);
+        self.dependency(
+            DependencyKind::ImportType,
+            expr.span,
+            &expr.source,
+            true,
+            None,
+        );
         walk::walk_ts_import_type(self, expr);
     }
 

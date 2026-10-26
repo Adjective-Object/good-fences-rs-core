@@ -166,6 +166,17 @@ pub(super) fn resolve(
                 ResolvedDependency::External(name) => DependencyTarget::External(name),
             }
         };
+        if dependency.json_attribute().is_some() {
+            ensure!(
+                matches!(&target, DependencyTarget::File(target)
+                    if crate::resource::kind(target, &options.css) == crate::resource::ResourceKind::Json),
+                "{}: JSON import attribute at bytes {}..{} requires a bundled JSON resource: {}",
+                path.display(),
+                dependency.span().start,
+                dependency.span().end,
+                dependency.specifier()
+            );
+        }
         resolved.insert(dependency.id(), target);
     }
     Ok(resolved)

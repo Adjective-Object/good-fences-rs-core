@@ -44,6 +44,7 @@ table Dependency {
   specifier_span:Span (required);
   type_only:bool;
   enclosing_function:Span;
+  json_attribute:Span;
 }
 table NamedImport { name:string (required); }
 table NamespaceImport {}

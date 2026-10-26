@@ -14770,6 +14770,7 @@ impl<'a> Dependency<'a> {
   pub const VT_SPECIFIER_SPAN: flatbuffers::VOffsetT = 14;
   pub const VT_TYPE_ONLY: flatbuffers::VOffsetT = 16;
   pub const VT_ENCLOSING_FUNCTION: flatbuffers::VOffsetT = 18;
+  pub const VT_JSON_ATTRIBUTE: flatbuffers::VOffsetT = 20;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -14781,6 +14782,7 @@ impl<'a> Dependency<'a> {
     args: &'args DependencyArgs<'args>
   ) -> flatbuffers::WIPOffset<Dependency<'bldr>> {
     let mut builder = DependencyBuilder::new(_fbb);
+    if let Some(x) = args.json_attribute { builder.add_json_attribute(x); }
     if let Some(x) = args.enclosing_function { builder.add_enclosing_function(x); }
     if let Some(x) = args.specifier_span { builder.add_specifier_span(x); }
     if let Some(x) = args.pattern { builder.add_pattern(x); }
@@ -14814,6 +14816,9 @@ impl<'a> Dependency<'a> {
     let enclosing_function = self.enclosing_function().map(|x| {
       x.unpack()
     });
+    let json_attribute = self.json_attribute().map(|x| {
+      x.unpack()
+    });
     DependencyT {
       id,
       kind,
@@ -14823,6 +14828,7 @@ impl<'a> Dependency<'a> {
       specifier_span,
       type_only,
       enclosing_function,
+      json_attribute,
     }
   }
 
@@ -14882,6 +14888,13 @@ impl<'a> Dependency<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<Span>(Dependency::VT_ENCLOSING_FUNCTION, None)}
   }
+  #[inline]
+  pub fn json_attribute(&self) -> Option<&'a Span> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<Span>(Dependency::VT_JSON_ATTRIBUTE, None)}
+  }
 }
 
 impl flatbuffers::Verifiable for Dependency<'_> {
@@ -14899,6 +14912,7 @@ impl flatbuffers::Verifiable for Dependency<'_> {
      .visit_field::<Span>("specifier_span", Self::VT_SPECIFIER_SPAN, true)?
      .visit_field::<bool>("type_only", Self::VT_TYPE_ONLY, false)?
      .visit_field::<Span>("enclosing_function", Self::VT_ENCLOSING_FUNCTION, false)?
+     .visit_field::<Span>("json_attribute", Self::VT_JSON_ATTRIBUTE, false)?
      .finish();
     Ok(())
   }
@@ -14912,6 +14926,7 @@ pub struct DependencyArgs<'a> {
     pub specifier_span: Option<&'a Span>,
     pub type_only: bool,
     pub enclosing_function: Option<&'a Span>,
+    pub json_attribute: Option<&'a Span>,
 }
 impl<'a> Default for DependencyArgs<'a> {
   #[inline]
@@ -14925,6 +14940,7 @@ impl<'a> Default for DependencyArgs<'a> {
       specifier_span: None, // required field
       type_only: false,
       enclosing_function: None,
+      json_attribute: None,
     }
   }
 }
@@ -14967,6 +14983,10 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> DependencyBuilder<'a, 'b, A> {
     self.fbb_.push_slot_always::<&Span>(Dependency::VT_ENCLOSING_FUNCTION, enclosing_function);
   }
   #[inline]
+  pub fn add_json_attribute(&mut self, json_attribute: &Span) {
+    self.fbb_.push_slot_always::<&Span>(Dependency::VT_JSON_ATTRIBUTE, json_attribute);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> DependencyBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     DependencyBuilder {
@@ -14995,6 +15015,7 @@ impl core::fmt::Debug for Dependency<'_> {
       ds.field("specifier_span", &self.specifier_span());
       ds.field("type_only", &self.type_only());
       ds.field("enclosing_function", &self.enclosing_function());
+      ds.field("json_attribute", &self.json_attribute());
       ds.finish()
   }
 }
@@ -15009,6 +15030,7 @@ pub struct DependencyT {
   pub specifier_span: SpanT,
   pub type_only: bool,
   pub enclosing_function: Option<SpanT>,
+  pub json_attribute: Option<SpanT>,
 }
 impl Default for DependencyT {
   fn default() -> Self {
@@ -15021,6 +15043,7 @@ impl Default for DependencyT {
       specifier_span: Default::default(),
       type_only: false,
       enclosing_function: None,
+      json_attribute: None,
     }
   }
 }
@@ -15045,6 +15068,8 @@ impl DependencyT {
     let type_only = self.type_only;
     let enclosing_function_tmp = self.enclosing_function.as_ref().map(|x| x.pack());
     let enclosing_function = enclosing_function_tmp.as_ref();
+    let json_attribute_tmp = self.json_attribute.as_ref().map(|x| x.pack());
+    let json_attribute = json_attribute_tmp.as_ref();
     Dependency::create(_fbb, &DependencyArgs{
       id,
       kind,
@@ -15054,6 +15079,7 @@ impl DependencyT {
       specifier_span,
       type_only,
       enclosing_function,
+      json_attribute,
     })
   }
 }

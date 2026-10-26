@@ -425,6 +425,15 @@ impl<'a> CachedRenderer<'a> {
             if whole {
                 self.replace(index as u32, replacement);
             } else {
+                if let Some(span) = dependency.json_attribute() {
+                    self.edit(
+                        index as u32,
+                        Edit {
+                            span,
+                            replacement: Code::default(),
+                        },
+                    );
+                }
                 self.edit(
                     index as u32,
                     Edit {

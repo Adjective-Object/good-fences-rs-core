@@ -8,6 +8,17 @@ use oxc_span::Span;
 
 use crate::owned::{DependencyKind, ModuleFacts};
 
+pub(crate) fn json_import_attribute(declaration: &ImportDeclaration<'_>) -> Option<Span> {
+    let clause = declaration.with_clause.as_ref()?;
+    (clause.with_entries.len() == 1
+        && match &clause.with_entries[0].key {
+            ImportAttributeKey::Identifier(key) => key.name == "type",
+            ImportAttributeKey::StringLiteral(key) => key.value == "type",
+        }
+        && clause.with_entries[0].value.value == "json")
+        .then(|| Span::new(declaration.source.span.end, clause.span.end))
+}
+
 pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<()> {
     let mut policy = Policy {
         commonjs: program.source_type.is_commonjs(),
@@ -371,9 +382,26 @@ impl<'a> Visit<'a> for Policy {
     }
 
     fn visit_import_declaration(&mut self, declaration: &ImportDeclaration<'a>) {
+        let json_attribute = json_import_attribute(declaration).is_some();
+        if json_attribute
+            && declaration.specifiers.as_ref().is_some_and(|specifiers| {
+                specifiers.iter().any(|specifier| match specifier {
+                    ImportDeclarationSpecifier::ImportDefaultSpecifier(_) => false,
+                    ImportDeclarationSpecifier::ImportSpecifier(specifier) => {
+                        specifier.imported.name() != "default"
+                    }
+                    ImportDeclarationSpecifier::ImportNamespaceSpecifier(_) => true,
+                })
+            })
+        {
+            self.reject(
+                declaration.span,
+                "JSON import attributes support only default or side-effect imports",
+            );
+        }
         self.module_declaration(
             declaration.span,
-            declaration.with_clause.is_some(),
+            declaration.with_clause.is_some() && !json_attribute,
             declaration.phase.is_some(),
         );
         walk::walk_import_declaration(self, declaration);

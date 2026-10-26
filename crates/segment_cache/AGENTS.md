@@ -22,9 +22,11 @@
   parser identity, UTF-8 ranges, local IDs, links and order on both boundaries.
 - Preserve sealed extraction provenance on both boundaries and in `to_parsed`;
   never bless unrelated parsed facts by hashing separately supplied source text.
-- Schema 20/extractor 33 retains typed nested module buffers and wire seals,
+- Schema 21/extractor 34 retains typed nested module buffers and wire seals,
   including dynamic namespace observations, deferred recipes, async references
   and lazy construction candidates with original argument slots.
+- Static JSON import-attribute spans remain borrowed source facts, restricted to
+  non-CJS static imports. Resolve and validate target resource kinds on every build.
 - URL dependencies retain only checked literal source spans and original URL
   construction evidence, never output names, worker realms or resolved entries.
   Require that construction to be the first, nonspread argument of new Worker.

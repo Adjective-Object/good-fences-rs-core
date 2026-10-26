@@ -488,6 +488,24 @@ pub(crate) fn esm_plan_configured(
     let manifest = diagnostic_manifest(graph, plan, policy)?;
     graph.validate_links()?;
     let mut modules = load_modules(graph, plan, sources, relocations)?;
+    for (&file, module) in &modules {
+        for dependency in module
+            .parsed
+            .facts()
+            .dependencies()
+            .iter()
+            .filter(|d| d.json_attribute().is_some())
+        {
+            ensure!(
+                matches!(graph.dependency_target(file, dependency.id()),
+                    Some(DependencyTarget::File(target))
+                    if matches!(target.extension().and_then(|ext| ext.to_str()), Some("json" | "jsonc"))
+                        && require_resources.get(target) == Some(&crate::resource::RequireValue::Default)),
+                "{}: JSON import attribute at bytes {}..{} requires a checked prepared JSON resource",
+                module.path.display(), dependency.span().start, dependency.span().end
+            );
+        }
+    }
     for module in modules.values_mut() {
         module.mapping = mappings.get(module.path).cloned();
     }

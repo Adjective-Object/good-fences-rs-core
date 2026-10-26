@@ -713,7 +713,7 @@ fn property_token_matches(source: &str, receiver: Span, property: Span, name: &s
     )
 }
 
-fn trivia(mut text: &str) -> Option<&str> {
+pub(super) fn trivia(mut text: &str) -> Option<&str> {
     loop {
         text = text.trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
         if let Some(comment) = text.strip_prefix("/*") {
