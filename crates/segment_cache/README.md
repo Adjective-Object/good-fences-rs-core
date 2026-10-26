@@ -18,7 +18,9 @@ module body and ordered statement ranges, not lossy legacy dependency/name sets.
 `CacheRecord` and `CachedModule` have private storage. Consumers and validators
 use borrowed accessors such as `record.module().facts()` and
 `record.module().segments()`; no mutable view of sealed records is exposed.
-Production loading/publication uses typed FlatBuffers, schema 19/extractor 30.
+Production loading/publication uses typed FlatBuffers, schema 19/extractor 31.
+Extractor 31 admits native read-only eval identity references while rejecting
+unshadowed invocation and mutation contexts; the wire layout is unchanged.
 Extractor 30 also admits conditional native host-loader selections without
 inferring dependencies; earlier sidecars miss/rebuild, with no wire-layout change.
 URL dependencies retain original relative literals and construction spans, not

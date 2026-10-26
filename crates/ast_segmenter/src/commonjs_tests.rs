@@ -185,6 +185,73 @@ fn commonjs_empty_bodies_and_top_level_return_are_deliberate() {
 }
 
 #[test]
+fn eval_identity_reads_remain_native_but_operations_are_rejected() {
+    for path in ["primordials.mjs", "primordials.cjs"] {
+        for source in [
+            "const primordials = Object.freeze([Array, eval, Function]);",
+            "const primordials = (() => [eval])();",
+            "const identity = eval;",
+            "const identity = {eval};",
+            "const identity = flag ? eval : other;",
+            "const identity = flag && eval;",
+            "const identity = (other, eval);",
+            "observe(eval);",
+            "typeof eval;",
+            "function read() { return eval; }",
+            "const identity = (eval, other)();",
+            "const identity = (eval ? first : second)();",
+        ] {
+            let parsed = parse(source, path).unwrap();
+            let references: Vec<_> = parsed
+                .facts()
+                .references()
+                .iter()
+                .filter(|reference| reference.name() == "eval")
+                .collect();
+            assert_eq!(references.len(), 1, "{source}");
+            assert!(references.iter().all(|reference| reference.read()
+                && !reference.write()
+                && reference.binding().is_none()
+                && reference.commonjs().is_none()));
+            assert!(parsed.facts().dependencies().is_empty());
+        }
+        for source in [
+            "eval('local');",
+            "(eval)('local');",
+            "eval?.('local');",
+            "(0, eval)('global');",
+            "(flag ? eval : other)('code');",
+            "(flag && eval)('code');",
+            "eval.call(null, 'code');",
+            "eval['apply'](null, ['code']);",
+            "new eval('code');",
+            "eval`code`;",
+            "eval = other;",
+            "eval++;",
+            "({value: eval} = other);",
+        ] {
+            let error = format!("{:#}", parse(source, path).unwrap_err());
+            // Strict ESM writes may fail semantic validation before the policy gate.
+            assert!(error.contains(path), "{}: {}", source, error);
+            if path.ends_with(".cjs") || (!source.contains(" = ") && !source.contains("++")) {
+                assert!(
+                    error.contains("unsupported unshadowed eval operation")
+                        && error.contains("bytes "),
+                    "{}: {}",
+                    source,
+                    error
+                );
+            }
+        }
+    }
+    parse(
+        "function read(eval) { return eval('ordinary call'); }",
+        "shadow.cjs",
+    )
+    .unwrap();
+}
+
+#[test]
 fn require_shapes_and_mutation_have_span_diagnostics() {
     for (source, expected) in [
         ("require(path)", "nonliteral require"),

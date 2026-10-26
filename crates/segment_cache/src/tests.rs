@@ -44,7 +44,7 @@ fn commonjs_module_detectors_roundtrip_without_reparse_or_loader_dependencies() 
     );
     assert!(parsed.facts().dependencies().is_empty());
     assert_eq!(ast_segmenter::module_parse_count(), parses);
-    assert_eq!(EXTRACTOR_VERSION, 30);
+    assert_eq!(EXTRACTOR_VERSION, 31);
     assert_eq!(SCHEMA_VERSION, 19);
 }
 
@@ -79,6 +79,52 @@ fn esm_host_loader_selections_roundtrip_as_borrowed_native_reads() {
         original.module().facts().emission()
     );
     assert_eq!(ast_segmenter::module_parse_count(), parses);
+}
+
+#[test]
+fn eval_identity_reads_roundtrip_as_borrowed_checked_facts() {
+    for (path, source, format) in [
+        (
+            "primordials.mjs",
+            "export const Primordials = Object.freeze((function () {
+                const p = [Array, eval, Function];
+                return p.concat(p.filter(i => i.name[0].toUpperCase() === i.name[0])
+                    .map(k => k.prototype));
+            })());",
+            ModuleFormat::Esm,
+        ),
+        (
+            "primordials.cjs",
+            "module.exports = Object.freeze([Array, eval, Function]);",
+            ModuleFormat::CommonJs,
+        ),
+    ] {
+        let original = record(source, path, format);
+        let parses = ast_segmenter::module_parse_count();
+        let cached =
+            CacheRecord::decode(&original.encode(source).unwrap(), source, original.config())
+                .unwrap();
+        let parsed = cached.to_parsed(source).unwrap();
+        assert!(matches!(
+            parsed.facts(),
+            ast_segmenter::views::ModuleFacts::Wire(_)
+        ));
+        assert_eq!(parsed.body(), original.module().body());
+        assert_eq!(
+            parsed.facts().references(),
+            original.module().facts().references()
+        );
+        assert_eq!(
+            parsed.facts().effects(),
+            original.module().facts().effects()
+        );
+        assert_eq!(
+            parsed.facts().emission(),
+            original.module().facts().emission()
+        );
+        assert!(parsed.facts().dependencies().is_empty());
+        assert_eq!(ast_segmenter::module_parse_count(), parses);
+    }
 }
 
 #[test]

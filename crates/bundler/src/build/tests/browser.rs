@@ -7,6 +7,102 @@ fn browser_options() -> BuildOptions {
 }
 
 #[test]
+fn browser_eval_identity_tables_preserve_native_values_and_cache_reuse() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "primordials.mjs",
+        "export const Primordials = Object.freeze((function () {
+            const p = [Array, eval, Function, Object];
+            return p.concat(p.filter(i => i.name[0].toUpperCase() === i.name[0])
+                .map(k => k.prototype));
+        })());
+        export function read() { return eval; }",
+    );
+    write(
+        dir.root(),
+        "legacy.cjs",
+        "module.exports = Object.freeze([Array, eval, Function]);",
+    );
+    write(
+        dir.root(),
+        "main.mjs",
+        "export {Primordials, read} from './primordials.mjs';
+         export {default as legacy} from './legacy.cjs';",
+    );
+    let mut config = browser_options();
+    config.output.source_maps = true;
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let built = session.build(&config).unwrap();
+    assert_eq!(
+        built.product.artifacts.backend,
+        crate::link::Backend::Native
+    );
+    assert_eq!(built.product.graph.file_count(), 3);
+    assert!(session.sources.values().all(|source| source
+        .record
+        .module()
+        .facts()
+        .dependencies()
+        .iter()
+        .all(|dependency| dependency.kind() != ast_segmenter::owned::DependencyKind::Require)));
+    let entry = built.product.artifacts.entries["main"]
+        .to_string_lossy()
+        .replace('\\', "/");
+    for (host, expected) in [
+        ("", r#"[[true,true,true,true,true,true,7],[]]"#),
+        (
+            "Object.defineProperty(globalThis, 'eval', {get() { events.push('read'); return intrinsic; }});",
+            r#"[[true,true,true,true,true,true,7],["read","read","read"]]"#,
+        ),
+        (
+            "Object.defineProperty(globalThis, 'eval', {get() { events.push('read'); throw new RangeError('host failure'); }});",
+            r#"["RangeError",["read"]]"#,
+        ),
+        ("delete globalThis.eval;", r#"["ReferenceError",[]]"#),
+    ] {
+        let check = |entry: &str| format!(
+            "const intrinsic = globalThis.eval;
+             const events = [];
+             {host}
+             let result;
+             try {{
+                 const ns = await import('./{entry}');
+                 result = [ns.Primordials[1] === intrinsic, ns.legacy[1] === intrinsic,
+                     ns.read() === intrinsic, Object.isFrozen(ns.Primordials),
+                     Object.isFrozen(ns.legacy), ns.Primordials[4] === Array.prototype,
+                     ns.Primordials.length];
+             }} catch (error) {{ result = error.name; }}
+             console.log(JSON.stringify([result, events]));"
+        );
+        write(dir.root(), "check.mjs", &check("main.mjs"));
+        let original = observe_entry(&dir.root().join("check.mjs"));
+        assert_eq!(String::from_utf8_lossy(&original).trim(), expected);
+        assert_eq!(
+            observe_named(&built.product.artifacts, &check(&entry)),
+            original,
+            "{host}"
+        );
+    }
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&built.product, &noop.product));
+    assert_eq!(noop.counters.source_parses, 0);
+    let disk = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(disk.counters.source_parses, 0);
+    assert_eq!(disk.counters.disk_hits, 3);
+    assert_eq!(disk.product.artifacts, built.product.artifacts);
+    config.cache = CacheMode::Disabled;
+    let uncached = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(uncached.product.artifacts, built.product.artifacts);
+}
+
+#[test]
 fn browser_esm_environment_probes_preserve_conditional_host_loader_selection() {
     let dir = TmpDir::new();
     write(

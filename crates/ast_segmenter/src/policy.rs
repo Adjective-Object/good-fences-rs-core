@@ -32,6 +32,7 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
         typeof_names: HashSet::new(),
         require_selections: HashSet::new(),
         wrapper_operations: HashSet::new(),
+        eval_operations: HashSet::new(),
         operation: false,
         errors: Vec::new(),
     };
@@ -93,7 +94,12 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
                     "unsupported module access (expected module.exports or a guarded module detector)",
                 );
             }
-            "eval" => policy.reject(reference.span(), "unsupported unshadowed eval"),
+            "eval"
+                if reference.write()
+                    || policy.eval_operations.contains(&reference.span().start) =>
+            {
+                policy.reject(reference.span(), "unsupported unshadowed eval operation");
+            }
             "arguments"
                 if policy.commonjs
                     && policy.wrapper_arguments.contains(&reference.span().start) =>
@@ -139,6 +145,7 @@ struct Policy {
     typeof_names: HashSet<u32>,
     require_selections: HashSet<u32>,
     wrapper_operations: HashSet<u32>,
+    eval_operations: HashSet<u32>,
     operation: bool,
     errors: Vec<String>,
 }
@@ -234,6 +241,9 @@ fn module_detector(expression: &LogicalExpression<'_>) -> Option<[u32; 3]> {
 
 impl<'a> Visit<'a> for Policy {
     fn visit_identifier_reference(&mut self, reference: &IdentifierReference<'a>) {
+        if self.operation && reference.name == "eval" {
+            self.eval_operations.insert(reference.span.start);
+        }
         if !self.commonjs
             && self.operation
             && matches!(reference.name.as_str(), "require" | "module" | "exports")

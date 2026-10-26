@@ -23,7 +23,7 @@ Graph linking, effect policy, Ecco registration, execution constraints and nativ
 recipe rendering consume owned-or-wire AST views. A byte-backed graph retains
 verified owners, including Ecco's nested storage, without unpacking extraction
 trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
-`.seg.fb` records (schema 19/extractor 30); parse fingerprints include both active
+`.seg.fb` records (schema 19/extractor 31); parse fingerprints include both active
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
 
@@ -2002,6 +2002,11 @@ Old-reader quiescence is mandatory before pruning immutable prior generations;
 publication promises atomic visibility, not power-loss durability.
 
 ## CommonJS runtime
+
+Read-only `eval` values, including ESM/CJS primordial identity tables, remain
+native free references with the host function's identity. Calls, construction,
+tags and mutations through an unshadowed eval reference remain unsupported.
+The bundler never injects an evaluator or compiles source strings at runtime.
 
 ESM inputs may read `module`/`exports`, probe `typeof require`, or select bare
 `require` in conditional value branches for environment detection (including

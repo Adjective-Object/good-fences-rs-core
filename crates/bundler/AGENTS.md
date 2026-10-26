@@ -519,6 +519,8 @@ Canonical symbols use owned (file, BindingId) identities and checked export rout
 including barrels/redeclarations. Allocated lexical names are not observable source
 names or rewrite instructions; boundary values retain typed graph identities.
 No hooks, code JSON, source loading/assembly, eval or runtime compilation.
+Source read-only eval identity references remain native; this does not authorize
+unshadowed eval operations or generated evaluators.
 Keep native live bindings, TDZ and const semantics. Outside explicit generated
 boundary opt-in, only source await/for-await events suspend evaluation; never
 wrap every module in async.
