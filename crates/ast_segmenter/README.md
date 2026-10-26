@@ -224,6 +224,10 @@ preceded by an `&&` guard. Equality can be strict or operand-reversed; parenthes
 are transparent. Detector aliases remain ordinary values in the opaque body:
 property getters, short-circuiting and exports identity are not rewritten.
 Alias capability probes do not create dependencies or provide a Node loader.
+Direct `module == null`, `module != null`, `module === null` and
+`module !== null` checks are also supported, with either operand order and
+parentheses. They retain the real wrapper value and original short-circuit
+timing; they do not admit adjacent module escapes or loader operations.
 
 ## Source-local support matrix
 

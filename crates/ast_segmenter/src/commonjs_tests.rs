@@ -418,6 +418,53 @@ fn commonjs_guarded_module_detectors_preserve_wrapper_reference_facts() {
 }
 
 #[test]
+fn commonjs_module_null_checks_preserve_wrapper_reference_facts() {
+    for operator in ["==", "!=", "===", "!=="] {
+        for comparison in [
+            format!("(module) {operator} (null)"),
+            format!("(null) {operator} (module)"),
+        ] {
+            let source = format!(
+                "(function() {{
+                    if (typeof module !== 'undefined' && {comparison}
+                        && typeof exports !== 'undefined' && module.exports === exports) {{
+                        module.exports = 7;
+                    }}
+                }}());"
+            );
+            let parsed = parse(&source, "null-check.cjs").unwrap();
+            assert!(matches!(parsed.body(), ModuleBody::CommonJs { .. }));
+            assert_eq!(parsed.segments().len(), 1);
+            assert!(parsed.facts().dependencies().is_empty());
+            let references: Vec<_> = parsed
+                .facts()
+                .references()
+                .iter()
+                .filter(|reference| reference.name() == "module")
+                .collect();
+            assert_eq!(references.len(), 4);
+            assert!(references
+                .iter()
+                .all(|reference| reference.binding().is_none()
+                    && reference.commonjs() == Some(CommonJsGlobal::Module)
+                    && !reference.write()));
+        }
+    }
+    let parsed = parse(
+        "function local(module) { return module !== null; } module.exports = local;",
+        "shadow.cjs",
+    )
+    .unwrap();
+    let shadow = parsed
+        .facts()
+        .references()
+        .iter()
+        .find(|reference| reference.name() == "module" && reference.binding().is_some())
+        .unwrap();
+    assert!(shadow.commonjs().is_none());
+}
+
+#[test]
 fn commonjs_module_detector_admission_stays_bounded() {
     for source in [
         "module.require('util');",
@@ -445,6 +492,18 @@ fn commonjs_module_detector_admission_stays_bounded() {
         "(typeof module == 'object' && module && !module.nodeType && module).require('util');",
         "delete (typeof module == 'object' && module && !module.nodeType && module).x;",
         "(typeof module == 'object' && module && !module.nodeType && module).x = 1;",
+        "module === undefined;",
+        "module === other;",
+        "module < null;",
+        "module + null;",
+        "module.nodeType !== null;",
+        "module.require !== null;",
+        "module[name] !== null;",
+        "module() !== null;",
+        "new module() !== null;",
+        "module`tag` !== null;",
+        "(module !== null) && consume(module);",
+        "module !== null && module.require('util');",
     ] {
         let error = format!("{:#}", parse(source, "bad.cjs").unwrap_err());
         assert!(

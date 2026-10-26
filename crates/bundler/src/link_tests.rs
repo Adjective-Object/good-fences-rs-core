@@ -2846,6 +2846,96 @@ fn commonjs_guarded_module_detectors_keep_native_lazy_identity_and_guards() {
 }
 
 #[test]
+fn commonjs_module_null_checks_keep_native_lazy_identity_and_guards() {
+    let input = sources(&[
+        (
+            "entry.mjs",
+            "export function load() { return require('./probe.cjs'); }",
+        ),
+        (
+            "probe.cjs",
+            r#"
+            trace.push('factory');
+            (function() {
+                if (typeof module !== "undefined" && module !== null &&
+                    typeof exports !== "undefined" && module.exports === exports) {
+                    trace.push('commonjs');
+                    const comparisons = [
+                        module == null, module != null, module === null, module !== null,
+                        null == module, null != module, null === module, null !== module
+                    ];
+                    module.exports = {comparisons};
+                } else {
+                    throw Error('wrong environment');
+                }
+            }());
+            "#,
+        ),
+    ]);
+    for wire in [false, true] {
+        let graph = graph_with_storage(&input, false, ModuleFormat::Esm, wire);
+        let entry = graph.file_id(Path::new("entry.mjs")).unwrap();
+        let policy = EffectPolicy::default();
+        let plan = partition(
+            &graph,
+            &[RootSeed {
+                id: RootId::Entry("entry.mjs".into()),
+                evaluation_roots: vec![entry],
+                binding_roots: vec![GraphNode::Module(entry)],
+            }],
+            &policy,
+        )
+        .unwrap();
+        for browser in [false, true] {
+            let output = esm_plan_prepared(
+                &graph,
+                &plan,
+                &policy,
+                &input,
+                &BTreeMap::new(),
+                browser,
+                &BTreeMap::new(),
+            )
+            .unwrap()
+            .render()
+            .unwrap();
+            assert_eq!(output.backend, Backend::Native);
+            let check = r#"
+                import assert from 'node:assert/strict';
+                globalThis.trace = [];
+                Object.defineProperty(Object.prototype, Symbol.toPrimitive, {
+                    configurable: true,
+                    get() {
+                        if (Object.hasOwn(this, 'exports'))
+                            throw Error('null checks must not coerce the wrapper');
+                        return undefined;
+                    }
+                });
+                try {
+                    const ns = await import('./entry.mjs');
+                    assert.deepEqual(trace, []);
+                    const value = ns.load();
+                    assert.equal(ns.load(), value);
+                    assert.deepEqual(value.comparisons,
+                        [false, true, false, true, false, true, false, true]);
+                    assert.deepEqual(trace, ['factory', 'commonjs']);
+                } finally {
+                    delete Object.prototype[Symbol.toPrimitive];
+                }
+            "#;
+            let mut files = output.files.clone();
+            files.insert("check.mjs".into(), observation(&output, check));
+            let actual = node(&files, Path::new("check.mjs"));
+            assert!(
+                actual.status.success(),
+                "wire={wire}, browser={browser}: {}",
+                String::from_utf8_lossy(&actual.stderr)
+            );
+        }
+    }
+}
+
+#[test]
 fn commonjs_native_cache_cycles_aliases_replacement_and_retry() {
     let output = compare(&sources(&[
         ("entry.cjs", "const a = require('./a.cjs'); console.log(a === require('./a.cjs'), a); const lazy = require('./lazy.cjs'); console.log('before'); console.log(lazy()); for(let i=0;i<2;i++) { try { require('./fail.cjs'); } catch(e) { console.log(e.message); } } console.log(require('./primitive.cjs')); console.log(require('./return.cjs').value, require('./modulevar.cjs').kept);"),

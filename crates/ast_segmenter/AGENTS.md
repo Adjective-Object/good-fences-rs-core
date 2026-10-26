@@ -110,7 +110,9 @@ Read-only unshadowed eval values remain native identity reads in ESM/CJS.
 Reject invocation/construction/tag and mutation contexts; never synthesize an
 evaluator or rewrite source code strings.
 CommonJS module probes admit only typeof and the structural object-type/truthy/
-negated nodeType/truthy detector tail, optionally behind an && guard. Preserve
+negated nodeType/truthy detector tail, optionally behind an && guard, plus direct
+equality/inequality comparisons with null. These comparisons expose no module
+value and never authorize adjacent escapes or member operations. Preserve
 opaque aliases/getters/identity; do not infer loaders or dependencies from aliases.
 Direct module.require/computed unknown members and bare wrapper escapes stay rejected.
 ESM environment reads of module/exports and typeof require stay unresolved native

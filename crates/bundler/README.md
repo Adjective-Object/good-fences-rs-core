@@ -2107,6 +2107,9 @@ the same lexical module record. Aliases preserve getters, short-circuiting and
 exports identity, but do not acquire Node `require`/`process` capabilities or
 fabricate `util` dependencies. Direct `module.require`, unknown computed module
 members and unguarded module escapes remain unsupported.
+Direct equality/inequality checks between `module` and `null` also observe that
+record, including strict and reversed forms. UMD null guards keep their original
+short-circuit timing without acquiring loader capabilities.
 `__filename` and `__dirname` are factory-local wrapper parameters initialized
 from the actual output availability chunk's native path bindings on Node (the CJS
 counterpart of `import.meta.filename`/`import.meta.dirname`). They describe emitted

@@ -314,6 +314,26 @@ impl<'a> Visit<'a> for Policy {
     }
 
     fn visit_binary_expression(&mut self, expression: &BinaryExpression<'a>) {
+        if self.commonjs
+            && matches!(
+                expression.operator,
+                BinaryOperator::Equality
+                    | BinaryOperator::Inequality
+                    | BinaryOperator::StrictEquality
+                    | BinaryOperator::StrictInequality
+            )
+        {
+            for (value, null) in [
+                (&expression.left, &expression.right),
+                (&expression.right, &expression.left),
+            ] {
+                if matches!(null.get_inner_expression(), Expression::NullLiteral(_)) {
+                    if let Some(reference) = module_identifier(value) {
+                        self.module_probes.insert(reference);
+                    }
+                }
+            }
+        }
         let saved = self.operation;
         self.operation = false;
         walk::walk_binary_expression(self, expression);
