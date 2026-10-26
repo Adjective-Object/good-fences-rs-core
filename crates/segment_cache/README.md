@@ -18,7 +18,9 @@ module body and ordered statement ranges, not lossy legacy dependency/name sets.
 `CacheRecord` and `CachedModule` have private storage. Consumers and validators
 use borrowed accessors such as `record.module().facts()` and
 `record.module().segments()`; no mutable view of sealed records is exposed.
-Production loading/publication uses typed FlatBuffers, schema 19/extractor 31.
+Production loading/publication uses typed FlatBuffers, schema 19/extractor 32.
+Extractor 32 restricts worker URLs to the first argument of new Worker and
+validates that enclosing constructor through borrowed invocation facts.
 Extractor 31 admits native read-only eval identity references while rejecting
 unshadowed invocation and mutation contexts; the wire layout is unchanged.
 Extractor 30 also admits conditional native host-loader selections without

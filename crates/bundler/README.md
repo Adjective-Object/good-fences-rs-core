@@ -23,7 +23,7 @@ Graph linking, effect policy, Ecco registration, execution constraints and nativ
 recipe rendering consume owned-or-wire AST views. A byte-backed graph retains
 verified owners, including Ecco's nested storage, without unpacking extraction
 trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
-`.seg.fb` records (schema 19/extractor 31); parse fingerprints include both active
+`.seg.fb` records (schema 19/extractor 32); parse fingerprints include both active
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
 
@@ -1570,10 +1570,10 @@ checks execution, not rendering/readiness.
 
 ### Discovered module worker entries
 
-Browser builds recognize unshadowed literal `new URL("./worker.js", import.meta.url)`
-expressions as checked script targets. During the existing preparation frontier,
-each new target becomes a normal evaluation-only entrypoint. Nested targets join
-that same frontier; configured entries for the same file are reused. All entries
+Browser builds recognize `new Worker(new URL("./worker.js", import.meta.url), ...)`
+expressions with unshadowed URL as checked script targets. During the existing
+preparation frontier, each new target becomes a normal evaluation-only entrypoint.
+Nested targets join that same frontier; configured entries for the same file are reused. All entries
 share source preparation, cache owners, resolution, inventory, graph, effect
 analysis and ordinary native multi-file emission. There are no child sessions,
 recursive builds or classic-script backend. Dynamic imports and shared chunks
@@ -1585,8 +1585,10 @@ construction and surrounding constructor/options remain unchanged. Discovered
 entry routes appear in the ordinary entry manifest under stable `worker:` labels.
 Callers must construct `{type: "module"}` workers. Classic `importScripts` Blob
 bootstraps require an explicit application adaptation, not a hidden bundler shim.
-Recognition is URL-based rather than a proof of Worker constructor identity;
-other `import.meta` shapes, non-script targets and external targets remain errors.
+The constructor must be an identifier named Worker, including an imported alias
+with that name; its first argument must be the literal URL construction.
+Standalone URLs and URLs passed to other constructors do not discover workers.
+Other `import.meta` shapes, non-script targets and external targets remain errors.
 
 ## Package-local resolution storage
 

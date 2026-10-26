@@ -395,6 +395,18 @@ pub(crate) fn validate_module(
                             && reference.binding().is_none()),
                 "invalid literal resource URL evidence"
             );
+            ensure!(
+                facts.invocations().iter().any(|worker| {
+                    worker.construct()
+                        && worker.arguments().get(0).is_some_and(|argument| {
+                            !argument.spread() && argument.span() == d.span()
+                        })
+                        && facts.references().iter().any(|reference| {
+                            reference.span() == worker.callee() && reference.name() == "Worker"
+                        })
+                }),
+                "resource URL is not the first argument of new Worker"
+            );
             let base = call.arguments().get(1).unwrap().span();
             ensure!(
                 source

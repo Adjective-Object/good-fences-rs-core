@@ -234,7 +234,7 @@ unchanged.
 | Mixed-file static ESM/CJS syntax, ESM wrapper writes/deletes/updates/calls/construction/tags, or other ESM loader use except the environment reads above | Diagnostic; direct require support never enables CommonJS wrapper operations |
 | Read-only unshadowed `eval` values (e.g. primordial identity tables) | Native free references; no injected evaluator or code transformation |
 | Unshadowed `eval` operations (calls, construction, tags, writes), nested `with`, unsupported `import.meta` | Diagnostic; lexically shadowed eval is an ordinary call |
-| Literal relative `new URL(request, import.meta.url)` with unshadowed URL | Typed URL occurrence and original literal emission slot; target/entry policy belongs to the bundler |
+| `new Worker(new URL(relative, import.meta.url), ...)` with unshadowed URL | Typed URL occurrence and original literal emission slot; the constructor is named Worker, including imported aliases; target/entry policy belongs to the bundler |
 | Top-level await/for-await | ESM source spans in `facts.top_level_await`, excluding nested functions; CJS diagnostic. Dependency/SCC scheduling belongs to the native bundler host |
 | Import attributes/options/phases (including type import options) | Diagnostic |
 | Erasable TS annotations/types/assertions, TS import types | Owned syntax facts and type-only references/dependencies; **not erased or executable output** |

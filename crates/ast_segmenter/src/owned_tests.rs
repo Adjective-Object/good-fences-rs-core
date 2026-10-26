@@ -20,7 +20,7 @@ fn parse(source: &str) -> ModuleFacts {
 }
 
 #[test]
-fn literal_url_has_occurrence_and_literal_operation_without_worker_identity() {
+fn worker_url_has_occurrence_and_literal_operation_with_imported_worker_alias() {
     let source = "import {CrossDomainWorker as Worker} from './wrapper.js'; export const start = () => new Worker(new URL('./parser.worker', import.meta /*base*/ .url));";
     let facts = parse(source);
     let dependency = facts
@@ -43,6 +43,55 @@ fn literal_url_has_occurrence_and_literal_operation_without_worker_identity() {
         operation.kind().span(&facts, recipe),
         dependency.specifier_span()
     );
+}
+
+#[test]
+fn worker_url_recognizes_constructor_with_optional_arguments() {
+    for source in [
+        "new Worker(new URL('./worker.js', import.meta.url));",
+        "new Worker(new URL('./worker.js', import.meta.url), {type: 'module'});",
+        "new Worker(new URL('./worker.js', import.meta.url), options, ...extra);",
+    ] {
+        let facts = parse(source);
+        let dependencies: Vec<_> = facts
+            .dependencies()
+            .iter()
+            .filter(|dependency| dependency.kind() == DependencyKind::Url)
+            .collect();
+        assert_eq!(dependencies.len(), 1, "{source}");
+        assert_eq!(dependencies[0].specifier(), "./worker.js");
+    }
+}
+
+#[test]
+fn worker_url_requires_the_url_as_the_first_worker_constructor_argument() {
+    for source in [
+        "new URL('./worker.js', import.meta.url);",
+        "new Consumer(new URL('./worker.js', import.meta.url));",
+        "Worker(new URL('./worker.js', import.meta.url));",
+        "new SharedWorker(new URL('./worker.js', import.meta.url));",
+        "new globalThis.Worker(new URL('./worker.js', import.meta.url));",
+        "new Worker(options, new URL('./worker.js', import.meta.url));",
+        "const url = new URL('./worker.js', import.meta.url); new Worker(url);",
+        "new Worker(new URL('./worker.js', import.meta.url), new URL('./other.js', import.meta.url));",
+        "function start(URL) { return new Worker(new URL('./worker.js', import.meta.url)); }",
+    ] {
+        let error = parse_module(
+            &logger::StdioLogger::new(),
+            source,
+            Path::new("worker.mjs"),
+            ModuleFormat::Esm,
+        )
+        .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("unsupported import.meta"),
+            "{}: {:#}",
+            source,
+            error
+        );
+    }
+    let facts = parse("new URL('./asset.png', 'https://example.invalid/');");
+    assert!(facts.dependencies().is_empty());
 }
 
 #[test]

@@ -18,7 +18,7 @@ globalThis.events.push('parent:' + value);
 export function start() {
     return new Worker(new URL('./parser.worker', import.meta.url), {type: 'module'});
 }
-export const again = () => new URL('./parser.worker', import.meta.url);
+export const again = () => new Worker(new URL('./parser.worker', import.meta.url), {type: 'module'});
 "#,
     );
     write(
@@ -29,7 +29,7 @@ import {value} from './shared.mjs';
 globalThis.events.push('worker:' + value);
 globalThis.workerApi = {
     load: () => import('./plugin.mjs'),
-    nested: () => new URL('./nested.worker.js', import.meta.url),
+    nested: () => new Worker(new URL('./nested.worker.js', import.meta.url), {type: 'module'}),
 };
 "#,
     );
@@ -108,14 +108,14 @@ const parent = await import('./renamed/deep/start.mjs');
 assert.deepEqual(events, ['shared', 'parent:42']);
 const worker = parent.start();
 assert.deepEqual(worker.options, {type: 'module'});
-assert.equal(worker.url.href, parent.again().href);
+assert.equal(worker.url.href, parent.again().url.href);
 assert.ok(fs.existsSync(worker.url));
 assert.ok(worker.url.pathname.includes('/workers/'));
 assert.deepEqual(events, ['shared', 'parent:42']);
 await import(worker.url);
 assert.deepEqual(events, ['shared', 'parent:42', 'worker:42']);
 assert.equal((await workerApi.load()).value, 'plugin');
-await import(workerApi.nested());
+await import(workerApi.nested().url);
 assert.deepEqual(events, ['shared', 'parent:42', 'worker:42', 'nested:42']);
 const {Worker: ThreadWorker} = await import('node:worker_threads');
 async function bootRealm() {
@@ -150,7 +150,7 @@ fn worker_entries_reuse_explicit_entries_and_revalidate_targets() {
     write(
         dir.root(),
         "main.mjs",
-        "export const url = new URL('./worker.js', import.meta.url);",
+        "export const start = () => new Worker(new URL('./worker.js', import.meta.url), {type: 'module'});",
     );
     write(dir.root(), "worker.js", "globalThis.ready = 1;");
     let mut config = config();
@@ -170,7 +170,9 @@ fn worker_entries_reuse_explicit_entries_and_revalidate_targets() {
         &first.product.artifacts,
         r#"
 import assert from 'node:assert/strict';
-import {url} from './renamed/deep/start.mjs';
+import {start} from './renamed/deep/start.mjs';
+globalThis.Worker = class { constructor(url) { this.url = url; } };
+const {url} = start();
 assert.ok(url.pathname.endsWith('/custom/worker.mjs'));
 assert.equal(globalThis.ready, undefined);
 await import(url);
@@ -202,7 +204,7 @@ fn worker_entries_respect_public_base_and_drop_removed_roots() {
     write(
         dir.root(),
         "main.mjs",
-        "export const url = new URL('./worker.js', import.meta.url);",
+        "export const start = () => new Worker(new URL('./worker.js', import.meta.url), {type: 'module'});",
     );
     write(dir.root(), "worker.js", "globalThis.ready = true;");
     let mut config = config();
@@ -213,7 +215,9 @@ fn worker_entries_respect_public_base_and_drop_removed_roots() {
         &first.product.artifacts,
         r#"
 import assert from 'node:assert/strict';
-import {url} from './renamed/deep/start.mjs';
+import {start} from './renamed/deep/start.mjs';
+globalThis.Worker = class { constructor(url) { this.url = url; } };
+const {url} = start();
 assert.ok(url.href.startsWith('https://assets.example.invalid/build/workers/'));
 "#,
     );
@@ -229,7 +233,7 @@ fn worker_entries_publish_empty_modules_and_reject_non_scripts() {
     write(
         dir.root(),
         "main.mjs",
-        "export const url = new URL('./worker.js', import.meta.url);",
+        "export const start = () => new Worker(new URL('./worker.js', import.meta.url), {type: 'module'});",
     );
     write(dir.root(), "worker.js", "");
     let mut session = BuildSession::new(dir.root()).unwrap();
@@ -238,7 +242,9 @@ fn worker_entries_publish_empty_modules_and_reject_non_scripts() {
     observe_named(
         &first.product.artifacts,
         r#"
-import {url} from './renamed/deep/start.mjs';
+import {start} from './renamed/deep/start.mjs';
+globalThis.Worker = class { constructor(url) { this.url = url; } };
+const {url} = start();
 await import(url);
 "#,
     );
@@ -246,7 +252,7 @@ await import(url);
     write(
         dir.root(),
         "main.mjs",
-        "export const url = new URL('./asset.json', import.meta.url);",
+        "export const start = () => new Worker(new URL('./asset.json', import.meta.url), {type: 'module'});",
     );
     let error = session.build(&config()).err().expect("non-script URL");
     let error = format!("{error:#}");

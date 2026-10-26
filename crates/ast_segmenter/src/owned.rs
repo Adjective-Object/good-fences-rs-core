@@ -363,9 +363,18 @@ impl Extractor<'_, '_> {
     }
 }
 
-fn literal_resource_url<'b, 'a>(
+fn literal_worker_url<'b, 'a>(
     expression: &'b NewExpression<'a>,
-) -> Option<&'b StringLiteral<'a>> {
+) -> Option<(&'b NewExpression<'a>, &'b StringLiteral<'a>)> {
+    let Expression::Identifier(worker) = &expression.callee else {
+        return None;
+    };
+    if worker.name != "Worker" || expression.type_arguments.is_some() {
+        return None;
+    }
+    let Argument::NewExpression(expression) = expression.arguments.first()? else {
+        return None;
+    };
     if expression.arguments.len() != 2 || expression.type_arguments.is_some() {
         return None;
     }
@@ -390,20 +399,20 @@ fn literal_resource_url<'b, 'a>(
     if base.optional || base.property.name != "url" {
         return None;
     }
-    matches!(&base.object, Expression::ImportMeta(_)).then_some(source)
+    matches!(&base.object, Expression::ImportMeta(_)).then_some((expression, source))
 }
 
 impl<'a> Visit<'a> for Extractor<'_, 'a> {
     fn visit_new_expression(&mut self, expression: &NewExpression<'a>) {
         if !self.commonjs {
-            if let Some(source) = literal_resource_url(expression) {
-                if let Expression::Identifier(callee) = expression.callee.get_inner_expression() {
+            if let Some((url, source)) = literal_worker_url(expression) {
+                if let Expression::Identifier(callee) = url.callee.get_inner_expression() {
                     let reference = self
                         .semantic
                         .scoping()
                         .get_reference(callee.reference_id.get().expect("validated URL reference"));
                     if reference.symbol_id().is_none() {
-                        self.dependency(DependencyKind::Url, expression.span, source, false);
+                        self.dependency(DependencyKind::Url, url.span, source, false);
                     }
                 }
             }

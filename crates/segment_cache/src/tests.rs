@@ -44,7 +44,7 @@ fn commonjs_module_detectors_roundtrip_without_reparse_or_loader_dependencies() 
     );
     assert!(parsed.facts().dependencies().is_empty());
     assert_eq!(ast_segmenter::module_parse_count(), parses);
-    assert_eq!(EXTRACTOR_VERSION, 31);
+    assert_eq!(EXTRACTOR_VERSION, 32);
     assert_eq!(SCHEMA_VERSION, 19);
 }
 
@@ -128,8 +128,8 @@ fn eval_identity_reads_roundtrip_as_borrowed_checked_facts() {
 }
 
 #[test]
-fn literal_url_roundtrips_borrowed_and_rejects_corrupted_evidence() {
-    let source = "export const load = () => new URL('./parser.worker', import.meta /*base*/ .url);";
+fn worker_url_roundtrips_borrowed_and_rejects_corrupted_evidence() {
+    let source = "export const load = () => new Worker(new URL('./parser.worker', import.meta /*base*/ .url), {type: 'module'});";
     let original = record(source, "url.mjs", ModuleFormat::Esm);
     let parses = ast_segmenter::module_parse_count();
     let cached =
@@ -148,6 +148,8 @@ fn literal_url_roundtrips_borrowed_and_rejects_corrupted_evidence() {
         |v: &mut serde_json::Value| v.set("module.facts.dependencies.0.type_only", true),
         |v: &mut serde_json::Value| v.add("module.facts.dependencies.0.specifier_span.start", 1),
         |v: &mut serde_json::Value| v.set("module.facts.invocations.0.construct", false),
+        |v: &mut serde_json::Value| v.set("module.facts.invocations.1.construct", false),
+        |v: &mut serde_json::Value| v.set("module.facts.invocations.0.arguments.0.spread", true),
         |v: &mut serde_json::Value| v.set("module.facts.references.0.name", "Other"),
     ] {
         let damaged = corrupt(&original, edit);

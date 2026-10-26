@@ -1,7 +1,8 @@
 # bundler
 
-Browser literal URL dependencies discover normal evaluation-only module-worker
-entries during the shared preparation frontier. Use the same source owners,
+Browser `new Worker(new URL(relative, import.meta.url), ...)` expressions discover
+normal evaluation-only module-worker entries during the shared preparation
+frontier. Use the same source owners,
 resolver, inventory, graph, planner and native multi-file emitter; never create
 child BuildSessions, sub-builds or a classic-script output path. Nested workers
 join the same frontier, existing explicit entries are reused, and shared modules

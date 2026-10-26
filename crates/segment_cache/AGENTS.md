@@ -22,11 +22,12 @@
   parser identity, UTF-8 ranges, local IDs, links and order on both boundaries.
 - Preserve sealed extraction provenance on both boundaries and in `to_parsed`;
   never bless unrelated parsed facts by hashing separately supplied source text.
-- Schema 19/extractor 31 retains typed nested module buffers and wire seals,
+- Schema 19/extractor 32 retains typed nested module buffers and wire seals,
   including dynamic namespace observations, deferred recipes, async references
   and lazy construction candidates with original argument slots.
 - URL dependencies retain only checked literal source spans and original URL
   construction evidence, never output names, worker realms or resolved entries.
+  Require that construction to be the first, nonspread argument of new Worker.
 - The two-empty-piece dynamic pattern captures the importing directory tree;
   require patterns still need a relative prefix. Ignored imports have no dependency
   occurrence, but retain ordinary source/input effect and reference facts.
