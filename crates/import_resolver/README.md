@@ -51,7 +51,12 @@ once: missing files never cause retries of later export entries. Checked cache
 proofs retain the complete manifest bytes and only the actual selected probes.
 An exports map is authoritative: unmatched subpaths or inactive conditions fail
 resolution, even when a matching physical file exists. Packages without exports
-retain legacy filesystem resolution. Browser resolution applies a dependency's
+retain legacy filesystem resolution.
+Boolean `main` fields supply no legacy entry path: subpath exports still work,
+unexported roots remain private, and packages without exports use normal index
+fallback. Manifest proofs retain the exact bytes even when such fields normalize
+to an absent path.
+Browser resolution applies a dependency's
 object mapping to its selected legacy package entry (for example, `main` pointing
 to `server.mjs` mapped to `browser.mjs`), while preserving importer request/path
 mappings. Cached cwd-relative browser destinations are restored to absolute

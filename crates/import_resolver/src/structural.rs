@@ -899,6 +899,115 @@ mod tests {
     }
 
     #[test]
+    fn boolean_main_preserves_exports_and_tracked_manifest_invalidation() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "entry.mjs" => "",
+            "node_modules/math-intrinsics/package.json" => r#"{"main":false,"exports":{"./abs":"./abs.js","./private":null}}"#,
+            "node_modules/math-intrinsics/abs.js" => "",
+            "node_modules/math-intrinsics/next.js" => "",
+            "node_modules/math-intrinsics/private.js" => "",
+            "node_modules/math-intrinsics/index.js" => ""
+        };
+        let base = dir.root().join("entry.mjs");
+        for environment in [TargetEnv::Node, TargetEnv::Browser] {
+            for mode in [ResolutionMode::Import, ResolutionMode::Require] {
+                let manifest = dir.root().join("node_modules/math-intrinsics/package.json");
+                std::fs::write(
+                    &manifest,
+                    r#"{"main":false,"exports":{"./abs":"./abs.js","./private":null}}"#,
+                )
+                .unwrap();
+                let mut resolver = StructuralResolver::new(
+                    dir.root().into(),
+                    NodeModulesResolverOptions::default_for_env(environment),
+                    BTreeSet::new(),
+                );
+                let first = tracked(&resolver, &base, "math-intrinsics/abs", mode);
+                assert_eq!(
+                    first.dependency,
+                    ResolvedDependency::File(
+                        dir.root().join("node_modules/math-intrinsics/abs.js")
+                    )
+                );
+                let cached = tracked(&resolver, &base, "math-intrinsics/abs", mode);
+                assert_eq!(cached.dependency, first.dependency);
+                assert_eq!(cached.inputs, first.inputs);
+                for request in [
+                    "math-intrinsics",
+                    "math-intrinsics/private",
+                    "math-intrinsics/index.js",
+                ] {
+                    let error = resolver
+                        .resolve_dependency_with_inputs(&base, request, mode)
+                        .unwrap_err();
+                    assert!(format!("{error:#}").contains(request), "{error:#}");
+                }
+                std::fs::write(
+                    &manifest,
+                    r#"{"main":false,"exports":{"./abs":"./next.js","./private":null}}"#,
+                )
+                .unwrap();
+                assert!(cached.inputs.validate().is_err());
+                resolver.invalidate();
+                assert_eq!(
+                    tracked(&resolver, &base, "math-intrinsics/abs", mode).dependency,
+                    ResolvedDependency::File(
+                        dir.root().join("node_modules/math-intrinsics/next.js")
+                    )
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn boolean_main_uses_legacy_index_fallback_and_observes_entry_edits() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "entry.mjs" => "",
+            "node_modules/pkg/package.json" => r#"{"main":false}"#,
+            "node_modules/pkg/index.js" => "",
+            "node_modules/pkg/explicit.js" => "",
+            "node_modules/pkg/false.js" => ""
+        };
+        let base = dir.root().join("entry.mjs");
+        for environment in [TargetEnv::Node, TargetEnv::Browser] {
+            for mode in [ResolutionMode::Import, ResolutionMode::Require] {
+                let mut resolver = StructuralResolver::new(
+                    dir.root().into(),
+                    NodeModulesResolverOptions::default_for_env(environment),
+                    BTreeSet::new(),
+                );
+                for (main, expected) in [
+                    ("false", "index.js"),
+                    ("true", "index.js"),
+                    (r#""./explicit.js""#, "explicit.js"),
+                    (r#""false""#, "false.js"),
+                ] {
+                    std::fs::write(
+                        dir.root().join("node_modules/pkg/package.json"),
+                        format!(r#"{{"main":{main}}}"#),
+                    )
+                    .unwrap();
+                    resolver.invalidate();
+                    let first = tracked(&resolver, &base, "pkg", mode);
+                    assert_eq!(
+                        first.dependency,
+                        ResolvedDependency::File(
+                            dir.root().join("node_modules/pkg").join(expected)
+                        )
+                    );
+                    assert_eq!(tracked(&resolver, &base, "pkg", mode).inputs, first.inputs);
+                    std::fs::write(
+                        dir.root().join("node_modules/pkg/package.json"),
+                        r#"{"main":null}"#,
+                    )
+                    .unwrap();
+                    assert!(first.inputs.validate().is_err());
+                }
+            }
+        }
+    }
+
+    #[test]
     fn exports_arrays_resolve_modes_patterns_and_null_fallbacks_with_checked_cache_hits() {
         let dir = test_tmpdir::test_tmpdir! {
             "entry.mjs" => "",

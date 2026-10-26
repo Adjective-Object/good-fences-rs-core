@@ -4,6 +4,9 @@ Reads the package metadata used by the cached resolver: package names, entry
 fields, browser mappings and exports. Conditional export entries retain JSON
 declaration order; consumers must select the first active condition, including
 `default`, rather than prioritizing their own condition list.
+Boolean `main` values (including the `main: false` used by subpath-only
+packages) are absent legacy entry paths, not filenames or disabled modules.
+String paths remain unchanged; exports still govern package access.
 Nested condition objects preserve order at every level. Root conditional
 shorthand normalizes to an exact `"."` export, without adding wildcard access.
 Fallback arrays retain ordered recursive targets, including condition objects

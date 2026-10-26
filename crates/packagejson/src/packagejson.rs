@@ -26,7 +26,7 @@ pub type BrowserMap = AHashMap<String, StringOrBool>;
 #[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct PackageJson {
     pub name: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_main")]
     pub main: Option<String>,
     #[serde(default)]
     pub module: Option<String>,
@@ -40,6 +40,15 @@ pub struct PackageJson {
 
 pub type PackageJsonExports = AHashMap<String, PackageJsonExport>;
 pub type PackageJsonImports = AHashMap<String, crate::exported_path::ExportedPath>;
+
+fn deserialize_main<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    Ok(match Option::<StringOrBool>::deserialize(deserializer)? {
+        Some(StringOrBool::Str(path)) => Some(path),
+        Some(StringOrBool::Bool(_)) | None => None,
+    })
+}
 
 fn deserialize_exports<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
@@ -193,6 +202,31 @@ impl ContextData for PackageJson {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn boolean_main_is_not_an_entry_path() {
+        let absent: PackageJson = serde_json::from_str("{}").unwrap();
+        for main in ["false", "true", "null"] {
+            let package: PackageJson =
+                serde_json::from_str(&format!(r#"{{"main":{main}}}"#)).unwrap();
+            assert_eq!(package, absent);
+        }
+        for path in ["", "./index.js", "false"] {
+            let package: PackageJson =
+                serde_json::from_str(&format!(r#"{{"main":"{path}"}}"#)).unwrap();
+            assert_eq!(package.main.as_deref(), Some(path));
+        }
+        for invalid in ["42", "[]", "{}"] {
+            assert!(
+                serde_json::from_str::<PackageJson>(&format!(r#"{{"main":{invalid}}}"#)).is_err()
+            );
+        }
+        for field in ["name", "module", "browser", "exports", "imports"] {
+            assert!(
+                serde_json::from_str::<PackageJson>(&format!(r#"{{"{field}":false}}"#)).is_err()
+            );
+        }
+    }
 
     #[test]
     fn imports_retain_recursive_targets_without_exports_shorthand() {
