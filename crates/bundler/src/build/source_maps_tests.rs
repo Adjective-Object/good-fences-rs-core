@@ -611,6 +611,58 @@ fn upstream_source_maps_require_explicit_repair_of_dangling_package_directives()
 }
 
 #[test]
+fn upstream_source_maps_repair_scoped_package_side_effect_subpath_without_changing_runtime() {
+    let dir = TmpDir::new();
+    let path = "node_modules/@vendor/runtime/src/runtime.js";
+    let source = "(function(){globalThis.runtimeValue='SHIPPED_RUNTIME';})();\n";
+    write(
+        dir.root(),
+        "main.mjs",
+        "import '@vendor/runtime/src/runtime.js'; console.log(globalThis.runtimeValue);",
+    );
+    write(
+        dir.root(),
+        "node_modules/@vendor/runtime/package.json",
+        r#"{"name":"@vendor/runtime","version":"1.0.0"}"#,
+    );
+    write(
+        dir.root(),
+        path,
+        &format!("{source}//# sourceMappingURL=runtime.js.map\n"),
+    );
+    let mut config = options();
+    config.output.source_maps = true;
+    config.cache = CacheMode::Disabled;
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let error = session.build(&config).err().unwrap();
+    let report = format!("{error:#}");
+    assert!(report.contains("upstream source map"), "{report}");
+    assert!(report.contains("runtime.js.map"), "{report}");
+    assert!(report.contains("missing or unsupported"), "{report}");
+
+    write(dir.root(), path, source);
+    let repaired = session.build(&config).unwrap();
+    assert_eq!(repaired.product.artifacts.backend, link::Backend::Native);
+    assert_origin(
+        &repaired.product.artifacts,
+        &dir.root().join(path),
+        source,
+        "'SHIPPED_RUNTIME'",
+    );
+    assert_eq!(
+        observe_named(&repaired.product.artifacts, "await import('./main.mjs');"),
+        b"SHIPPED_RUNTIME\n"
+    );
+    let cold = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(repaired.product.artifacts, cold.product.artifacts);
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&repaired.product, &noop.product));
+}
+
+#[test]
 fn source_maps_reserve_case_insensitive_resource_and_parent_paths() {
     let dir = TmpDir::new();
     write(dir.root(), "main.mjs", "export const value = 1;");
