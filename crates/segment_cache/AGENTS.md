@@ -25,7 +25,7 @@
   parser identity, UTF-8 ranges, local IDs, links and order on both boundaries.
 - Preserve sealed extraction provenance on both boundaries and in `to_parsed`;
   never bless unrelated parsed facts by hashing separately supplied source text.
-- Schema 21/extractor 34 retains typed nested module buffers and wire seals,
+- Schema 21/extractor 35 retains typed nested module buffers and wire seals,
   including dynamic namespace observations, deferred recipes, async references
   and lazy construction candidates with original argument slots.
 - Static JSON import-attribute spans remain borrowed source facts, restricted to

@@ -1010,6 +1010,137 @@ fn source_maps_preserve_explicit_portable_commonjs_accelerator_repairs() {
 }
 
 #[test]
+fn source_maps_preserve_commonjs_browserify_require_detectors() {
+    let dir = TmpDir::new();
+    let source = r#"globalThis.bundleRuns++;
+        var fallback = 'function' == typeof require && require;
+        var cached;
+        module.exports = function load(name, jumped) {
+            if (name === 'known') return cached || (cached = {value: 42});
+            var current = 'function' == typeof require && require;
+            if (!jumped && current) return current(name, true);
+            if (fallback) return fallback(name, true);
+            var error = new Error("Cannot find module '" + name + "'");
+            error.code = 'MODULE_NOT_FOUND';
+            throw error;
+        };"#;
+    write(dir.root(), "bundle.cjs", source);
+    write(
+        dir.root(),
+        "main.mjs",
+        "export function loadBundle() { return require('./bundle.cjs'); }
+         export async function dynamicBundle() { return (await import('./bundle.cjs')).default; }",
+    );
+    let mut config = options();
+    config.resolver.target_env = TargetEnv::Browser;
+    config.output.source_maps = true;
+    config.execution =
+        crate::execution::ExecutionOptions::new(std::num::NonZeroUsize::new(4).unwrap());
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let cold = session.build(&config).unwrap();
+    assert_eq!(cold.product.artifacts.backend, link::Backend::Native);
+    assert_eq!(cold.product.graph.file_count(), 2);
+    assert_eq!(cold.counters.source_reparses, 0);
+    assert_eq!(cold.counters.fragment_reparses, 0);
+    assert_origin(
+        &cold.product.artifacts,
+        &dir.root().join("bundle.cjs"),
+        source,
+        "'MODULE_NOT_FOUND'",
+    );
+    for (host, result, events) in [
+        ("", "MODULE_NOT_FOUND", "[]"),
+        (
+            "globalThis.require = loader;",
+            "host:missing:true",
+            r#"["load:missing:true","load:missing:true"]"#,
+        ),
+        (
+            "Object.defineProperty(globalThis, 'require', {get() { events.push('read'); return loader; }});",
+            "host:missing:true",
+            r#"["read","read","read","read","load:missing:true","read","read","load:missing:true"]"#,
+        ),
+        (
+            "Object.defineProperty(globalThis, 'require', {get() { events.push('read'); return undefined; }});",
+            "MODULE_NOT_FOUND",
+            r#"["read","read","read"]"#,
+        ),
+        (
+            "Object.defineProperty(globalThis, 'require', {get() {
+                events.push('read'); return events.length <= 2 ? loader : undefined;
+            }});",
+            "host:missing:true",
+            r#"["read","read","read","load:missing:true","read","load:missing:true"]"#,
+        ),
+        (
+            "Object.defineProperty(globalThis, 'require', {get() {
+                events.push('read'); return events.length === 2 ? loader : undefined;
+            }});",
+            "MODULE_NOT_FOUND",
+            r#"["read","read","read","read"]"#,
+        ),
+    ] {
+        let check = format!(
+            "globalThis.bundleRuns = 0;
+             const events = [];
+             const loader = (name, jumped) => {{
+                 events.push('load:' + name + ':' + jumped);
+                 return 'host:' + name + ':' + jumped;
+             }};
+             {host}
+             const ns = await import('./main.mjs');
+             console.log(globalThis.bundleRuns);
+             const bundle = ns.loadBundle();
+             console.log(bundle('known').value, bundle('known') === bundle('known'));
+             for (const jumped of [false, true]) {{
+                 try {{ console.log(bundle('missing', jumped)); }}
+                 catch (error) {{
+                     if (error.code !== 'MODULE_NOT_FOUND') throw error;
+                     console.log(error.code);
+                 }}
+             }}
+             console.log(bundle === ns.loadBundle(), bundle === await ns.dynamicBundle(), globalThis.bundleRuns);
+             console.log(JSON.stringify(events));"
+        );
+        assert_eq!(
+            String::from_utf8(observe_named(&cold.product.artifacts, &check)).unwrap(),
+            format!("0\n42 true\n{result}\n{result}\ntrue true 1\n{events}\n"),
+            "{host}"
+        );
+    }
+    assert_eq!(
+        observe_named(
+            &cold.product.artifacts,
+            "globalThis.bundleRuns = 0;
+             let reads = 0;
+             Object.defineProperty(globalThis, 'require', {get() { reads++; throw new RangeError('host failure'); }});
+             const ns = await import('./main.mjs');
+             for (let i = 0; i < 2; i++) {
+                 try { ns.loadBundle(); throw new Error('expected host failure'); }
+                 catch (error) { if (!(error instanceof RangeError)) throw error; }
+             }
+             console.log(globalThis.bundleRuns, reads);",
+        ),
+        b"2 2\n"
+    );
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&cold.product, &noop.product));
+    let warm = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(warm.counters.source_parses, 0);
+    assert_eq!(warm.counters.disk_hits, 2);
+    assert_eq!(warm.product.artifacts, cold.product.artifacts);
+    config.cache = CacheMode::Disabled;
+    let uncached = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(uncached.product.artifacts, cold.product.artifacts);
+}
+
+#[test]
 fn source_maps_reserve_case_insensitive_resource_and_parent_paths() {
     let dir = TmpDir::new();
     write(dir.root(), "main.mjs", "export const value = 1;");

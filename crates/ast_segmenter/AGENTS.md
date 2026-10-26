@@ -115,6 +115,10 @@ equality/inequality comparisons with null. These comparisons expose no module
 value and never authorize adjacent escapes or member operations. Preserve
 opaque aliases/getters/identity; do not infer loaders or dependencies from aliases.
 Direct module.require/computed unknown members and bare wrapper escapes stay rejected.
+CommonJS `typeof require` and `typeof require == 'function' && require` retain
+native host reads (strict/reversed equality too), never inferred dependencies or
+an injected loader. Other loader escapes and direct operations on the detector
+result remain rejected.
 ESM environment reads of module/exports and typeof require stay unresolved native
 references, not CJS wrapper facts or constant-false guards. Preserve host reads,
 short-circuit aliases and lexical TDZ; keep direct wrapper operations rejected.

@@ -7,7 +7,7 @@
   Aggregate updates copy verified borrowed request tables directly into a new
   builder, preserving untouched requests without unpacking input/proof trees.
 
-- This is the production `.seg.fb` backend (schema 21/extractor 34).
+- This is the production `.seg.fb` backend (schema 21/extractor 35).
   `segment_cache` adds source-local semantic validation before exposing records.
 - Dependencies retain the static JSON import attribute as an optional typed span;
   target/resource compatibility is derived, never cached.

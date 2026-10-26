@@ -228,6 +228,11 @@ Direct `module == null`, `module != null`, `module === null` and
 `module !== null` checks are also supported, with either operand order and
 parentheses. They retain the real wrapper value and original short-circuit
 timing; they do not admit adjacent module escapes or loader operations.
+CommonJS Browserify-style `typeof require == 'function' && require` detectors
+also retain native host reads, including strict/reversed equality and parentheses.
+`typeof require` is supported independently. Selected aliases stay ordinary values:
+no dependency or loader is inferred/injected; missing hosts and getter timing
+are preserved. Direct operations on the detector result remain rejected.
 
 ## Source-local support matrix
 
@@ -243,7 +248,7 @@ unchanged.
 | Global CJS `require()` | Exactly one literal or relative template/concatenation argument; parenthesized expressions accepted; shadowed calls are ordinary code |
 | Relative template/concatenation import/require | One real occurrence with owned literal pieces, a leading `./` or `../`, and the original argument span; graph capture is a later step |
 | Unconstrained/bare nonliteral import/require, extra/spread require arguments, optional require call | Diagnostic, never a missing dependency |
-| Require reassignment, escaped/aliased loader, `require.resolve`, `module.require`, unknown module access | Diagnostic; only direct loader calls, `module.exports`, `typeof module` and the bounded CJS detector above are supported |
+| Require reassignment, escaped/aliased loader, `require.resolve`, `module.require`, unknown module access | Diagnostic except for the bounded native CJS detectors above; no loader/dependency inference from aliases |
 | CJS `require`/`module`/`exports` declarations at module scope | Diagnostic (wrapper parameters and var/function redeclarations must not be misidentified as independent locals); nested shadows and pure type-space declarations supported |
 | CJS `__filename`/`__dirname` declarations | Top-level var/function redeclarations reuse wrapper parameters; lexical redeclarations are diagnostics; nested shadows supported |
 | CJS `module`/`exports` reassignment | Preserved verbatim with reference write flags; no alias or named-export inference |

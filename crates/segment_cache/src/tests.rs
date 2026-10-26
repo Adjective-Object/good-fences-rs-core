@@ -89,6 +89,37 @@ fn commonjs_module_detectors_roundtrip_without_reparse_or_loader_dependencies() 
 }
 
 #[test]
+fn commonjs_require_detectors_roundtrip_without_reparse_or_loader_dependencies() {
+    let source = "var fallback = 'function' == typeof require && require;
+        module.exports = function(name) {
+            var current = typeof require === 'function' && require;
+            if (current) return current(name, true);
+            if (fallback) return fallback(name, true);
+            throw new Error('missing');
+        };";
+    let original = record(source, "browserify.cjs", ModuleFormat::CommonJs);
+    let parses = ast_segmenter::module_parse_count();
+    let cached =
+        CacheRecord::decode(&original.encode(source).unwrap(), source, original.config()).unwrap();
+    let parsed = cached.to_parsed(source).unwrap();
+    assert!(matches!(
+        parsed.facts(),
+        ast_segmenter::views::ModuleFacts::Wire(_)
+    ));
+    assert_eq!(parsed.body(), original.module().body());
+    assert_eq!(
+        parsed.facts().references(),
+        original.module().facts().references()
+    );
+    assert_eq!(
+        parsed.facts().emission(),
+        original.module().facts().emission()
+    );
+    assert!(parsed.facts().dependencies().is_empty());
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+}
+
+#[test]
 fn esm_host_loader_selections_roundtrip_as_borrowed_native_reads() {
     let source = "export function load() {
         const requireFunc = typeof __webpack_require__ === 'function' ? __non_webpack_require__ : require;

@@ -666,6 +666,101 @@ fn esm_environment_probes_do_not_enable_wrapper_operations() {
 }
 
 #[test]
+fn commonjs_require_detectors_preserve_native_reads_without_dependencies() {
+    for guard in [
+        "'function' == typeof require && require",
+        "typeof require === 'function' && require",
+        "('function' === (typeof (require))) && (require)",
+        "(typeof require) == ('function') && require",
+    ] {
+        let source = format!(
+            "var fallback = {guard};
+             module.exports = function(name) {{
+                 var current = {guard};
+                 return current ? current(name, true) : fallback ? fallback(name, true) : 'missing';
+             }};"
+        );
+        let parsed = parse(&source, "browserify.cjs").unwrap();
+        assert!(parsed.facts().commonjs());
+        assert!(parsed.facts().dependencies().is_empty());
+        let references: Vec<_> = parsed
+            .facts()
+            .references()
+            .iter()
+            .filter(|reference| reference.name() == "require")
+            .collect();
+        assert_eq!(references.len(), 4);
+        assert!(references.iter().all(|reference| reference.read()
+            && !reference.write()
+            && reference.binding().is_none()
+            && reference.commonjs() == Some(CommonJsGlobal::Require)));
+    }
+    let parsed = parse(
+        "typeof require; var host = typeof require === 'function' && require;
+         module.exports = () => require('./real.cjs');",
+        "browserify.cjs",
+    )
+    .unwrap();
+    assert_eq!(parsed.facts().dependencies().len(), 1);
+    assert_eq!(
+        parsed.facts().dependencies().get(0).unwrap().specifier(),
+        "./real.cjs"
+    );
+    let parsed = parse(
+        "function shadow(require) {
+            var host = typeof require === 'function' && require;
+            return host('local');
+         } module.exports = shadow;",
+        "browserify.cjs",
+    )
+    .unwrap();
+    assert!(parsed.facts().dependencies().is_empty());
+    assert!(parsed
+        .facts()
+        .references()
+        .iter()
+        .filter(|reference| reference.name() == "require")
+        .all(|reference| reference.binding().is_some() && reference.commonjs().is_none()));
+}
+
+#[test]
+fn commonjs_require_detector_admission_stays_bounded() {
+    for source in [
+        "var loader = require;",
+        "var loader = flag && require;",
+        "var loader = typeof require === 'object' && require;",
+        "var loader = typeof require !== 'function' && require;",
+        "var loader = typeof require === 'function' || require;",
+        "var loader = typeof other === 'function' && require;",
+        "var loader = typeof require === 'function' && (require, other);",
+        "var loader = typeof require === 'function' && require.resolve;",
+        "var loader = typeof require === 'function' && (require = other);",
+        "var loader = typeof require === 'function' && require++;",
+        "var loader = typeof require === 'function' ? require : other;",
+        "(typeof require === 'function' && require)('indirect');",
+        "new (typeof require === 'function' && require)('indirect');",
+        "(typeof require === 'function' && require)`indirect`;",
+        "(typeof require === 'function' && require).resolve('indirect');",
+        "(typeof require === 'function' && require)['resolve']('indirect');",
+        "typeof require.resolve;",
+    ] {
+        let error = format!("{:#}", parse(source, "unsupported.cjs").unwrap_err());
+        assert!(
+            error.contains("unsupported require reassignment, alias or indirect use")
+                && error.contains("bytes "),
+            "{}: {}",
+            source,
+            error
+        );
+    }
+    assert!(parse(
+        "export const loader = typeof require === 'function' && require;",
+        "unsupported.mjs"
+    )
+    .is_err());
+}
+
+#[test]
 fn mixed_modules_are_errors_not_partial_records() {
     for (path, source) in [
         ("test.mjs", "export const x = 1; module.exports = x;"),

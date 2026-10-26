@@ -23,9 +23,13 @@ Graph linking, effect policy, Ecco registration, execution constraints and nativ
 recipe rendering consume owned-or-wire AST views. A byte-backed graph retains
 verified owners, including Ecco's nested storage, without unpacking extraction
 trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
-`.seg.fb` records (schema 21/extractor 34); parse fingerprints include both active
+`.seg.fb` records (schema 21/extractor 35); parse fingerprints include both active
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
+CommonJS Browserify capability detectors (`typeof require == 'function' && require`,
+including strict/reversed equality) retain native host reads and short-circuit
+timing. Their aliases create no dependencies or injected loader; ordinary native
+CJS initialization, missing-module errors and host getters remain intact.
 
 Preparation stages only source identities and settled resolutions, not owning
 graph inputs or a second source-text map. New products construct graph inputs

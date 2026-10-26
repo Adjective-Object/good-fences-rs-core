@@ -22,7 +22,9 @@ module body and ordered statement ranges, not lossy legacy dependency/name sets.
 `CacheRecord` and `CachedModule` have private storage. Consumers and validators
 use borrowed accessors such as `record.module().facts()` and
 `record.module().segments()`; no mutable view of sealed records is exposed.
-Production loading/publication uses typed FlatBuffers, schema 21/extractor 34.
+Production loading/publication uses typed FlatBuffers, schema 21/extractor 35.
+Extractor 35 admits bounded CommonJS native `require` capability detectors;
+earlier sidecars miss/rebuild, with no wire-layout or loader/dependency inference.
 Static JSON import attributes persist as typed borrowed dependency clause spans;
 semantic validation restricts them to static ESM imports. Target JSON-resource
 compatibility is checked by the bundler after resolution, not cached.

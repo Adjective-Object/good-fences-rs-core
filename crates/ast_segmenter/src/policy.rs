@@ -86,7 +86,11 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
                 policy.reject(reference.span(), "mixed ESM/CommonJS wrapper reference");
             }
             "require" if policy.commonjs => {
-                if reference.write() || !direct_call {
+                if reference.write()
+                    || (!direct_call
+                        && !policy.typeof_names.contains(&reference.span().start)
+                        && !policy.require_selections.contains(&reference.span().start))
+                {
                     policy.reject(
                         reference.span(),
                         "unsupported require reassignment, alias or indirect use",
@@ -193,6 +197,36 @@ fn module_identifier(expression: &Expression<'_>) -> Option<u32> {
         Expression::Identifier(id) if id.name == "module" => Some(id.span.start),
         _ => None,
     }
+}
+
+fn require_detector(expression: &LogicalExpression<'_>) -> Option<u32> {
+    if expression.operator != LogicalOperator::And {
+        return None;
+    }
+    let Expression::Identifier(selected) = expression.right.get_inner_expression() else {
+        return None;
+    };
+    if selected.name != "require" {
+        return None;
+    }
+    let Expression::BinaryExpression(guard) = expression.left.get_inner_expression() else {
+        return None;
+    };
+    if !matches!(
+        guard.operator,
+        BinaryOperator::Equality | BinaryOperator::StrictEquality
+    ) {
+        return None;
+    }
+    let is_function = |expression: &Expression<'_>| matches!(expression.get_inner_expression(), Expression::StringLiteral(s) if s.value == "function");
+    let is_require_type = |expression: &Expression<'_>| {
+        matches!(expression.get_inner_expression(), Expression::UnaryExpression(u)
+            if u.operator == UnaryOperator::Typeof
+                && matches!(u.argument.get_inner_expression(), Expression::Identifier(id) if id.name == "require"))
+    };
+    ((is_function(&guard.left) && is_require_type(&guard.right))
+        || (is_require_type(&guard.left) && is_function(&guard.right)))
+    .then_some(selected.span.start)
 }
 
 fn and_operands<'b, 'a>(
@@ -344,6 +378,9 @@ impl<'a> Visit<'a> for Policy {
         if self.commonjs && !self.operation {
             if let Some(references) = module_detector(expression) {
                 self.module_probes.extend(references);
+            }
+            if let Some(reference) = require_detector(expression) {
+                self.require_selections.insert(reference);
             }
         }
         // Either operand can supply the result. Unlike a conditional test or
