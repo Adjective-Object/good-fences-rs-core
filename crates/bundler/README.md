@@ -2053,6 +2053,9 @@ can use native `globalThis`; compose their shipped maps through the edit rather
 than retaining stale generated offsets. Regression coverage checks upstream
 provenance, deferred exactly-once CJS activation, host-global identity under
 name collisions and execution without access to `eval`/`Function`.
+The same policy applies to eval fallbacks in unreachable CommonJS environment
+branches. Explicit `globalThis` repairs preserve callable exports/self aliases,
+deferred activation and shipped-JavaScript map provenance without exposing globals.
 
 ESM inputs may read `module`/`exports`, probe `typeof require`, or select bare
 `require` in conditional value branches for environment detection (including

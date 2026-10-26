@@ -838,6 +838,85 @@ fn upstream_source_maps_preserve_explicit_csp_safe_package_global_helper_repairs
 }
 
 #[test]
+fn source_maps_preserve_explicit_csp_safe_commonjs_global_fallback_repairs() {
+    let dir = TmpDir::new();
+    let path = "node_modules/@vendor/format/index.js";
+    let source = r#"(function() {
+        var namespace;
+        if (typeof module !== 'undefined') {
+            namespace = module.exports = format;
+        } else {
+            namespace = globalThis;
+        }
+        namespace.format = format;
+        namespace.vsprintf = function(fmt, args) { return format.apply(null, [fmt].concat(args)); };
+        globalThis.formatRuns++;
+        function format(fmt, value) { return fmt.replace('%s', value); }
+    }());"#;
+    write(
+        dir.root(),
+        "node_modules/@vendor/format/package.json",
+        r#"{"name":"@vendor/format","main":"index.js"}"#,
+    );
+    write(
+        dir.root(),
+        path,
+        &source.replace(
+            "namespace = globalThis;",
+            "namespace = (function(){ return this || (1,eval)('this') }());",
+        ),
+    );
+    write(
+        dir.root(),
+        "main.mjs",
+        "export const globalThis = 'local'; export function load() { return require('@vendor/format'); }",
+    );
+    let mut config = options();
+    config.resolver.target_env = TargetEnv::Browser;
+    config.output.source_maps = true;
+    config.cache = CacheMode::Disabled;
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let report = format!("{:#}", session.build(&config).err().unwrap());
+    assert!(
+        report.contains("unsupported unshadowed eval operation"),
+        "{report}"
+    );
+
+    write(dir.root(), path, source);
+    let repaired = session.build(&config).unwrap();
+    assert_eq!(repaired.product.artifacts.backend, link::Backend::Native);
+    assert_origin(
+        &repaired.product.artifacts,
+        &dir.root().join(path),
+        source,
+        "'%s'",
+    );
+    assert_eq!(
+        observe_named(
+            &repaired.product.artifacts,
+            "globalThis.formatRuns = 0;
+             for (const name of ['eval', 'Function']) {
+                 Object.defineProperty(globalThis, name, {get() { throw new Error('unsafe-eval'); }});
+             }
+             const ns = await import('./main.mjs');
+             console.log(globalThis.formatRuns, ns.globalThis);
+             const format = ns.load();
+             console.log(format === ns.load(), format === format.format, globalThis.formatRuns);
+             console.log(format('hello %s', 'native'), format.vsprintf('hello %s', ['worker']));
+             console.log(Object.hasOwn(globalThis, 'format'));",
+        ),
+        b"0 local\ntrue true 1\nhello native hello worker\nfalse\n"
+    );
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&repaired.product, &noop.product));
+    let cold = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(repaired.product.artifacts, cold.product.artifacts);
+}
+
+#[test]
 fn source_maps_reserve_case_insensitive_resource_and_parent_paths() {
     let dir = TmpDir::new();
     write(dir.root(), "main.mjs", "export const value = 1;");
