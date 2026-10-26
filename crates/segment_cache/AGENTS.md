@@ -25,9 +25,12 @@
   parser identity, UTF-8 ranges, local IDs, links and order on both boundaries.
 - Preserve sealed extraction provenance on both boundaries and in `to_parsed`;
   never bless unrelated parsed facts by hashing separately supplied source text.
-- Schema 21/extractor 35 retains typed nested module buffers and wire seals,
+- Schema 22/extractor 36 retains typed nested module buffers and wire seals,
   including dynamic namespace observations, deferred recipes, async references
   and lazy construction candidates with original argument slots.
+- Typed policy occurrences are source evidence, never cached waivers. Strict
+  loaders reject them on cold and warm paths; explicit reporting loaders leave
+  admission to callers without reparsing or unpacking hits.
 - Static JSON import-attribute spans remain borrowed source facts, restricted to
   non-CJS static imports. Resolve and validate target resource kinds on every build.
 - URL dependencies retain only checked literal source spans and original URL

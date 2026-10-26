@@ -3822,6 +3822,183 @@ impl<'a> flatbuffers::Verifiable for LazyWrapperKind {
 
 impl flatbuffers::SimpleToVerifyInSlice for LazyWrapperKind {}
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
+pub const ENUM_MIN_POLICY_NAME: u16 = 0;
+#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
+pub const ENUM_MAX_POLICY_NAME: u16 = 24;
+#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
+#[allow(non_camel_case_types)]
+pub const ENUM_VALUES_POLICY_NAME: [PolicyName; 25] = [
+  PolicyName::UsesEval,
+  PolicyName::RequireReassignment,
+  PolicyName::RequireIndirectUse,
+  PolicyName::MixedEsmCommonjs,
+  PolicyName::ModuleAccess,
+  PolicyName::EsmRequireContext,
+  PolicyName::WrapperArguments,
+  PolicyName::WrapperRedeclaration,
+  PolicyName::ImportAttributes,
+  PolicyName::JsonImportBindings,
+  PolicyName::DynamicImportOptions,
+  PolicyName::ImportTypeOptions,
+  PolicyName::WithStatement,
+  PolicyName::ImportMeta,
+  PolicyName::CommonjsTopLevelAwait,
+  PolicyName::ResourceManagementTransform,
+  PolicyName::JsxTransform,
+  PolicyName::DecoratorTransform,
+  PolicyName::AutoAccessorTransform,
+  PolicyName::TypescriptEnumTransform,
+  PolicyName::TypescriptNamespaceTransform,
+  PolicyName::TypescriptParameterPropertyTransform,
+  PolicyName::TypescriptImportAssignment,
+  PolicyName::TypescriptExportAssignment,
+  PolicyName::TypescriptNamespaceExport,
+];
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[repr(transparent)]
+pub struct PolicyName(pub u16);
+#[allow(non_upper_case_globals)]
+impl PolicyName {
+  pub const UsesEval: Self = Self(0);
+  pub const RequireReassignment: Self = Self(1);
+  pub const RequireIndirectUse: Self = Self(2);
+  pub const MixedEsmCommonjs: Self = Self(3);
+  pub const ModuleAccess: Self = Self(4);
+  pub const EsmRequireContext: Self = Self(5);
+  pub const WrapperArguments: Self = Self(6);
+  pub const WrapperRedeclaration: Self = Self(7);
+  pub const ImportAttributes: Self = Self(8);
+  pub const JsonImportBindings: Self = Self(9);
+  pub const DynamicImportOptions: Self = Self(10);
+  pub const ImportTypeOptions: Self = Self(11);
+  pub const WithStatement: Self = Self(12);
+  pub const ImportMeta: Self = Self(13);
+  pub const CommonjsTopLevelAwait: Self = Self(14);
+  pub const ResourceManagementTransform: Self = Self(15);
+  pub const JsxTransform: Self = Self(16);
+  pub const DecoratorTransform: Self = Self(17);
+  pub const AutoAccessorTransform: Self = Self(18);
+  pub const TypescriptEnumTransform: Self = Self(19);
+  pub const TypescriptNamespaceTransform: Self = Self(20);
+  pub const TypescriptParameterPropertyTransform: Self = Self(21);
+  pub const TypescriptImportAssignment: Self = Self(22);
+  pub const TypescriptExportAssignment: Self = Self(23);
+  pub const TypescriptNamespaceExport: Self = Self(24);
+
+  pub const ENUM_MIN: u16 = 0;
+  pub const ENUM_MAX: u16 = 24;
+  pub const ENUM_VALUES: &'static [Self] = &[
+    Self::UsesEval,
+    Self::RequireReassignment,
+    Self::RequireIndirectUse,
+    Self::MixedEsmCommonjs,
+    Self::ModuleAccess,
+    Self::EsmRequireContext,
+    Self::WrapperArguments,
+    Self::WrapperRedeclaration,
+    Self::ImportAttributes,
+    Self::JsonImportBindings,
+    Self::DynamicImportOptions,
+    Self::ImportTypeOptions,
+    Self::WithStatement,
+    Self::ImportMeta,
+    Self::CommonjsTopLevelAwait,
+    Self::ResourceManagementTransform,
+    Self::JsxTransform,
+    Self::DecoratorTransform,
+    Self::AutoAccessorTransform,
+    Self::TypescriptEnumTransform,
+    Self::TypescriptNamespaceTransform,
+    Self::TypescriptParameterPropertyTransform,
+    Self::TypescriptImportAssignment,
+    Self::TypescriptExportAssignment,
+    Self::TypescriptNamespaceExport,
+  ];
+  /// Returns the variant's name or "" if unknown.
+  pub fn variant_name(self) -> Option<&'static str> {
+    match self {
+      Self::UsesEval => Some("UsesEval"),
+      Self::RequireReassignment => Some("RequireReassignment"),
+      Self::RequireIndirectUse => Some("RequireIndirectUse"),
+      Self::MixedEsmCommonjs => Some("MixedEsmCommonjs"),
+      Self::ModuleAccess => Some("ModuleAccess"),
+      Self::EsmRequireContext => Some("EsmRequireContext"),
+      Self::WrapperArguments => Some("WrapperArguments"),
+      Self::WrapperRedeclaration => Some("WrapperRedeclaration"),
+      Self::ImportAttributes => Some("ImportAttributes"),
+      Self::JsonImportBindings => Some("JsonImportBindings"),
+      Self::DynamicImportOptions => Some("DynamicImportOptions"),
+      Self::ImportTypeOptions => Some("ImportTypeOptions"),
+      Self::WithStatement => Some("WithStatement"),
+      Self::ImportMeta => Some("ImportMeta"),
+      Self::CommonjsTopLevelAwait => Some("CommonjsTopLevelAwait"),
+      Self::ResourceManagementTransform => Some("ResourceManagementTransform"),
+      Self::JsxTransform => Some("JsxTransform"),
+      Self::DecoratorTransform => Some("DecoratorTransform"),
+      Self::AutoAccessorTransform => Some("AutoAccessorTransform"),
+      Self::TypescriptEnumTransform => Some("TypescriptEnumTransform"),
+      Self::TypescriptNamespaceTransform => Some("TypescriptNamespaceTransform"),
+      Self::TypescriptParameterPropertyTransform => Some("TypescriptParameterPropertyTransform"),
+      Self::TypescriptImportAssignment => Some("TypescriptImportAssignment"),
+      Self::TypescriptExportAssignment => Some("TypescriptExportAssignment"),
+      Self::TypescriptNamespaceExport => Some("TypescriptNamespaceExport"),
+      _ => None,
+    }
+  }
+}
+impl core::fmt::Debug for PolicyName {
+  fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+    if let Some(name) = self.variant_name() {
+      f.write_str(name)
+    } else {
+      f.write_fmt(format_args!("<UNKNOWN {:?}>", self.0))
+    }
+  }
+}
+impl<'a> flatbuffers::Follow<'a> for PolicyName {
+  type Inner = Self;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    let b = flatbuffers::read_scalar_at::<u16>(buf, loc);
+    Self(b)
+  }
+}
+
+impl flatbuffers::Push for PolicyName {
+    type Output = PolicyName;
+    #[inline]
+    unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
+        flatbuffers::emplace_scalar::<u16>(dst, self.0);
+    }
+}
+
+impl flatbuffers::EndianScalar for PolicyName {
+  type Scalar = u16;
+  #[inline]
+  fn to_little_endian(self) -> u16 {
+    self.0.to_le()
+  }
+  #[inline]
+  #[allow(clippy::wrong_self_convention)]
+  fn from_little_endian(v: u16) -> Self {
+    let b = u16::from_le(v);
+    Self(b)
+  }
+}
+
+impl<'a> flatbuffers::Verifiable for PolicyName {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    u16::run_verifier(v, pos)
+  }
+}
+
+impl flatbuffers::SimpleToVerifyInSlice for PolicyName {}
+#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 pub const ENUM_MIN_MODULE_BODY: u8 = 0;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 pub const ENUM_MAX_MODULE_BODY: u8 = 2;
@@ -24966,6 +25143,160 @@ impl EmissionFactsT {
     })
   }
 }
+pub enum PolicyViolationOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct PolicyViolation<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for PolicyViolation<'a> {
+  type Inner = PolicyViolation<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> PolicyViolation<'a> {
+  pub const VT_POLICY: flatbuffers::VOffsetT = 4;
+  pub const VT_SPAN: flatbuffers::VOffsetT = 6;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    PolicyViolation { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    args: &'args PolicyViolationArgs<'args>
+  ) -> flatbuffers::WIPOffset<PolicyViolation<'bldr>> {
+    let mut builder = PolicyViolationBuilder::new(_fbb);
+    if let Some(x) = args.span { builder.add_span(x); }
+    builder.add_policy(args.policy);
+    builder.finish()
+  }
+
+  pub fn unpack(&self) -> PolicyViolationT {
+    let policy = self.policy();
+    let span = {
+      let x = self.span();
+      x.unpack()
+    };
+    PolicyViolationT {
+      policy,
+      span,
+    }
+  }
+
+  #[inline]
+  pub fn policy(&self) -> PolicyName {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<PolicyName>(PolicyViolation::VT_POLICY, Some(PolicyName::UsesEval)).unwrap()}
+  }
+  #[inline]
+  pub fn span(&self) -> &'a Span {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<Span>(PolicyViolation::VT_SPAN, None).unwrap()}
+  }
+}
+
+impl flatbuffers::Verifiable for PolicyViolation<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<PolicyName>("policy", Self::VT_POLICY, false)?
+     .visit_field::<Span>("span", Self::VT_SPAN, true)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct PolicyViolationArgs<'a> {
+    pub policy: PolicyName,
+    pub span: Option<&'a Span>,
+}
+impl<'a> Default for PolicyViolationArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    PolicyViolationArgs {
+      policy: PolicyName::UsesEval,
+      span: None, // required field
+    }
+  }
+}
+
+pub struct PolicyViolationBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> PolicyViolationBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_policy(&mut self, policy: PolicyName) {
+    self.fbb_.push_slot::<PolicyName>(PolicyViolation::VT_POLICY, policy, PolicyName::UsesEval);
+  }
+  #[inline]
+  pub fn add_span(&mut self, span: &Span) {
+    self.fbb_.push_slot_always::<&Span>(PolicyViolation::VT_SPAN, span);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> PolicyViolationBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    PolicyViolationBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<PolicyViolation<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    self.fbb_.required(o, PolicyViolation::VT_SPAN,"span");
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for PolicyViolation<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("PolicyViolation");
+      ds.field("policy", &self.policy());
+      ds.field("span", &self.span());
+      ds.finish()
+  }
+}
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct PolicyViolationT {
+  pub policy: PolicyName,
+  pub span: SpanT,
+}
+impl Default for PolicyViolationT {
+  fn default() -> Self {
+    Self {
+      policy: PolicyName::UsesEval,
+      span: Default::default(),
+    }
+  }
+}
+impl PolicyViolationT {
+  pub fn pack<'b, A: flatbuffers::Allocator + 'b>(
+    &self,
+    _fbb: &mut flatbuffers::FlatBufferBuilder<'b, A>
+  ) -> flatbuffers::WIPOffset<PolicyViolation<'b>> {
+    let policy = self.policy;
+    let span_tmp = Some(self.span.pack());
+    let span = span_tmp.as_ref();
+    PolicyViolation::create(_fbb, &PolicyViolationArgs{
+      policy,
+      span,
+    })
+  }
+}
 pub enum ModuleFactsOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
@@ -24982,20 +25313,21 @@ impl<'a> flatbuffers::Follow<'a> for ModuleFacts<'a> {
 }
 
 impl<'a> ModuleFacts<'a> {
-  pub const VT_ECCO: flatbuffers::VOffsetT = 4;
-  pub const VT_ECCO_DECLARATIONS_HASH: flatbuffers::VOffsetT = 6;
-  pub const VT_COMMONJS: flatbuffers::VOffsetT = 8;
-  pub const VT_TOP_LEVEL_AWAIT: flatbuffers::VOffsetT = 10;
-  pub const VT_EFFECTS: flatbuffers::VOffsetT = 12;
-  pub const VT_INVOCATIONS: flatbuffers::VOffsetT = 14;
-  pub const VT_EMISSION: flatbuffers::VOffsetT = 16;
-  pub const VT_BINDINGS: flatbuffers::VOffsetT = 18;
-  pub const VT_REFERENCES: flatbuffers::VOffsetT = 20;
-  pub const VT_DEPENDENCIES: flatbuffers::VOffsetT = 22;
-  pub const VT_IMPORTS: flatbuffers::VOffsetT = 24;
-  pub const VT_EXPORTS: flatbuffers::VOffsetT = 26;
-  pub const VT_DIRECTIVES: flatbuffers::VOffsetT = 28;
-  pub const VT_HASHBANG: flatbuffers::VOffsetT = 30;
+  pub const VT_POLICY_VIOLATIONS: flatbuffers::VOffsetT = 4;
+  pub const VT_ECCO: flatbuffers::VOffsetT = 6;
+  pub const VT_ECCO_DECLARATIONS_HASH: flatbuffers::VOffsetT = 8;
+  pub const VT_COMMONJS: flatbuffers::VOffsetT = 10;
+  pub const VT_TOP_LEVEL_AWAIT: flatbuffers::VOffsetT = 12;
+  pub const VT_EFFECTS: flatbuffers::VOffsetT = 14;
+  pub const VT_INVOCATIONS: flatbuffers::VOffsetT = 16;
+  pub const VT_EMISSION: flatbuffers::VOffsetT = 18;
+  pub const VT_BINDINGS: flatbuffers::VOffsetT = 20;
+  pub const VT_REFERENCES: flatbuffers::VOffsetT = 22;
+  pub const VT_DEPENDENCIES: flatbuffers::VOffsetT = 24;
+  pub const VT_IMPORTS: flatbuffers::VOffsetT = 26;
+  pub const VT_EXPORTS: flatbuffers::VOffsetT = 28;
+  pub const VT_DIRECTIVES: flatbuffers::VOffsetT = 30;
+  pub const VT_HASHBANG: flatbuffers::VOffsetT = 32;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -25020,11 +25352,16 @@ impl<'a> ModuleFacts<'a> {
     if let Some(x) = args.top_level_await { builder.add_top_level_await(x); }
     if let Some(x) = args.ecco_declarations_hash { builder.add_ecco_declarations_hash(x); }
     if let Some(x) = args.ecco { builder.add_ecco(x); }
+    if let Some(x) = args.policy_violations { builder.add_policy_violations(x); }
     builder.add_commonjs(args.commonjs);
     builder.finish()
   }
 
   pub fn unpack(&self) -> ModuleFactsT {
+    let policy_violations = {
+      let x = self.policy_violations();
+      x.iter().map(|t| t.unpack()).collect()
+    };
     let ecco = self.ecco().map(|x| {
       Box::new(x.unpack())
     });
@@ -25077,6 +25414,7 @@ impl<'a> ModuleFacts<'a> {
       Box::new(x.unpack())
     });
     ModuleFactsT {
+      policy_violations,
       ecco,
       ecco_declarations_hash,
       commonjs,
@@ -25094,6 +25432,13 @@ impl<'a> ModuleFacts<'a> {
     }
   }
 
+  #[inline]
+  pub fn policy_violations(&self) -> flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<PolicyViolation<'a>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<PolicyViolation>>>>(ModuleFacts::VT_POLICY_VIOLATIONS, None).unwrap()}
+  }
   #[inline]
   pub fn ecco(&self) -> Option<ParsedFile<'a>> {
     // Safety:
@@ -25201,6 +25546,7 @@ impl flatbuffers::Verifiable for ModuleFacts<'_> {
   ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<PolicyViolation>>>>("policy_violations", Self::VT_POLICY_VIOLATIONS, true)?
      .visit_field::<flatbuffers::ForwardsUOffset<ParsedFile>>("ecco", Self::VT_ECCO, false)?
      .visit_field::<Fingerprint>("ecco_declarations_hash", Self::VT_ECCO_DECLARATIONS_HASH, true)?
      .visit_field::<bool>("commonjs", Self::VT_COMMONJS, false)?
@@ -25220,6 +25566,7 @@ impl flatbuffers::Verifiable for ModuleFacts<'_> {
   }
 }
 pub struct ModuleFactsArgs<'a> {
+    pub policy_violations: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<PolicyViolation<'a>>>>>,
     pub ecco: Option<flatbuffers::WIPOffset<ParsedFile<'a>>>,
     pub ecco_declarations_hash: Option<&'a Fingerprint>,
     pub commonjs: bool,
@@ -25239,6 +25586,7 @@ impl<'a> Default for ModuleFactsArgs<'a> {
   #[inline]
   fn default() -> Self {
     ModuleFactsArgs {
+      policy_violations: None, // required field
       ecco: None,
       ecco_declarations_hash: None, // required field
       commonjs: false,
@@ -25262,6 +25610,10 @@ pub struct ModuleFactsBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
   start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
 }
 impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> ModuleFactsBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_policy_violations(&mut self, policy_violations: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<PolicyViolation<'b >>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(ModuleFacts::VT_POLICY_VIOLATIONS, policy_violations);
+  }
   #[inline]
   pub fn add_ecco(&mut self, ecco: flatbuffers::WIPOffset<ParsedFile<'b >>) {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<ParsedFile>>(ModuleFacts::VT_ECCO, ecco);
@@ -25329,6 +25681,7 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> ModuleFactsBuilder<'a, 'b, A> {
   #[inline]
   pub fn finish(self) -> flatbuffers::WIPOffset<ModuleFacts<'a>> {
     let o = self.fbb_.end_table(self.start_);
+    self.fbb_.required(o, ModuleFacts::VT_POLICY_VIOLATIONS,"policy_violations");
     self.fbb_.required(o, ModuleFacts::VT_ECCO_DECLARATIONS_HASH,"ecco_declarations_hash");
     self.fbb_.required(o, ModuleFacts::VT_TOP_LEVEL_AWAIT,"top_level_await");
     self.fbb_.required(o, ModuleFacts::VT_EFFECTS,"effects");
@@ -25347,6 +25700,7 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> ModuleFactsBuilder<'a, 'b, A> {
 impl core::fmt::Debug for ModuleFacts<'_> {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     let mut ds = f.debug_struct("ModuleFacts");
+      ds.field("policy_violations", &self.policy_violations());
       ds.field("ecco", &self.ecco());
       ds.field("ecco_declarations_hash", &self.ecco_declarations_hash());
       ds.field("commonjs", &self.commonjs());
@@ -25367,6 +25721,7 @@ impl core::fmt::Debug for ModuleFacts<'_> {
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModuleFactsT {
+  pub policy_violations: Vec<PolicyViolationT>,
   pub ecco: Option<Box<ParsedFileT>>,
   pub ecco_declarations_hash: FingerprintT,
   pub commonjs: bool,
@@ -25385,6 +25740,7 @@ pub struct ModuleFactsT {
 impl Default for ModuleFactsT {
   fn default() -> Self {
     Self {
+      policy_violations: Default::default(),
       ecco: None,
       ecco_declarations_hash: Default::default(),
       commonjs: false,
@@ -25407,6 +25763,10 @@ impl ModuleFactsT {
     &self,
     _fbb: &mut flatbuffers::FlatBufferBuilder<'b, A>
   ) -> flatbuffers::WIPOffset<ModuleFacts<'b>> {
+    let policy_violations = Some({
+      let x = &self.policy_violations;
+      let w: Vec<_> = x.iter().map(|t| t.pack(_fbb)).collect();_fbb.create_vector(&w)
+    });
     let ecco = self.ecco.as_ref().map(|x|{
       x.pack(_fbb)
     });
@@ -25457,6 +25817,7 @@ impl ModuleFactsT {
       x.pack(_fbb)
     });
     ModuleFacts::create(_fbb, &ModuleFactsArgs{
+      policy_violations,
       ecco,
       ecco_declarations_hash,
       commonjs,

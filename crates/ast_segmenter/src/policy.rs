@@ -8,6 +8,11 @@ use oxc_span::Span;
 
 use crate::owned::{DependencyKind, ModuleFacts};
 
+mod diagnostics;
+pub use diagnostics::{PolicyErrors, PolicyName, PolicyViolation};
+#[cfg(test)]
+mod tests;
+
 pub(crate) fn json_import_attribute(declaration: &ImportDeclaration<'_>) -> Option<Span> {
     let clause = declaration.with_clause.as_ref()?;
     (clause.with_entries.len() == 1
@@ -19,7 +24,7 @@ pub(crate) fn json_import_attribute(declaration: &ImportDeclaration<'_>) -> Opti
         .then(|| Span::new(declaration.source.span.end, clause.span.end))
 }
 
-pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<()> {
+pub(crate) fn collect(program: &Program<'_>, facts: &ModuleFacts) -> Vec<PolicyViolation> {
     let mut policy = Policy {
         commonjs: program.source_type.is_commonjs(),
         bundled_imports: facts
@@ -56,10 +61,7 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
     if !policy.commonjs {
         for dependency in &requires {
             if dependency.pattern().is_some() {
-                policy.reject(
-                    dependency.span(),
-                    "unsupported ESM require context (expected a literal request)",
-                );
+                policy.reject(dependency.span(), PolicyName::EsmRequireContext);
             }
         }
     }
@@ -83,19 +85,23 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
                             && !policy.typeof_names.contains(&reference.span().start)
                             && !policy.require_selections.contains(&reference.span().start))) =>
             {
-                policy.reject(reference.span(), "mixed ESM/CommonJS wrapper reference");
+                policy.reject(reference.span(), PolicyName::MixedEsmCommonjs);
             }
-            "require" if policy.commonjs => {
-                if reference.write()
-                    || (!direct_call
-                        && !policy.typeof_names.contains(&reference.span().start)
-                        && !policy.require_selections.contains(&reference.span().start))
-                {
-                    policy.reject(
-                        reference.span(),
-                        "unsupported require reassignment, alias or indirect use",
-                    );
-                }
+            "require"
+                if policy.commonjs
+                    && (reference.write()
+                        || (!direct_call
+                            && !policy.typeof_names.contains(&reference.span().start)
+                            && !policy.require_selections.contains(&reference.span().start))) =>
+            {
+                policy.reject(
+                    reference.span(),
+                    if reference.write() {
+                        PolicyName::RequireReassignment
+                    } else {
+                        PolicyName::RequireIndirectUse
+                    },
+                );
             }
             "module"
                 if policy.commonjs
@@ -104,25 +110,19 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
                     && !policy.typeof_names.contains(&reference.span().start)
                     && !policy.module_probes.contains(&reference.span().start) =>
             {
-                policy.reject(
-                    reference.span(),
-                    "unsupported module access (expected module.exports or a guarded module detector)",
-                );
+                policy.reject(reference.span(), PolicyName::ModuleAccess);
             }
             "eval"
                 if reference.write()
                     || policy.eval_operations.contains(&reference.span().start) =>
             {
-                policy.reject(reference.span(), "unsupported unshadowed eval operation");
+                policy.reject(reference.span(), PolicyName::UsesEval);
             }
             "arguments"
                 if policy.commonjs
                     && policy.wrapper_arguments.contains(&reference.span().start) =>
             {
-                policy.reject(
-                    reference.span(),
-                    "unsupported CommonJS wrapper arguments access",
-                );
+                policy.reject(reference.span(), PolicyName::WrapperArguments);
             }
             _ => {}
         }
@@ -136,15 +136,15 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
                         && !binding.function_scoped()
                         && !binding.function()))
             {
-                policy.reject(
-                    binding.declarations()[0],
-                    "unsupported CommonJS wrapper redeclaration",
-                );
+                policy.reject(binding.declarations()[0], PolicyName::WrapperRedeclaration);
             }
         }
     }
-    eyre::ensure!(policy.errors.is_empty(), "{}", policy.errors.join("; "));
-    Ok(())
+    policy
+        .errors
+        .sort_by_key(|v| (v.span().start, v.span().end, v.policy()));
+    policy.errors.dedup();
+    policy.errors
 }
 
 struct Policy {
@@ -162,21 +162,20 @@ struct Policy {
     wrapper_operations: HashSet<u32>,
     eval_operations: HashSet<u32>,
     operation: bool,
-    errors: Vec<String>,
+    errors: Vec<PolicyViolation>,
 }
 
 impl Policy {
-    fn reject(&mut self, span: Span, message: &str) {
-        self.errors
-            .push(format!("{message} at bytes {}..{}", span.start, span.end));
+    fn reject(&mut self, span: Span, policy: PolicyName) {
+        self.errors.push(PolicyViolation::new(policy, span));
     }
 
     fn module_declaration(&mut self, span: Span, attributes: bool, phase: bool) {
         if self.commonjs {
-            self.reject(span, "mixed CommonJS/ESM declaration");
+            self.reject(span, PolicyName::MixedEsmCommonjs);
         }
         if attributes || phase {
-            self.reject(span, "unsupported import attributes or import phase");
+            self.reject(span, PolicyName::ImportAttributes);
         }
     }
 
@@ -451,10 +450,7 @@ impl<'a> Visit<'a> for Policy {
                 })
             })
         {
-            self.reject(
-                declaration.span,
-                "JSON import attributes support only default or side-effect imports",
-            );
+            self.reject(declaration.span, PolicyName::JsonImportBindings);
         }
         self.module_declaration(
             declaration.span,
@@ -493,17 +489,14 @@ impl<'a> Visit<'a> for Policy {
         if (expression.options.is_some() || expression.phase.is_some())
             && self.bundled_imports.contains(&expression.span.start)
         {
-            self.reject(
-                expression.span,
-                "unsupported dynamic import options or phase",
-            );
+            self.reject(expression.span, PolicyName::DynamicImportOptions);
         }
         walk::walk_import_expression(self, expression);
     }
 
     fn visit_ts_import_type(&mut self, expression: &TSImportType<'a>) {
         if expression.options.is_some() {
-            self.reject(expression.span, "unsupported import type options");
+            self.reject(expression.span, PolicyName::ImportTypeOptions);
         }
         walk::walk_ts_import_type(self, expression);
     }
@@ -524,25 +517,25 @@ impl<'a> Visit<'a> for Policy {
     }
 
     fn visit_with_statement(&mut self, statement: &WithStatement<'a>) {
-        self.reject(statement.span, "unsupported with statement");
+        self.reject(statement.span, PolicyName::WithStatement);
     }
 
     fn visit_import_meta(&mut self, property: &ImportMeta) {
         if !self.resource_url_depth {
-            self.reject(property.span, "unsupported import.meta");
+            self.reject(property.span, PolicyName::ImportMeta);
         }
     }
 
     fn visit_await_expression(&mut self, expression: &AwaitExpression<'a>) {
         if self.commonjs && self.function_depth == 0 {
-            self.reject(expression.span, "unsupported top-level await");
+            self.reject(expression.span, PolicyName::CommonjsTopLevelAwait);
         }
         walk::walk_await_expression(self, expression);
     }
 
     fn visit_for_of_statement(&mut self, statement: &ForOfStatement<'a>) {
         if self.commonjs && statement.r#await && self.function_depth == 0 {
-            self.reject(statement.span, "unsupported top-level for-await");
+            self.reject(statement.span, PolicyName::CommonjsTopLevelAwait);
         }
         walk::walk_for_of_statement(self, statement);
     }
@@ -572,79 +565,67 @@ impl<'a> Visit<'a> for Policy {
             declaration.kind,
             VariableDeclarationKind::Using | VariableDeclarationKind::AwaitUsing
         ) {
-            self.reject(
-                declaration.span,
-                "unsupported resource-management transform",
-            );
+            self.reject(declaration.span, PolicyName::ResourceManagementTransform);
         }
         walk::walk_variable_declaration(self, declaration);
     }
 
     fn visit_jsx_element(&mut self, element: &JSXElement<'a>) {
-        self.reject(element.span, "unsupported JSX transform");
+        self.reject(element.span, PolicyName::JsxTransform);
     }
 
     fn visit_jsx_fragment(&mut self, fragment: &JSXFragment<'a>) {
-        self.reject(fragment.span, "unsupported JSX transform");
+        self.reject(fragment.span, PolicyName::JsxTransform);
     }
 
     fn visit_decorator(&mut self, decorator: &Decorator<'a>) {
-        self.reject(decorator.span, "unsupported decorator transform");
+        self.reject(decorator.span, PolicyName::DecoratorTransform);
     }
 
     fn visit_accessor_property(&mut self, property: &AccessorProperty<'a>) {
-        self.reject(property.span, "unsupported auto-accessor transform");
+        self.reject(property.span, PolicyName::AutoAccessorTransform);
     }
 
     fn visit_ts_enum_declaration(&mut self, declaration: &TSEnumDeclaration<'a>) {
-        self.reject(declaration.span, "unsupported TypeScript enum transform");
+        self.reject(declaration.span, PolicyName::TypescriptEnumTransform);
     }
 
     fn visit_ts_namespace_declaration(&mut self, declaration: &TSNamespaceDeclaration<'a>) {
-        self.reject(
-            declaration.span,
-            "unsupported TypeScript namespace transform",
-        );
+        self.reject(declaration.span, PolicyName::TypescriptNamespaceTransform);
     }
 
     fn visit_ts_external_module_declaration(
         &mut self,
         declaration: &TSExternalModuleDeclaration<'a>,
     ) {
-        self.reject(
-            declaration.span,
-            "unsupported TypeScript namespace transform",
-        );
+        self.reject(declaration.span, PolicyName::TypescriptNamespaceTransform);
     }
 
     fn visit_ts_global_declaration(&mut self, declaration: &TSGlobalDeclaration<'a>) {
-        self.reject(
-            declaration.span,
-            "unsupported TypeScript namespace transform",
-        );
+        self.reject(declaration.span, PolicyName::TypescriptNamespaceTransform);
     }
     fn visit_formal_parameter(&mut self, parameter: &FormalParameter<'a>) {
         if parameter.accessibility.is_some() || parameter.readonly || parameter.r#override {
             self.reject(
                 parameter.span,
-                "unsupported TypeScript parameter property transform",
+                PolicyName::TypescriptParameterPropertyTransform,
             );
         }
         walk::walk_formal_parameter(self, parameter);
     }
 
     fn visit_ts_import_equals_declaration(&mut self, declaration: &TSImportEqualsDeclaration<'a>) {
-        self.reject(declaration.span, "unsupported TypeScript import assignment");
+        self.reject(declaration.span, PolicyName::TypescriptImportAssignment);
     }
 
     fn visit_ts_export_assignment(&mut self, declaration: &TSExportAssignment<'a>) {
-        self.reject(declaration.span, "unsupported TypeScript export assignment");
+        self.reject(declaration.span, PolicyName::TypescriptExportAssignment);
     }
 
     fn visit_ts_namespace_export_declaration(
         &mut self,
         declaration: &TSNamespaceExportDeclaration<'a>,
     ) {
-        self.reject(declaration.span, "unsupported TypeScript namespace export");
+        self.reject(declaration.span, PolicyName::TypescriptNamespaceExport);
     }
 }

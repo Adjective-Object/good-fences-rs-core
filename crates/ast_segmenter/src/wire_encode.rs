@@ -494,6 +494,18 @@ fn emission(v: &em::EmissionFacts) -> w::EmissionFactsT {
     })
 }
 fn facts<'b>(v: &o::ModuleFacts, b: &mut FlatBufferBuilder<'b>) -> WIPOffset<w::ModuleFacts<'b>> {
+    let policies = v
+        .policy_violations()
+        .iter()
+        .map(|v| {
+            table!(PolicyViolationT {
+                policy: w::PolicyName(v.policy() as u16),
+                span: span(v.span())
+            })
+            .pack(b)
+        })
+        .collect::<Vec<_>>();
+    let policy_violations = Some(b.create_vector(&policies));
     let ecco = v.ecco().map(|v| v.encode_flatbuffer(b));
     let hash = w::Fingerprint::new(&v.ecco_declarations_hash().bytes());
     let top_level_await = b.create_vector(
@@ -525,6 +537,7 @@ fn facts<'b>(v: &o::ModuleFacts, b: &mut FlatBufferBuilder<'b>) -> WIPOffset<w::
     w::ModuleFacts::create(
         b,
         &w::ModuleFactsArgs {
+            policy_violations,
             ecco,
             ecco_declarations_hash: Some(&hash),
             commonjs: v.commonjs(),

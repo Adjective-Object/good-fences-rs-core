@@ -3,6 +3,100 @@ use test_tmpdir::TmpDir;
 
 const SOURCE: &str = "import {x as y} from './dep'; export const value = y;";
 
+#[test]
+fn policy_evidence_survives_disk_hits_but_strict_loaders_never_admit_it() {
+    use ast_segmenter::policy::{PolicyErrors, PolicyName};
+    let dir = TmpDir::new();
+    let path = dir.root_join("player.cjs");
+    let source = "module.exports = eval('({value: 42})');";
+    fs::write(&path, source).unwrap();
+    let declarations =
+        ast_segmenter::PreparedDeclarations::new(ecco::LocalFacts::default()).unwrap();
+    let prepared = || PreparedSource {
+        source,
+        original: source.as_bytes(),
+        parser_path: &path,
+        package: ModuleFormat::CommonJs,
+    };
+    let mut observations = 0;
+    let cold = load_prepared_reporting_policies(
+        &logger::StdioLogger::new(),
+        &path,
+        prepared(),
+        CacheMode::ReadWrite,
+        &declarations,
+        |_, violations| {
+            observations += 1;
+            assert_eq!(violations.len(), 1);
+            assert_eq!(violations[0].policy(), PolicyName::UsesEval);
+        },
+    )
+    .unwrap();
+    assert_eq!(observations, 1);
+    assert_eq!(cold.write, CacheWrite::Stored);
+    let parses = ast_segmenter::module_parse_count();
+    let warm = load_prepared_reporting_policies(
+        &logger::StdioLogger::new(),
+        &path,
+        prepared(),
+        CacheMode::ReadWrite,
+        &declarations,
+        |_, _| panic!("disk hit reparsed"),
+    )
+    .unwrap();
+    assert_eq!(warm.status, CacheStatus::Hit);
+    assert!(warm
+        .record
+        .to_parsed(source)
+        .unwrap_err()
+        .downcast_ref::<PolicyErrors>()
+        .is_some());
+    let explicit = warm.record.to_parsed_reporting_policies(source).unwrap();
+    assert!(CacheRecord::from_parsed(source, &explicit)
+        .unwrap_err()
+        .downcast_ref::<PolicyErrors>()
+        .is_some());
+    let bytes = warm.record.encode(source).unwrap();
+    assert!(CacheRecord::decode(&bytes, source, warm.record.config())
+        .unwrap_err()
+        .downcast_ref::<PolicyErrors>()
+        .is_some());
+    assert!(CacheRecord::decode_reporting_policies(&bytes, source, warm.record.config()).is_ok());
+    assert!(matches!(
+        warm.record.module().facts(),
+        ast_segmenter::views::ModuleFacts::Wire(_)
+    ));
+    assert_eq!(
+        warm.record.module().facts().policy_violations(),
+        cold.record.module().facts().policy_violations()
+    );
+    let error = load_prepared_with_declarations(
+        &logger::StdioLogger::new(),
+        &path,
+        prepared(),
+        CacheMode::ReadWrite,
+        &declarations,
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<PolicyErrors>().unwrap().violations()[0].policy(),
+        PolicyName::UsesEval
+    );
+    assert!(format!("{error:#}").contains("eval('({value: 42})')"));
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+    fs::remove_file(sidecar_path(&path)).unwrap();
+    let error = load_prepared_with_declarations(
+        &logger::StdioLogger::new(),
+        &path,
+        prepared(),
+        CacheMode::ReadWrite,
+        &declarations,
+    )
+    .unwrap_err();
+    assert!(error.downcast_ref::<PolicyErrors>().is_some());
+    assert!(!sidecar_path(&path).exists());
+}
+
 fn setup() -> (TmpDir, PathBuf) {
     let dir = TmpDir::new();
     let path = dir.root_join("entry.js");
@@ -192,7 +286,10 @@ fn prepared_sources_cache_generated_coordinates_and_recheck_original_bytes() {
             fs::write(&path, b"changed input")?;
             Ok(())
         },
-        |_| {},
+        PolicyHandling::Strict(
+            |_: &[ast_segmenter::owned::Dependency],
+             _: &[ast_segmenter::policy::PolicyViolation]| {},
+        ),
     )
     .unwrap_err();
     assert!(format!("{error:#}").contains("source changed"));

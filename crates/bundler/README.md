@@ -4,6 +4,19 @@ Build and publication errors retain `eyre` cause chains with project/module path
 and stage/IO context. Worker panic reports retain string payloads and all workers
 are joined. Display the full chain with `{error:#}`; `to_string()` shows only the
 outer context. Diagnostic paths/requests are not added to duration traces.
+Demanded source/facts failures and policy waivers emit immediate stderr-only
+`bundler::diagnostic` events. Reachable preparation continues, including dependencies
+of policy-failing sources and independent resources, then returns deterministic
+`build::PreparationErrors` with inspectable typed reports before graph/planning/
+publication. Unused speculative errors and warnings remain private.
+`BuildOptions::policy_allowlist` accepts validated `build::PolicyAllowance::new`
+entries (exact portable root-relative canonical source path plus typed
+`build::PolicyName` values). Every encountered waiver warns that bundled output
+may be incorrect; source code is preserved, never repaired or evaluated.
+Admission runs anew on cold/disk/session/no-op builds; removing a waiver cannot
+reuse old success. See bundler-cli's README for names and JSON configuration.
+For transpiled inputs, policy excerpts/spans describe the prepared JavaScript,
+not unrelated byte positions in the original TypeScript/JSX.
 High-level `bundler::progress` tracing events mark build/publication phases and
 report numeric preparation/cache counts at most once per second. The library
 installs no subscriber; bundler-cli reports these events to stderr independently
@@ -23,7 +36,7 @@ Graph linking, effect policy, Ecco registration, execution constraints and nativ
 recipe rendering consume owned-or-wire AST views. A byte-backed graph retains
 verified owners, including Ecco's nested storage, without unpacking extraction
 trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
-`.seg.fb` records (schema 21/extractor 35); parse fingerprints include both active
+`.seg.fb` records (schema 22/extractor 36); parse fingerprints include both active
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
 CommonJS Browserify capability detectors (`typeof require == 'function' && require`,

@@ -35,8 +35,8 @@ use std::{ops::Range, sync::Arc};
 use eyre::{ensure, Result};
 
 pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
-pub const SCHEMA_VERSION: u32 = 21;
-pub const EXTRACTOR_VERSION: u32 = 35;
+pub const SCHEMA_VERSION: u32 = 22;
+pub const EXTRACTOR_VERSION: u32 = 36;
 pub const MODULE_IDENTIFIER: &str = "GFSM";
 const CHECKSUM_BYTES: usize = 16;
 
@@ -160,6 +160,14 @@ impl WireRecord {
             "cache extraction provenance mismatch"
         );
         let module_root = verified_module(module_bytes)?;
+        ensure!(
+            module_root
+                .facts()
+                .policy_violations()
+                .iter()
+                .all(|v| v.policy().variant_name().is_some()),
+            "unknown source policy discriminant"
+        );
         verify::module(module_root)?;
         ensure!(
             module_root.facts().commonjs() == config.commonjs()

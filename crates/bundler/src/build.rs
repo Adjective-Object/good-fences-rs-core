@@ -29,7 +29,9 @@ use crate::{
 mod discovery;
 #[path = "entry_outputs.rs"]
 mod entry_outputs;
+mod policy;
 mod prepare;
+pub use policy::{PolicyAllowance, PolicyName, PreparationErrors};
 mod scratch;
 mod worker_entries;
 
@@ -56,6 +58,8 @@ pub struct BuildOptions {
     /// JavaScript and target-selected host contracts, followed by exact user overrides.
     pub declarations: ecco::DeclarationConfig,
     pub cache: CacheMode,
+    /// Exact source/policy waivers; evidence is admitted anew on every build/hit.
+    pub policy_allowlist: Vec<PolicyAllowance>,
     pub output: OutputOptions,
     pub css: CssOptions,
 }
@@ -124,6 +128,7 @@ impl Default for BuildOptions {
             effects: EffectPolicy::default(),
             declarations: ecco::DeclarationConfig::default(),
             cache: CacheMode::ReadWrite,
+            policy_allowlist: Vec::new(),
             output: OutputOptions::default(),
             css: CssOptions::default(),
         }
@@ -369,16 +374,29 @@ impl BuildSession {
         .admitting(&inventory);
         let mut queue = VecDeque::new();
         let mut entries = BTreeMap::new();
+        let mut errors: BTreeMap<PathBuf, Vec<eyre::Report>> = BTreeMap::new();
         for (name, entry) in &options.entries {
             ensure!(!name.is_empty(), "empty entry name");
-            let path = inventory
-                .admit(&self.root.join(&entry.path))
-                .wrap_err_with(|| format!("entry {}: {}", name, entry.path.display()))?;
-            ensure!(
-                inventory.contains(&path),
-                "entry outside reachable build inventory: {}",
-                path.display()
-            );
+            let requested = self.root.join(&entry.path);
+            let admitted = (|| -> eyre::Result<PathBuf> {
+                let path = inventory
+                    .admit(&requested)
+                    .wrap_err_with(|| format!("entry {}: {}", name, entry.path.display()))?;
+                ensure!(
+                    inventory.contains(&path),
+                    "entry outside reachable build inventory: {}",
+                    path.display()
+                );
+                Ok(path)
+            })();
+            let path = match admitted {
+                Ok(path) => path,
+                Err(error) => {
+                    tracing::error!(target: "bundler::diagnostic", "{error:#}");
+                    errors.entry(requested).or_default().push(error);
+                    continue;
+                }
+            };
             entries.insert(name.clone(), (path.clone(), entry.namespace));
             queue.push_back(path);
         }
@@ -413,7 +431,7 @@ impl BuildSession {
         let mut relocations = BTreeMap::new();
         let mut require_resources = BTreeMap::new();
         let mut changed = BTreeSet::new();
-        let mut errors = BTreeMap::new();
+        let mut reported_policies = BTreeSet::new();
         let mut previous_contexts = BTreeMap::new();
         let mut upstreams = BTreeMap::new();
         let mut deferred_styles = BTreeMap::new();
@@ -422,6 +440,7 @@ impl BuildSession {
         let mut early_loaded = BTreeMap::new();
         let mut early_resolved = BTreeMap::new();
         let mut early_scheduled = BTreeSet::new();
+        let mut speculative_syntax = BTreeMap::new();
         let mut prepared_sources = 0usize;
         let mut resolved_modules = 0usize;
         #[cfg(test)]
@@ -429,27 +448,29 @@ impl BuildSession {
         #[cfg(test)]
         let dependency_observer =
             prepare::AFTER_DEPENDENCIES.with(|observer| observer.borrow().clone());
-        let read_with_inventory =
-            |path: PathBuf,
-             inventory: &Inventory,
-             dependencies: &dyn Fn(&[ast_segmenter::owned::Dependency])| {
-                let result = prepare::read(
-                    &path,
-                    inventory,
-                    previous.get(&path),
-                    options,
-                    &declarations,
-                    &public_base,
-                    dependencies,
-                )
-                .wrap_err_with(|| format!("preparing module {}", path.display()));
-                #[cfg(test)]
-                if let Some(observer) = &observer {
-                    observer(&path);
-                }
-                (path, result)
-            };
-        let read = |path| read_with_inventory(path, &inventory, &|_| {});
+        let read_with_inventory = |path: PathBuf,
+                                   inventory: &Inventory,
+                                   dependencies: &dyn Fn(
+            &[ast_segmenter::owned::Dependency],
+            policy::Admission,
+        )| {
+            let result = prepare::read(
+                &path,
+                inventory,
+                previous.get(&path),
+                options,
+                &declarations,
+                &public_base,
+                dependencies,
+            )
+            .wrap_err_with(|| format!("preparing module {}", path.display()));
+            #[cfg(test)]
+            if let Some(observer) = &observer {
+                observer(&path);
+            }
+            (path, result)
+        };
+        let read = |path| read_with_inventory(path, &inventory, &|_, _| {});
         let work = |job, report: &dyn Fn(prepare::Early)| {
             let provisional = matches!(&job, prepare::Job::PrepareEarly(_));
             match job {
@@ -457,9 +478,11 @@ impl BuildSession {
                     prepare::Claim::Ready(ready) => (path, Some(ready)),
                     prepare::Claim::Waiting => (path, None),
                     prepare::Claim::Read => {
-                        let dependencies = |dependencies: &[ast_segmenter::owned::Dependency]| {
+                        let dependencies = |dependencies: &[ast_segmenter::owned::Dependency],
+                                            admission| {
                             report(prepare::Early {
                                 path: path.clone(),
+                                admission,
                                 dependencies: prepare::Dependencies::Early(
                                     dependencies.to_vec().into(),
                                 ),
@@ -487,7 +510,24 @@ impl BuildSession {
                                 candidate_inventory.admit(&path)
                             };
                             let result = admission.and_then(|_| {
-                                read_with_inventory(path.clone(), &candidate_inventory, &|_| {}).1
+                                read_with_inventory(
+                                    path.clone(),
+                                    &candidate_inventory,
+                                    &|dependencies, admission| {
+                                        if admission.error.is_some()
+                                            || !admission.warnings.is_empty()
+                                        {
+                                            report(prepare::Early {
+                                                path: path.clone(),
+                                                dependencies: prepare::Dependencies::Early(
+                                                    dependencies.to_vec().into(),
+                                                ),
+                                                admission,
+                                            });
+                                        }
+                                    },
+                                )
+                                .1
                             });
                             let parses = crate::rewrite::parse_counts().difference(before).source;
                             speculation.record_parses(parses);
@@ -527,14 +567,14 @@ impl BuildSession {
                         .or_else(|| previous.get(&path))
                         .expect("prepared source")
                         .record;
-                    let result = prepare::resolve(
+                    let resolutions = prepare::resolve(
                         &path,
                         &prepare::Dependencies::Checked(record.clone()),
                         &inventory,
                         options,
                         &resolver,
-                    )
-                    .map(|resolutions| prepare::Prepared::Resolved {
+                    );
+                    let result = Ok(prepare::Prepared::Resolved {
                         loaded,
                         css_identity,
                         resolutions,
@@ -556,7 +596,16 @@ impl BuildSession {
                     let mut next = None;
                     let result = (|| -> eyre::Result<()> {
                         let prepared = match prepared? {
-                            prepare::Prepared::Dependencies(dependencies) => {
+                            prepare::Prepared::Dependencies {
+                                dependencies,
+                                admission,
+                            } => {
+                                admission.report(
+                                    &path,
+                                    &mut reported_policies,
+                                    &mut warnings,
+                                    &mut errors,
+                                );
                                 ensure!(
                                     early_requested.insert(path.clone()),
                                     "duplicate early dependency event"
@@ -567,29 +616,45 @@ impl BuildSession {
                                 });
                                 return Ok(());
                             }
-                            prepare::Prepared::EarlyResolved { resolutions } => {
+                            prepare::Prepared::EarlyResolved { mut resolutions } => {
                                 resolved_modules += 1;
-                                if let Ok(resolved) = &resolutions {
-                                    for target in resolved.values() {
-                                        match target {
-                                            DependencyTarget::File(path) => {
-                                                provisional.insert(path.clone());
-                                            }
-                                            DependencyTarget::Context(candidates) => {
-                                                provisional.extend(candidates.values().cloned())
-                                            }
-                                            DependencyTarget::External(_)
-                                            | DependencyTarget::Missing(_) => {}
+                                resolutions.report_errors(&path, &mut errors);
+                                for target in resolutions.targets.values() {
+                                    match target {
+                                        DependencyTarget::File(path) => {
+                                            provisional.insert(path.clone());
                                         }
+                                        DependencyTarget::Context(candidates) => {
+                                            provisional.extend(candidates.values().cloned())
+                                        }
+                                        DependencyTarget::External(_)
+                                        | DependencyTarget::Missing(_) => {}
                                     }
                                 }
-                                early_resolved.insert(path.clone(), resolutions);
+                                if errors.get(&path).is_some_and(|reports| {
+                                    reports.iter().any(|report| {
+                                        report
+                                            .downcast_ref::<ast_segmenter::policy::PolicyErrors>()
+                                            .is_some()
+                                    })
+                                }) {
+                                    // A demanded policy failure does not invalidate
+                                    // its checked dependency syntax.
+                                    discovered.extend(provisional.iter().cloned());
+                                }
+                                early_resolved.insert(path.clone(), resolutions.targets);
                                 let Some(loaded) = early_loaded.remove(&path) else {
                                     return Ok(());
                                 };
                                 prepare::Prepared::Script(loaded)
                             }
-                            prepare::Prepared::Script(loaded) => {
+                            prepare::Prepared::Script(mut loaded) => {
+                                std::mem::take(&mut loaded.admission).report(
+                                    &path,
+                                    &mut reported_policies,
+                                    &mut warnings,
+                                    &mut errors,
+                                );
                                 prepared_sources += 1;
                                 if early_requested.contains(&path)
                                     && !early_resolved.contains_key(&path)
@@ -626,17 +691,18 @@ impl BuildSession {
                         let mut css_identity = None;
                         let mut resolutions = None;
                         let loaded = match prepared {
-                            prepare::Prepared::Dependencies(_)
+                            prepare::Prepared::Dependencies { .. }
                             | prepare::Prepared::EarlyResolved { .. } => {
                                 unreachable!("handled early events")
                             }
                             prepare::Prepared::Resolved {
                                 loaded,
                                 css_identity: identity,
-                                resolutions: resolved,
+                                resolutions: mut resolved,
                             } => {
+                                resolved.report_errors(&path, &mut errors);
                                 css_identity = identity;
-                                resolutions = Some(resolved);
+                                resolutions = Some(resolved.targets);
                                 loaded
                             }
                             prepare::Prepared::Script(loaded) => {
@@ -644,7 +710,7 @@ impl BuildSession {
                                     resolutions = Some(
                                         early_resolved
                                             .remove(&path)
-                                            .expect("resolved early dependencies")?,
+                                            .expect("resolved early dependencies"),
                                     );
                                 }
                                 loaded
@@ -719,13 +785,23 @@ impl BuildSession {
                                     parser_package,
                                     previous.get(&path),
                                     options.cache,
+                                    (&self.root, &options.policy_allowlist),
                                     &declarations,
-                                    &|_| {},
+                                    &|_, _| {},
                                 )?;
                                 prepared_sources += 1;
                                 loaded
                             }
                         };
+                        // Resources and borrowed disk/session owners have no
+                        // early syntax event. Admission still precedes resolution.
+                        let mut loaded = loaded;
+                        std::mem::take(&mut loaded.admission).report(
+                            &path,
+                            &mut reported_policies,
+                            &mut warnings,
+                            &mut errors,
+                        );
                         let Some(resolved) = resolutions else {
                             next = Some(prepare::Job::Resolve {
                                 path: path.clone(),
@@ -736,6 +812,19 @@ impl BuildSession {
                         };
                         if !early_requested.contains(&path) {
                             resolved_modules += 1;
+                        }
+                        // A later input/map/worker failure must not suppress
+                        // other successfully resolved reachable dependencies.
+                        for target in resolved.values() {
+                            match target {
+                                DependencyTarget::File(path) => {
+                                    discovered.insert(path.clone());
+                                }
+                                DependencyTarget::Context(candidates) => {
+                                    discovered.extend(candidates.values().cloned());
+                                }
+                                DependencyTarget::External(_) | DependencyTarget::Missing(_) => {}
+                            }
                         }
                         let record = &loaded
                             .source
@@ -779,10 +868,29 @@ impl BuildSession {
                             .get(&path)
                             .or_else(|| previous.get(&path))
                             .expect("loaded source");
+                        let has_context = source
+                            .record
+                            .module()
+                            .facts()
+                            .dependencies()
+                            .iter()
+                            .any(|dependency| dependency.pattern().is_some());
+                        if has_context {
+                            previous_contexts
+                                .entry(path.clone())
+                                .or_insert_with(|| self.resolutions.get(&path).cloned());
+                        }
+                        if !has_context && self.resolutions.get(&path) != Some(&resolved) {
+                            changed.insert(path.clone());
+                        }
+                        // Late admissions must still expand checked contexts
+                        // when subsequent worker/map integration fails.
+                        self.resolutions.insert(path.clone(), resolved);
+                        let resolved = self.resolutions.get(&path).expect("resolved source");
                         let worker_urls = worker_entries::discover(
                             &path,
                             source,
-                            &resolved,
+                            resolved,
                             &inventory,
                             options,
                             &mut entries,
@@ -840,38 +948,18 @@ impl BuildSession {
                                 changed.insert(path.clone());
                             }
                         }
-                        let has_context = source
-                            .record
-                            .module()
-                            .facts()
-                            .dependencies()
-                            .iter()
-                            .any(|dependency| dependency.pattern().is_some());
-                        if has_context {
-                            previous_contexts
-                                .entry(path.clone())
-                                .or_insert_with(|| self.resolutions.get(&path).cloned());
-                        }
-                        if !has_context && self.resolutions.get(&path) != Some(&resolved) {
-                            changed.insert(path.clone());
-                        }
-                        for target in resolved.values() {
-                            if let DependencyTarget::File(path) = target {
-                                discovered.insert(path.clone());
-                            } else if let DependencyTarget::Context(candidates) = target {
-                                discovered.extend(candidates.values().cloned());
-                            }
-                        }
-                        self.resolutions.insert(path.clone(), resolved);
                         prepared_paths.insert(path.clone());
                         Ok(())
                     })();
                     let failed = result.is_err();
                     if let Err(error) = result {
-                        errors.insert(
-                            path.clone(),
-                            error.wrap_err(format!("integrating module {}", path.display())),
-                        );
+                        let error =
+                            error.wrap_err(format!("integrating module {}", path.display()));
+                        tracing::error!(target: "bundler::diagnostic", "{error:#}");
+                        errors
+                            .entry(path.clone())
+                            .or_insert_with(Vec::new)
+                            .push(error);
                     }
                     if last_progress.elapsed() >= Duration::from_secs(1) {
                         tracing::info!(
@@ -888,19 +976,23 @@ impl BuildSession {
                     }
                     (discovered, failed, next, provisional)
                 };
-            'frontier: loop {
+            loop {
                 let result = options.execution.prepare_events(
                     jobs,
                     work,
                     |event| {
-                        let (path, completed, early) = match event {
+                        let (path, mut completed, mut early) = match event {
                             crate::execution::PreparationEvent::Early(prepare::Early {
                                 path,
                                 dependencies,
+                                admission,
                             }) => (
                                 path,
                                 Some((
-                                    Ok(prepare::Prepared::Dependencies(dependencies)),
+                                    Ok(prepare::Prepared::Dependencies {
+                                        dependencies,
+                                        admission,
+                                    }),
                                     Vec::new(),
                                     0,
                                 )),
@@ -911,6 +1003,24 @@ impl BuildSession {
                             }
                         };
                         let mut jobs = Vec::new();
+                        if early && !scheduled.contains(&path) {
+                            // Keep in-flight syntax private. Completion removes
+                            // it, so storage is bounded by the worker frontier.
+                            if let Some((Ok(prepared), _, _)) = completed {
+                                speculative_syntax.insert(path, prepared);
+                            }
+                            return Ok((jobs, !awaiting.is_empty()));
+                        }
+                        if !early && completed.is_some() {
+                            speculative_syntax.remove(&path);
+                        } else if completed.is_none() && scheduled.contains(&path) {
+                            // An in-flight speculative owner was demanded. Its
+                            // available evidence must not wait for extraction.
+                            if let Some(prepared) = speculative_syntax.remove(&path) {
+                                completed = Some((Ok(prepared), Vec::new(), 0));
+                                early = true;
+                            }
+                        }
                         if let Some((prepared, observations, parses)) = completed {
                             #[cfg(test)]
                             let resolved_early =
@@ -981,10 +1091,7 @@ impl BuildSession {
                         Some(prepared) => (path, Ok(prepared)),
                         None => read(path),
                     };
-                    let (discovered, failed, next, _) = integrate(prepared, &mut deferred_styles);
-                    if failed {
-                        break 'frontier;
-                    }
+                    let (discovered, _, next, _) = integrate(prepared, &mut deferred_styles);
                     jobs = prepare::enqueue(
                         discovered,
                         &mut scheduled,
@@ -1001,18 +1108,18 @@ impl BuildSession {
                     break;
                 }
             }
-            if !errors.is_empty() {
-                break;
-            }
             let expanded = match options
                 .execution
                 .resolve(|| inventory.expand_contexts(&resolver))
             {
                 Ok(expanded) => expanded,
                 Err(error) => {
-                    self.resolutions.clear();
-                    self.pending_invalidated.extend(changed);
-                    return Err(error);
+                    tracing::error!(target: "bundler::diagnostic", "{error:#}");
+                    errors
+                        .entry(self.root.clone())
+                        .or_insert_with(Vec::new)
+                        .push(error);
+                    break;
                 }
             };
             if expanded.is_empty() {
@@ -1020,9 +1127,12 @@ impl BuildSession {
                     // All checked routes (including maps and composition jobs)
                     // must settle before CSS names, URLs or relocations capture them.
                     if let Err(error) = styles.finish_discovery() {
-                        self.resolutions.clear();
-                        self.pending_invalidated.extend(changed);
-                        return Err(error);
+                        tracing::error!(target: "bundler::diagnostic", "{error:#}");
+                        errors
+                            .entry(self.root.clone())
+                            .or_insert_with(Vec::new)
+                            .push(error);
+                        break;
                     }
                     prepare_styles = true;
                     resources.extend(deferred_styles.keys().cloned());
@@ -1075,8 +1185,8 @@ impl BuildSession {
             }
         }
         self.pending_invalidated.extend(changed);
-        if let Some((_, error)) = errors.into_iter().next() {
-            return Err(error);
+        if !errors.is_empty() {
+            return Err(PreparationErrors::new(errors).into());
         }
         tracing::info!(
             target: "bundler::progress",
@@ -1277,9 +1387,12 @@ impl BuildSession {
             .sources
             .iter()
             .map(|(path, source)| {
-                let parsed = source.record.to_parsed(&source.text).wrap_err_with(|| {
-                    format!("borrowing prepared graph facts for {}", path.display())
-                })?;
+                let parsed = source
+                    .record
+                    .to_parsed_reporting_policies(&source.text)
+                    .wrap_err_with(|| {
+                        format!("borrowing prepared graph facts for {}", path.display())
+                    })?;
                 let graph_input = if crate::resource::kind(path, &options.css)
                     == crate::resource::ResourceKind::Script
                     && source.transpiled.is_none()

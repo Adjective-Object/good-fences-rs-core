@@ -173,6 +173,8 @@ Only finite contexts enumerate prefix-compatible scopes; cache canonical
 directory listings and retain borrowed source owners for final match-set checks.
 Load upstream maps with each prepared script, including newly exposed context
 jobs, so map-admitted linked projections participate in discovery's fixed point.
+Retain checked context resolutions before fallible worker/map integration so
+late candidates remain discoverable even when their importer fails preparation.
 Settle all admissions/context jobs before comparing source edges or building
 the graph; never depend on completion order.
 Nonmatching additions never invalidate success. The eager graph inventory is
@@ -491,8 +493,13 @@ inherit only their already admitted canonical file membership, not arbitrary
 external/tree authority. Graph mutation stays
 serial. Resource/CSS processing uses a canonical
 serial frontier after scripts drain; do not serially pre-read ordinary scripts.
-Select source errors by canonical path, sort cache warnings and stop resource
-processing at its first serial failure. Drain/join workers on spawn/panic errors.
+Report demanded policy/source errors immediately on stderr-only
+bundler::diagnostic events; drain reachable preparation/facts and independent
+resources before a canonical-path aggregate failure. Policy failures still
+discover dependencies; unused speculative findings stay private. Exact portable
+canonical root-relative source/policy waivers warn on every encountered occurrence,
+including disk/memory/no-op hits, without changing source or cached admission.
+Drain/join workers on spawn/panic errors.
 Keep retention/placement/effects/global names serial, sharing checked
 Sync graph/facts and prepared canonical order without copies. Settle cross-owner
 addresses before dispatch; each ESM/CJS owner has private renderer/name/routing

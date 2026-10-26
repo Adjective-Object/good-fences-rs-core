@@ -7,6 +7,8 @@ the fixture-compatible JSON contract in `report`, and scoped tracing in `trace`.
 Libraries remain subscriber-free; tracing uses a local dispatch and flushes on
 errors. The CLI always reports bundler::progress events to stderr; the optional
 Chrome layer records audited duration spans only. Keep stdout JSON-only.
+Report bundler::diagnostic policy waivers/failures immediately to stderr, never
+Chrome traces. policyAllowlist uses exact portable source paths and typed names.
 Use one process-wide uptime clock for ordinary and lockfile log prefixes;
 enable ANSI severity colours only on interactive stderr, never redirected logs.
 The progress layer renders coordinator-owned bundler::progress::lockfile counts

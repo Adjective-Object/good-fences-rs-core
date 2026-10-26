@@ -52,6 +52,7 @@ every level. This is a deliberately limited CLI schema, not serialized
   "target": "node",
   "workers": 1,
   "cache": "read-write",
+  "policyAllowlist": [],
   "resolveConditions": [],
   "output": {
     "base_url": "./",
@@ -85,6 +86,44 @@ Changing the list or its order changes resolver cache policy.
 `lazy_runtimes` accepts at most 16 exact
 `module`/`import`/`action` objects, each containing `module` (a portable
 root-relative file) and `export` (a nonempty, control-free name, max 256 bytes).
+
+### Explicit unsafe policy waivers
+
+Policy rejections include a stable name, source path, byte span and bounded code
+excerpt with line/column when available. Preparation logs demanded failures as
+they arrive, finishes reachable source/facts preparation, then fails with a sorted
+summary. It does not plan, link or publish after any unallowed failure.
+
+```json
+{
+  "policyAllowlist": [
+    {
+      "source": "node_modules/lottie-web/build/player/lottie.js",
+      "policies": ["uses-eval"]
+    }
+  ]
+}
+```
+
+**Bundled output may be incorrect.** Each encountered waived occurrence warns
+immediately on stderr, even if another file later fails, and appears in successful
+JSON warnings. Waivers preserve source code; they do not repair it, evaluate code
+strings or authorize any other policy/file. Paths are exact, case-sensitive,
+slash-only canonical root-relative source identities: no globs, traversal,
+absolute paths or alias expansion. Unknown names, unknown fields, missing/empty
+policies and malformed paths are errors. Removing a waiver rejects the source
+again on warm disk, session-memory and no-op builds without reparsing hits.
+
+Supported names: `uses-eval`, `require-reassignment`, `require-indirect-use`,
+`mixed-esm-commonjs`, `module-access`, `esm-require-context`, `wrapper-arguments`,
+`wrapper-redeclaration`, `import-attributes`, `json-import-bindings`,
+`dynamic-import-options`, `import-type-options`, `with-statement`, `import-meta`,
+`commonjs-top-level-await`, `resource-management-transform`, `jsx-transform`,
+`decorator-transform`, `auto-accessor-transform`, `typescript-enum-transform`,
+`typescript-namespace-transform`, `typescript-parameter-property-transform`,
+`typescript-import-assignment`, `typescript-export-assignment`,
+`typescript-namespace-export`. Waiving a source-local gate does not bypass parser,
+semantic, extraction, resolution, linking or output validation errors.
 
 CSS loading is `caller-loaded` or `auto-mount`; `--css-auto-mount` overrides it.
 CSS Modules accepts `false`, `true`, `"everything"` or `"ext:.custom.suffix"`;

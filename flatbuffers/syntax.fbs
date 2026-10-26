@@ -203,7 +203,21 @@ table EmissionFacts {
   lazy_modules:[LazyModuleCandidate] (required);
   lazy_selectors:[LazySelectorCandidate] (required);
 }
+enum PolicyName:ushort {
+  UsesEval = 0, RequireReassignment, RequireIndirectUse, MixedEsmCommonjs,
+  ModuleAccess, EsmRequireContext, WrapperArguments, WrapperRedeclaration,
+  ImportAttributes, JsonImportBindings, DynamicImportOptions, ImportTypeOptions,
+  WithStatement, ImportMeta, CommonjsTopLevelAwait, ResourceManagementTransform,
+  JsxTransform, DecoratorTransform, AutoAccessorTransform, TypescriptEnumTransform,
+  TypescriptNamespaceTransform, TypescriptParameterPropertyTransform,
+  TypescriptImportAssignment, TypescriptExportAssignment, TypescriptNamespaceExport
+}
+table PolicyViolation {
+  policy:PolicyName;
+  span:Span (required);
+}
 table ModuleFacts {
+  policy_violations:[PolicyViolation] (required);
   ecco:ParsedFile;
   ecco_declarations_hash:Fingerprint (required);
   commonjs:bool;

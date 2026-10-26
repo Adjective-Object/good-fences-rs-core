@@ -22,7 +22,14 @@ module body and ordered statement ranges, not lossy legacy dependency/name sets.
 `CacheRecord` and `CachedModule` have private storage. Consumers and validators
 use borrowed accessors such as `record.module().facts()` and
 `record.module().segments()`; no mutable view of sealed records is exposed.
-Production loading/publication uses typed FlatBuffers, schema 21/extractor 35.
+Production loading/publication uses typed FlatBuffers, schema 22/extractor 36.
+Typed named/span-bearing policy occurrences are sealed source evidence, not
+admission decisions. Default loaders reject them even on disk hits. Explicit
+`load_prepared_reporting_policies` reports cold syntax/evidence and returns
+borrowed evidence on hits; callers must apply their current source/policy admission
+before planning/emission. Hits never reparse or unpack trees to enforce waivers.
+Low-level record construction, decode and parsed-owner adapters are strict too;
+their explicit `*_reporting_policies` variants preserve evidence for admission.
 Extractor 35 admits bounded CommonJS native `require` capability detectors;
 earlier sidecars miss/rebuild, with no wire-layout or loader/dependency inference.
 Static JSON import attributes persist as typed borrowed dependency clause spans;
@@ -84,7 +91,7 @@ tables, 64 levels and 64 MiB apparent size before generated access. Both roots
 are structurally verified; unknown discriminants, wrong size prefixes and checksums
 are rejected. No Serde, object `unpack`, owned-tree reconstruction or
 decode/re-encode canonical comparison occurs. This is an untrusted cache, not an
-authenticated artifact. Diagnostics are not persisted.
+authenticated artifact. Rendered diagnostics and caller waivers are not persisted.
 `from_parsed` also checks the extraction's sealed source/configuration and record
 hashes; passing an unrelated parse alongside plausible-length text is an error.
 `encode(source)` and `to_parsed(source)` check exact source identity then share/copy

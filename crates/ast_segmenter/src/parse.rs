@@ -88,6 +88,47 @@ pub fn parse_module_with_dependencies(
     declarations: &crate::PreparedDeclarations,
     dependencies: impl FnOnce(&[crate::owned::Dependency]),
 ) -> eyre::Result<ParsedModule> {
+    parse_module_inner(
+        logger,
+        source,
+        path,
+        package_format,
+        declarations,
+        true,
+        |deps, _| dependencies(deps),
+    )
+}
+
+/// Explicit evidence-reporting extraction. Callers must admit policy evidence
+/// themselves before planning or emitting; cached evidence contains no waivers.
+pub fn parse_module_reporting_policies(
+    logger: &impl logger::Logger,
+    source: &str,
+    path: &Path,
+    package_format: ModuleFormat,
+    declarations: &crate::PreparedDeclarations,
+    observations: impl FnOnce(&[crate::owned::Dependency], &[crate::policy::PolicyViolation]),
+) -> eyre::Result<ParsedModule> {
+    parse_module_inner(
+        logger,
+        source,
+        path,
+        package_format,
+        declarations,
+        false,
+        observations,
+    )
+}
+
+fn parse_module_inner(
+    logger: &impl logger::Logger,
+    source: &str,
+    path: &Path,
+    package_format: ModuleFormat,
+    declarations: &crate::PreparedDeclarations,
+    strict: bool,
+    observations: impl FnOnce(&[crate::owned::Dependency], &[crate::policy::PolicyViolation]),
+) -> eyre::Result<ParsedModule> {
     let allocator = Allocator::default();
     MODULE_PARSES.with(|count| count.set(count.get() + 1));
     let parsed = oxc_utils_parse::parse_bundler_file(&allocator, source, path, package_format)
@@ -104,9 +145,12 @@ pub fn parse_module_with_dependencies(
     );
     let mut facts = crate::owned::extract_syntax(&parsed.program, &semantic.semantic)
         .wrap_err_with(|| format!("{}: occurrence extraction failed", path.display()))?;
-    crate::policy::check(&parsed.program, &facts)
-        .wrap_err_with(|| format!("{}: unsupported bundler syntax", path.display()))?;
-    dependencies(facts.dependencies());
+    let violations = crate::policy::collect(&parsed.program, &facts);
+    if strict && !violations.is_empty() {
+        return Err(crate::policy::PolicyErrors::new(path, Some(source), violations).into());
+    }
+    facts.set_policy_violations(violations);
+    observations(facts.dependencies(), facts.policy_violations());
     crate::owned::extract_recipes(&parsed.program, &mut facts);
     *facts.ecco_declarations_hash_mut() = declarations.fingerprint();
     let (body, segments) = if parsed.program.source_type.is_commonjs() {

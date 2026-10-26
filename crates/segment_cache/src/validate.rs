@@ -130,6 +130,20 @@ pub(crate) fn validate_module(
         }
     }
     let facts = module.facts();
+    let mut previous_policy = None;
+    for violation in facts.policy_violations() {
+        span(source, violation.span())?;
+        let key = (
+            violation.span().start,
+            violation.span().end,
+            violation.policy(),
+        );
+        ensure!(
+            previous_policy.is_none_or(|previous| previous < key),
+            "unordered/duplicate source policy evidence"
+        );
+        previous_policy = Some(key);
+    }
     match (&facts.ecco(), module.body()) {
         (Some(parsed), ModuleBody::Esm) => {
             parsed.validate()?;

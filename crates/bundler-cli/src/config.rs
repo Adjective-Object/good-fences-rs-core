@@ -25,6 +25,8 @@ pub(crate) struct Config {
     #[serde(rename = "resolveExtensions")]
     resolve_extensions: Option<Vec<String>>,
     cache: Cache,
+    #[serde(rename = "policyAllowlist")]
+    policy_allowlist: Vec<PolicyAllowance>,
 }
 
 impl Default for Config {
@@ -41,8 +43,16 @@ impl Default for Config {
             resolve_conditions: Vec::new(),
             resolve_extensions: None,
             cache: Cache::default(),
+            policy_allowlist: Vec::new(),
         }
     }
+}
+
+#[derive(Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PolicyAllowance {
+    source: String,
+    policies: Vec<bundler::build::PolicyName>,
 }
 
 #[derive(Clone, Default, serde::Deserialize)]
@@ -154,6 +164,11 @@ impl Config {
     pub fn into_options(self, root: &Path) -> eyre::Result<BuildOptions> {
         let mut options = BuildOptions::default();
         let config = self;
+        options.policy_allowlist = config
+            .policy_allowlist
+            .into_iter()
+            .map(|entry| bundler::build::PolicyAllowance::new(entry.source, entry.policies))
+            .collect::<eyre::Result<_>>()?;
         options.resolver =
             import_resolver::node_resolver::caching::NodeModulesResolverOptions::default_for_env(
                 match config.target {
@@ -229,5 +244,60 @@ impl Config {
         options.css.css_modules = config.css.css_modules;
         options.css.css_modules_exclude = config.css.css_modules_exclude;
         Ok(options)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_tmpdir::TmpDir;
+
+    #[test]
+    fn policy_allowlist_rejects_unknown_names_fields_and_nonportable_paths() {
+        let root = TmpDir::new();
+        for source in [
+            "",
+            "/absolute.js",
+            "C:/absolute.js",
+            "../a.js",
+            "./a.js",
+            "a//b.js",
+            "a/../b.js",
+            "a\\b.js",
+            "*.js",
+            "a?.js",
+            "a/\u{1b}.js",
+        ] {
+            let json =
+                serde_json::json!({"policyAllowlist":[{"source":source,"policies":["uses-eval"]}]});
+            let config: Config = serde_json::from_value(json).unwrap();
+            let error = config.into_options(root.root()).err().unwrap();
+            assert!(
+                format!("{error:#}").contains("policyAllowlist source"),
+                "{source:?}: {error:#}"
+            );
+        }
+        for json in [
+            r#"{"policyAllowlist":[{"source":"a.js","policies":["not-a-policy"]}]}"#,
+            r#"{"policyAllowlist":[{"source":"a.js","policies":["uses-eval"],"extra":true}]}"#,
+            r#"{"policyAllowlist":[{"source":"a.js"}]}"#,
+            r#"{"policyAllowlist":{"source":"a.js","policies":["uses-eval"]}}"#,
+        ] {
+            assert!(serde_json::from_str::<Config>(json).is_err(), "{json}");
+        }
+        let config: Config =
+            serde_json::from_str(r#"{"policyAllowlist":[{"source":"a.js","policies":[]}]}"#)
+                .unwrap();
+        assert!(config.into_options(root.root()).is_err());
+        let config: Config = serde_json::from_str(r#"{"policyAllowlist":[{"source":"node_modules/lottie-web/build/player/lottie.js","policies":["uses-eval"]}]}"#).unwrap();
+        let options = config.into_options(root.root()).unwrap();
+        assert_eq!(
+            options.policy_allowlist[0].source(),
+            "node_modules/lottie-web/build/player/lottie.js"
+        );
+        assert_eq!(
+            options.policy_allowlist[0].policies(),
+            &std::collections::BTreeSet::from([bundler::build::PolicyName::UsesEval])
+        );
     }
 }

@@ -99,6 +99,15 @@ impl CacheRecord {
     }
 
     pub fn from_parsed(source: &str, parsed: &ParsedModule) -> eyre::Result<Self> {
+        crate::sidecar::enforce_policies(std::path::Path::new("<source>"), source, parsed.facts())?;
+        Self::from_parsed_reporting_policies(source, parsed)
+    }
+
+    /// Preserve policy evidence without admitting it; callers enforce current policy.
+    pub fn from_parsed_reporting_policies(
+        source: &str,
+        parsed: &ParsedModule,
+    ) -> eyre::Result<Self> {
         ensure!(
             source.len() <= u32::MAX as usize,
             "cache source exceeds span limit"
@@ -141,6 +150,17 @@ impl CacheRecord {
 
     /// Reuse the already semantically checked immutable owner, not an owned tree.
     pub fn to_parsed(&self, source: &str) -> eyre::Result<ParsedModule> {
+        let parsed = self.to_parsed_reporting_policies(source)?;
+        crate::sidecar::enforce_policies(
+            std::path::Path::new("<cached source>"),
+            source,
+            parsed.facts(),
+        )?;
+        Ok(parsed)
+    }
+
+    /// Borrow the checked owner, retaining evidence for explicit caller admission.
+    pub fn to_parsed_reporting_policies(&self, source: &str) -> eyre::Result<ParsedModule> {
         let _span = tracing::info_span!("cache.to_parsed").entered();
         self.check_source(source)?;
         Ok(self.module.parsed.clone())
@@ -160,6 +180,21 @@ impl CacheRecord {
 
     /// Invalid/stale records are errors here; filesystem callers treat them as misses.
     pub fn decode(bytes: &[u8], source: &str, config: ParserConfig) -> eyre::Result<Self> {
+        let record = Self::decode_reporting_policies(bytes, source, config)?;
+        crate::sidecar::enforce_policies(
+            std::path::Path::new("<cached source>"),
+            source,
+            record.module().facts(),
+        )?;
+        Ok(record)
+    }
+
+    /// Decode checked borrowed evidence without applying caller admission.
+    pub fn decode_reporting_policies(
+        bytes: &[u8],
+        source: &str,
+        config: ParserConfig,
+    ) -> eyre::Result<Self> {
         ensure!(bytes.len() <= MAX_RECORD_BYTES, "cache exceeds byte limit");
         Self::decode_shared(Arc::from(bytes), source, config)
     }

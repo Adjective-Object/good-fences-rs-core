@@ -35,7 +35,7 @@ pub(crate) fn record<T>(
             metadata.is_event()
                 && matches!(
                     metadata.target(),
-                    "bundler::progress" | "bundler::progress::discovery"
+                    "bundler::progress" | "bundler::progress::discovery" | "bundler::diagnostic"
                 )
         }));
     let (chrome, guard) = if let Some(path) = trace_file {

@@ -31,6 +31,7 @@ macro_rules! storage_accessors {
         };
     }
 storage_accessors! {
+    policy_violations => Sequence<'_, crate::policy::PolicyViolation>,
     ecco => Option<ecco::views::ParsedFileView<'_>>,
     ecco_declarations_hash => crate::DeclarationFingerprint,
     commonjs => bool,
@@ -254,6 +255,19 @@ impl<'a> Element<'a> for Span {
         span(v)
     }
 }
+impl<'a> Element<'a> for crate::policy::PolicyViolation {
+    type Owned = Self;
+    type Wire = ForwardsUOffset<w::PolicyViolation<'a>>;
+    fn owned(v: &'a Self) -> Self {
+        *v
+    }
+    fn wire(v: w::PolicyViolation<'a>) -> Self {
+        Self::new(
+            crate::policy::PolicyName::from_id(v.policy().0).expect("verified policy discriminant"),
+            span(v.span()),
+        )
+    }
+}
 impl<'a> Element<'a> for u32 {
     type Owned = u32;
     type Wire = u32;
@@ -474,6 +488,7 @@ view!(LazyOptionProperty, em::LazyOptionProperty);
 view!(LazySelectorCandidate, em::LazySelectorCandidate);
 
 impl<'a> ModuleFacts<'a> {
+    sequence!(policy_violations, crate::policy::PolicyViolation);
     pub fn ecco(self) -> Option<ecco::views::ParsedFileView<'a>> {
         match self {
             Self::Owned(v) => v.ecco().map(Into::into),

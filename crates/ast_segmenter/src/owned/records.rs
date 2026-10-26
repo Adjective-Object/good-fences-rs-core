@@ -456,6 +456,8 @@ impl Directive {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModuleFacts {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    policy_violations: Vec<crate::policy::PolicyViolation>,
     /// Owned lazy ESM operations, never solved effects. CJS stays opaque.
     ecco: Option<ecco::ParsedFile>,
     /// Effective contracts are identity inputs even for opaque CommonJS.
@@ -495,6 +497,7 @@ impl ModuleFacts {
         hashbang: Option<Directive>,
     ) -> Self {
         Self {
+            policy_violations: Vec::new(),
             ecco,
             ecco_declarations_hash,
             commonjs,
@@ -516,12 +519,23 @@ impl ModuleFacts {
         &mut self.ecco
     }
 
+    pub(crate) fn set_policy_violations(
+        &mut self,
+        violations: Vec<crate::policy::PolicyViolation>,
+    ) {
+        self.policy_violations = violations;
+    }
+
     pub(crate) fn ecco_declarations_hash_mut(&mut self) -> &mut crate::DeclarationFingerprint {
         &mut self.ecco_declarations_hash
     }
 }
 
 impl ModuleFacts {
+    pub fn policy_violations(&self) -> &[crate::policy::PolicyViolation] {
+        &self.policy_violations
+    }
+
     pub fn ecco(&self) -> Option<&ecco::ParsedFile> {
         self.ecco.as_ref()
     }

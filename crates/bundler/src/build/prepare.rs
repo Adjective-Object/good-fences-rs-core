@@ -73,6 +73,7 @@ impl Dependencies {
 pub(super) struct Early {
     pub path: PathBuf,
     pub dependencies: Dependencies,
+    pub admission: policy::Admission,
 }
 
 pub(super) type Completion = (
@@ -160,9 +161,12 @@ impl Speculation {
 }
 
 pub(super) enum Prepared {
-    Dependencies(Dependencies),
+    Dependencies {
+        dependencies: Dependencies,
+        admission: policy::Admission,
+    },
     EarlyResolved {
-        resolutions: eyre::Result<HashMap<ast_segmenter::owned::DependencyId, DependencyTarget>>,
+        resolutions: Resolutions,
     },
     Script(Loaded),
     Resource {
@@ -172,8 +176,27 @@ pub(super) enum Prepared {
     Resolved {
         loaded: Loaded,
         css_identity: Option<PathBuf>,
-        resolutions: HashMap<ast_segmenter::owned::DependencyId, DependencyTarget>,
+        resolutions: Resolutions,
     },
+}
+
+#[derive(Default)]
+pub(super) struct Resolutions {
+    pub targets: HashMap<ast_segmenter::owned::DependencyId, DependencyTarget>,
+    pub errors: Vec<eyre::Report>,
+}
+
+impl Resolutions {
+    pub(super) fn report_errors(
+        &mut self,
+        path: &Path,
+        errors: &mut BTreeMap<PathBuf, Vec<eyre::Report>>,
+    ) {
+        for error in self.errors.drain(..) {
+            tracing::error!(target: "bundler::diagnostic", "{error:#}");
+            errors.entry(path.to_owned()).or_default().push(error);
+        }
+    }
 }
 
 pub(super) fn resolve(
@@ -182,9 +205,9 @@ pub(super) fn resolve(
     inventory: &Inventory,
     options: &BuildOptions,
     resolver: &impl DependencyResolver,
-) -> eyre::Result<HashMap<ast_segmenter::owned::DependencyId, DependencyTarget>> {
+) -> Resolutions {
     let _span = tracing::info_span!("build.resolve").entered();
-    let mut resolved = HashMap::new();
+    let mut resolved = Resolutions::default();
     for dependency in dependencies.iter() {
         if dependency.type_only() {
             continue;
@@ -195,55 +218,56 @@ pub(super) fn resolve(
             require = dependency.kind() == DependencyKind::Require
         )
         .entered();
-        let target = if dependency.pattern().is_some() {
-            DependencyTarget::Context(
-                crate::context::resolve(
-                    inventory.root(),
-                    path,
-                    dependency,
-                    inventory.candidates(
+        let result = (|| -> eyre::Result<DependencyTarget> {
+            let target = if dependency.pattern().is_some() {
+                DependencyTarget::Context(
+                    crate::context::resolve(
+                        inventory.root(),
                         path,
-                        dependencies,
                         dependency,
+                        inventory.candidates(
+                            path,
+                            dependencies,
+                            dependency,
+                            &options.resolver.extensions,
+                        )?,
                         &options.resolver.extensions,
-                    )?,
-                    &options.resolver.extensions,
-                    resolver,
+                        resolver,
+                    )
+                    .wrap_err_with(|| {
+                        format!(
+                            "{}: context at bytes {}..{}",
+                            path.display(),
+                            dependency.span().start,
+                            dependency.span().end
+                        )
+                    })?,
                 )
-                .wrap_err_with(|| {
-                    format!(
-                        "{}: context at bytes {}..{}",
-                        path.display(),
-                        dependency.span().start,
-                        dependency.span().end
-                    )
-                })?,
-            )
-        } else {
-            let mode = if dependency.kind() == DependencyKind::Require {
-                ResolutionMode::Require
             } else {
-                ResolutionMode::Import
+                let mode = if dependency.kind() == DependencyKind::Require {
+                    ResolutionMode::Require
+                } else {
+                    ResolutionMode::Import
+                };
+                match resolver
+                    .resolve_dependency(path, &dependency.specifier(), mode)
+                    .wrap_err_with(|| {
+                        format!(
+                            "{}: bytes {}..{}",
+                            path.display(),
+                            dependency.span().start,
+                            dependency.span().end
+                        )
+                    })? {
+                    ResolvedDependency::File(target) => DependencyTarget::File(target),
+                    ResolvedDependency::External(name) => DependencyTarget::External(name),
+                }
             };
-            match resolver
-                .resolve_dependency(path, &dependency.specifier(), mode)
-                .wrap_err_with(|| {
-                    format!(
-                        "{}: bytes {}..{}",
-                        path.display(),
-                        dependency.span().start,
-                        dependency.span().end
-                    )
-                })? {
-                ResolvedDependency::File(target) => DependencyTarget::File(target),
-                ResolvedDependency::External(name) => DependencyTarget::External(name),
+            if dependency.kind() == DependencyKind::Url {
+                worker_entries::target(path, dependency, Some(&target), options)?;
             }
-        };
-        if dependency.kind() == DependencyKind::Url {
-            worker_entries::target(path, dependency, Some(&target), options)?;
-        }
-        if dependency.json_attribute().is_some() {
-            ensure!(
+            if dependency.json_attribute().is_some() {
+                ensure!(
                 matches!(&target, DependencyTarget::File(target)
                     if crate::resource::kind(target, &options.css) == crate::resource::ResourceKind::Json),
                 "{}: JSON import attribute at bytes {}..{} requires a bundled JSON resource: {}",
@@ -252,13 +276,21 @@ pub(super) fn resolve(
                 dependency.span().end,
                 dependency.specifier()
             );
+            }
+            Ok(target)
+        })();
+        match result {
+            Ok(target) => {
+                resolved.targets.insert(dependency.id(), target);
+            }
+            Err(error) => resolved.errors.push(error),
         }
-        resolved.insert(dependency.id(), target);
     }
-    Ok(resolved)
+    resolved
 }
 
 pub(super) struct Loaded {
+    pub admission: policy::Admission,
     pub source: Option<Source>,
     pub status: Option<CacheStatus>,
     pub warning: Option<String>,
@@ -297,7 +329,7 @@ pub(super) fn read(
     options: &BuildOptions,
     declarations: &PreparedDeclarations,
     base: &crate::output_url::PublicBase,
-    dependencies: &dyn Fn(&[ast_segmenter::owned::Dependency]),
+    dependencies: &dyn Fn(&[ast_segmenter::owned::Dependency], policy::Admission),
 ) -> eyre::Result<Prepared> {
     let _span = tracing::info_span!("prepare.read").entered();
     ensure!(
@@ -336,6 +368,7 @@ pub(super) fn read(
                 format,
                 Some(previous),
                 options.cache,
+                (inventory.root(), &options.policy_allowlist),
                 declarations,
                 dependencies,
             )?;
@@ -358,6 +391,7 @@ pub(super) fn read(
             format,
             previous,
             options.cache,
+            (inventory.root(), &options.policy_allowlist),
             declarations,
             dependencies,
         )?;
@@ -381,6 +415,7 @@ pub(super) fn read(
         format,
         previous,
         options.cache,
+        (inventory.root(), &options.policy_allowlist),
         declarations,
         dependencies,
     )?))
@@ -394,8 +429,9 @@ pub(super) fn load(
     package: ModuleFormat,
     previous: Option<&Source>,
     cache: CacheMode,
+    policy: (&Path, &[PolicyAllowance]),
     declarations: &PreparedDeclarations,
-    dependencies: &dyn Fn(&[ast_segmenter::owned::Dependency]),
+    dependencies: &dyn Fn(&[ast_segmenter::owned::Dependency], policy::Admission),
 ) -> eyre::Result<Loaded> {
     let _span = tracing::info_span!("prepare.load", bytes = input.len()).entered();
     let config = ParserConfig::for_path(parser_path, package)?;
@@ -407,15 +443,22 @@ pub(super) fn load(
                 && s.record.matches_prepared_declarations(declarations)
         })
     });
-    if previous.is_some() {
+    if let Some(previous) = previous {
         return Ok(Loaded {
+            admission: policy::Admission::check(
+                policy.0,
+                path,
+                &text,
+                previous.record.module().facts().policy_violations(),
+                policy.1,
+            ),
             source: None,
             status: None,
             warning: None,
             transpiled: None,
         });
     }
-    let loaded = segment_cache::load_prepared_with_dependencies(
+    let loaded = segment_cache::load_prepared_reporting_policies(
         &logger::StdioLogger::new(),
         path,
         segment_cache::PreparedSource {
@@ -426,7 +469,18 @@ pub(super) fn load(
         },
         cache,
         declarations,
-        dependencies,
+        |deps, violations| {
+            dependencies(
+                deps,
+                policy::Admission::check(
+                    policy.0,
+                    path,
+                    &text,
+                    violations.iter().copied(),
+                    policy.1,
+                ),
+            )
+        },
     )
     .wrap_err_with(|| format!("loading source facts for {}", path.display()))?;
     let warning = if let CacheWrite::Failed(message) = loaded.write {
@@ -435,6 +489,13 @@ pub(super) fn load(
         None
     };
     Ok(Loaded {
+        admission: policy::Admission::check(
+            policy.0,
+            path,
+            &text,
+            loaded.record.module().facts().policy_violations(),
+            policy.1,
+        ),
         source: Some(Source {
             css_identity: None,
             input,

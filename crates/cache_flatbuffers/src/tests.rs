@@ -66,6 +66,17 @@ fn load(bytes: Vec<u8>) -> Result<WireRecord> {
 }
 
 #[test]
+fn unknown_policy_discriminants_are_rejected_before_borrowed_access() {
+    let mut module = module();
+    module.facts.policy_violations.push(w::PolicyViolationT {
+        policy: w::PolicyName(u16::MAX),
+        span: w::SpanT { start: 0, end: 4 },
+    });
+    let error = load(checksum(&payload(&record(&module)))).unwrap_err();
+    assert!(format!("{error:#}").contains("unknown source policy discriminant"));
+}
+
+#[test]
 fn xxh3_framing_and_seals_use_complete_big_endian_128_bit_digests() {
     assert_eq!(
         hash128(b""),

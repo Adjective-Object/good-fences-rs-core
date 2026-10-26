@@ -11,6 +11,64 @@ use test_tmpdir::TmpDir;
 static CLI_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[test]
+fn project_policy_waivers_keep_stdout_json_and_diagnostics_out_of_duration_traces() {
+    let dir = TmpDir::new();
+    let root = dir.root();
+    std::fs::write(root.join("entry.cjs"), "module.exports = eval('42');").unwrap();
+    let config = |entries: &[&str], trace: &str| {
+        serde_json::json!({
+            "entries": entries,
+            "traceFile": trace,
+            "policyAllowlist": [{"source": "entry.cjs", "policies": ["uses-eval"]}]
+        })
+        .to_string()
+    };
+    std::fs::write(
+        root.join("bundler.config.json"),
+        config(&["entry.cjs"], ".bundler-trace-policy-success.json"),
+    )
+    .unwrap();
+    let mut stdout = Vec::new();
+    run_from(root, [], &mut stdout).unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
+    assert_eq!(report["warnings"].as_array().unwrap().len(), 1);
+    assert!(report["warnings"][0]
+        .as_str()
+        .unwrap()
+        .contains("bundled output may be incorrect"));
+    std::fs::write(root.join("other.cjs"), "eval('unallowed');").unwrap();
+    std::fs::write(
+        root.join("bundler.config.json"),
+        config(
+            &["entry.cjs", "other.cjs"],
+            ".bundler-trace-policy-error.json",
+        ),
+    )
+    .unwrap();
+    stdout.clear();
+    let error = run_from(root, [], &mut stdout).unwrap_err();
+    assert!(stdout.is_empty());
+    assert!(format!("{error:#}").contains("other.cjs: policy uses-eval"));
+    for trace in [
+        ".bundler-trace-policy-success.json",
+        ".bundler-trace-policy-error.json",
+    ] {
+        let path = root.join(trace);
+        assert!(!complete_trace(&path).is_empty());
+        let bytes = std::fs::read_to_string(path).unwrap();
+        for excluded in [
+            "POLICY WAIVER",
+            "uses-eval",
+            "unallowed",
+            "eval('42')",
+            "bundler::diagnostic",
+        ] {
+            assert!(!bytes.contains(excluded), "{excluded} leaked into {trace}");
+        }
+    }
+}
+
+#[test]
 fn failure_context_preserves_config_causes_and_module_stages() {
     let dir = TmpDir::new();
     let root = dir.root();

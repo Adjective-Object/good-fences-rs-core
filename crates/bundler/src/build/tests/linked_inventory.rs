@@ -355,6 +355,23 @@ fn contexts_settle_late_checked_link_scopes_before_graph_construction() {
     let noop = session.build(&config).unwrap();
     assert!(Rc::ptr_eq(&first.product, &noop.product));
     assert!(noop.invalidated.is_empty());
+    write(
+        &package,
+        "index.mjs",
+        "export const load = n => import(`../sibling/${n}.mjs`);\n//# sourceMappingURL=missing-index.js.map",
+    );
+    write(&sibling, "one.mjs", "eval('late context failure');");
+    write(&sibling, "two.mjs", "export default 2;");
+    config.output.source_maps = true;
+    let mut failing = BuildSession::new(&root).unwrap();
+    let error = failing.build(&config).err().unwrap();
+    let failures = error.downcast_ref::<PreparationErrors>().unwrap();
+    assert_eq!(failures.errors().len(), 2, "{error:#}");
+    let summary = format!("{error:#}");
+    assert!(summary.contains("missing-index.js.map"), "{summary}");
+    assert!(summary.contains("policy uses-eval"), "{summary}");
+    assert!(failing.sources.contains_key(&sibling.join("two.mjs")));
+    assert!(failing.last.is_none());
     remove_directory_link(&root.join("linked"));
     remove_directory_link(&root.join("styles"));
 }

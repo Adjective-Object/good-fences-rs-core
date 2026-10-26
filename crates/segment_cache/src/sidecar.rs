@@ -53,6 +53,11 @@ pub struct PreparedSource<'a> {
     pub package: ModuleFormat,
 }
 
+enum PolicyHandling<F> {
+    Strict(F),
+    Report(F),
+}
+
 pub fn load_prepared(
     logger: &impl logger::Logger,
     path: &Path,
@@ -92,9 +97,42 @@ pub fn load_prepared_with_dependencies(
         mode,
         declarations,
         || Ok(()),
-        dependencies,
+        PolicyHandling::Strict(
+            |deps: &[ast_segmenter::owned::Dependency],
+             _: &[ast_segmenter::policy::PolicyViolation]| dependencies(deps),
+        ),
     )
     .wrap_err_with(|| format!("loading prepared source cache for {}", path.display()))
+}
+
+/// Extract/cache source-local policy evidence without admitting it. Unlike the
+/// strict loaders, every caller must enforce its current policy on returned hits.
+pub fn load_prepared_reporting_policies(
+    logger: &impl logger::Logger,
+    path: &Path,
+    prepared: PreparedSource<'_>,
+    mode: CacheMode,
+    declarations: &ast_segmenter::PreparedDeclarations,
+    observations: impl FnOnce(
+        &[ast_segmenter::owned::Dependency],
+        &[ast_segmenter::policy::PolicyViolation],
+    ),
+) -> eyre::Result<CacheOutcome> {
+    load_prepared_inner(
+        logger,
+        path,
+        prepared,
+        mode,
+        declarations,
+        || Ok(()),
+        PolicyHandling::Report(observations),
+    )
+    .wrap_err_with(|| {
+        format!(
+            "loading policy-reporting source cache for {}",
+            path.display()
+        )
+    })
 }
 
 pub fn sidecar_path(source: &Path) -> PathBuf {
@@ -202,7 +240,10 @@ fn load(
         mode,
         declarations,
         before_publish,
-        |_| {},
+        PolicyHandling::Strict(
+            |_: &[ast_segmenter::owned::Dependency],
+             _: &[ast_segmenter::policy::PolicyViolation]| {},
+        ),
     )
 }
 
@@ -213,8 +254,14 @@ fn load_prepared_inner(
     mode: CacheMode,
     declarations: &ast_segmenter::PreparedDeclarations,
     before_publish: impl FnOnce() -> eyre::Result<()>,
-    dependencies: impl FnOnce(&[ast_segmenter::owned::Dependency]),
+    policies: PolicyHandling<
+        impl FnOnce(&[ast_segmenter::owned::Dependency], &[ast_segmenter::policy::PolicyViolation]),
+    >,
 ) -> eyre::Result<CacheOutcome> {
+    let (strict, observations) = match policies {
+        PolicyHandling::Strict(observations) => (true, observations),
+        PolicyHandling::Report(observations) => (false, observations),
+    };
     let source = prepared.source;
     let _span = tracing::info_span!("cache.load", bytes = source.len()).entered();
     let config =
@@ -240,18 +287,30 @@ fn load_prepared_inner(
         Ok(record) => (record, CacheStatus::Hit, CacheWrite::NotRequested),
         Err(reason) => {
             let extraction_span = tracing::info_span!("cache.extract").entered();
-            let parsed = ast_segmenter::parse_module_with_dependencies(
-                logger,
-                source,
-                prepared.parser_path,
-                prepared.package,
-                declarations,
-                dependencies,
-            )
+            let parsed = if strict {
+                ast_segmenter::parse_module_with_dependencies(
+                    logger,
+                    source,
+                    prepared.parser_path,
+                    prepared.package,
+                    declarations,
+                    |deps| observations(deps, &[]),
+                )
+            } else {
+                ast_segmenter::parse_module_reporting_policies(
+                    logger,
+                    source,
+                    prepared.parser_path,
+                    prepared.package,
+                    declarations,
+                    observations,
+                )
+            }
             .wrap_err_with(|| format!("extracting source facts for {}", path.display()))?;
-            let record = CacheRecord::from_parsed(source, &parsed).wrap_err_with(|| {
-                format!("constructing source cache record for {}", path.display())
-            })?;
+            let record = CacheRecord::from_parsed_reporting_policies(source, &parsed)
+                .wrap_err_with(|| {
+                    format!("constructing source cache record for {}", path.display())
+                })?;
             drop(extraction_span);
             let write = if mode == CacheMode::ReadWrite {
                 match publish(path, source, prepared.original, &record, before_publish) {
@@ -264,6 +323,9 @@ fn load_prepared_inner(
             (record, CacheStatus::Miss(reason), write)
         }
     };
+    if strict {
+        enforce_policies(path, source, record.module().facts())?;
+    }
     unchanged(path, prepared.original)?;
     Ok(CacheOutcome {
         source: source.to_owned(),
@@ -271,6 +333,20 @@ fn load_prepared_inner(
         status,
         write,
     })
+}
+
+pub(crate) fn enforce_policies(
+    path: &Path,
+    source: &str,
+    facts: ast_segmenter::views::ModuleFacts<'_>,
+) -> eyre::Result<()> {
+    let violations: Vec<_> = facts.policy_violations().iter().collect();
+    if !violations.is_empty() {
+        return Err(
+            ast_segmenter::policy::PolicyErrors::new(path, Some(source), violations).into(),
+        );
+    }
+    Ok(())
 }
 
 fn publish(

@@ -3,6 +3,7 @@ source: crates/ast_segmenter/src/commonjs_tests.rs
 expression: facts
 ---
 ModuleFacts {
+    policy_violations: [],
     ecco: None,
     ecco_declarations_hash: DeclarationFingerprint(
         Fingerprint(

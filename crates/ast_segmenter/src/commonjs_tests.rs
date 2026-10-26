@@ -302,8 +302,8 @@ fn require_shapes_and_mutation_have_span_diagnostics() {
         ("require(...paths)", "nonliteral require"),
         ("require?.('./x')", "require call"),
         ("require = loader; require('./x');", "require reassignment"),
-        ("const load = require; load('./x');", "require reassignment"),
-        ("require.resolve('./x');", "require reassignment"),
+        ("const load = require; load('./x');", "require-indirect-use"),
+        ("require.resolve('./x');", "require-indirect-use"),
         ("module.require('./x');", "module access"),
         ("const m = module; m.require('./x');", "module access"),
         ("module[name]('./x');", "module access"),
@@ -746,7 +746,7 @@ fn commonjs_require_detector_admission_stays_bounded() {
     ] {
         let error = format!("{:#}", parse(source, "unsupported.cjs").unwrap_err());
         assert!(
-            error.contains("unsupported require reassignment, alias or indirect use")
+            (error.contains("require-indirect-use") || error.contains("require-reassignment"))
                 && error.contains("bytes "),
             "{}: {}",
             source,

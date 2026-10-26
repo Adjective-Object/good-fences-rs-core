@@ -54,6 +54,12 @@ after parser, semantic and support checks, before effects/recipes/Ecco extractio
 It reuses the same AST classifier and keeps the arena on the calling worker;
 the callback borrows the syntax slice and may copy provisional observations.
 No dependency copy is needed when callers do not request an owned event.
+Strict parser entrypoints retain their support gate. The explicit
+`parse_module_reporting_policies` API instead reports checked dependencies and
+typed `policy::PolicyViolation` evidence before recipes/Ecco, retaining occurrences
+in sealed facts. Callers must enforce admission before emission. `PolicyName`
+provides stable names; `PolicyErrors` preserves typed spans and bounded UTF-8-safe
+code diagnostics. Evidence contains no caller allowlist decisions.
 
 `facts().emission().lazy_modules()` and `lazy_selectors()` expose syntax-only
 construction candidates through borrowed owned-or-wire sequences. Module candidates
