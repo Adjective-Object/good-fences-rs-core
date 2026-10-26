@@ -23,7 +23,7 @@ Graph linking, effect policy, Ecco registration, execution constraints and nativ
 recipe rendering consume owned-or-wire AST views. A byte-backed graph retains
 verified owners, including Ecco's nested storage, without unpacking extraction
 trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
-`.seg.fb` records (schema 19/extractor 28); parse fingerprints include both active
+`.seg.fb` records (schema 19/extractor 29); parse fingerprints include both active
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
 
@@ -2038,6 +2038,12 @@ requires see partial exports; deferred sites execute only when called. Failed
 factories are removed from the require cache and retry on the next require.
 Successful modules execute once. Native ESM proxies carry static named/default
 requests; CJS namespace requests/entries use a canonical runtime-key bridge.
+Bounded `typeof module == 'object' && module && !module.nodeType && module`
+detectors (including reversed/strict equality and a preceding `&&` guard) see
+the same lexical module record. Aliases preserve getters, short-circuiting and
+exports identity, but do not acquire Node `require`/`process` capabilities or
+fabricate `util` dependencies. Direct `module.require`, unknown computed module
+members and unguarded module escapes remain unsupported.
 `__filename` and `__dirname` are factory-local wrapper parameters initialized
 from the actual output availability chunk's native path bindings on Node (the CJS
 counterpart of `import.meta.filename`/`import.meta.dirname`). They describe emitted

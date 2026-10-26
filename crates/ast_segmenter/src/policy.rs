@@ -28,6 +28,7 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
         arguments_depth: 0,
         wrapper_arguments: HashSet::new(),
         module_receivers: HashSet::new(),
+        module_probes: HashSet::new(),
         typeof_names: HashSet::new(),
         wrapper_operations: HashSet::new(),
         operation: false,
@@ -81,11 +82,13 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
             "module"
                 if policy.commonjs
                     && !reference.write()
-                    && !policy.module_receivers.contains(&reference.span().start) =>
+                    && !policy.module_receivers.contains(&reference.span().start)
+                    && !policy.typeof_names.contains(&reference.span().start)
+                    && !policy.module_probes.contains(&reference.span().start) =>
             {
                 policy.reject(
                     reference.span(),
-                    "unsupported module access (only module.exports is supported)",
+                    "unsupported module access (expected module.exports or a guarded module detector)",
                 );
             }
             "eval" => policy.reject(reference.span(), "unsupported unshadowed eval"),
@@ -130,6 +133,7 @@ struct Policy {
     arguments_depth: usize,
     wrapper_arguments: HashSet<u32>,
     module_receivers: HashSet<u32>,
+    module_probes: HashSet<u32>,
     typeof_names: HashSet<u32>,
     wrapper_operations: HashSet<u32>,
     operation: bool,
@@ -161,6 +165,68 @@ impl Policy {
             }
         }
     }
+}
+
+fn module_identifier(expression: &Expression<'_>) -> Option<u32> {
+    match expression.get_inner_expression() {
+        Expression::Identifier(id) if id.name == "module" => Some(id.span.start),
+        _ => None,
+    }
+}
+
+fn and_operands<'b, 'a>(
+    expression: &'b Expression<'a>,
+) -> Option<(&'b Expression<'a>, &'b Expression<'a>)> {
+    match expression.get_inner_expression() {
+        Expression::LogicalExpression(logical) if logical.operator == LogicalOperator::And => {
+            Some((&logical.left, &logical.right))
+        }
+        _ => None,
+    }
+}
+
+// Admit only the value-producing detector tail, not arbitrary wrapper escapes
+// or member operations. A preceding guard (e.g. freeExports) stays untouched.
+fn module_detector(expression: &LogicalExpression<'_>) -> Option<[u32; 3]> {
+    if expression.operator != LogicalOperator::And {
+        return None;
+    }
+    let last = module_identifier(&expression.right)?;
+    let (prefix, not_node) = and_operands(&expression.left)?;
+    let Expression::UnaryExpression(not_node) = not_node.get_inner_expression() else {
+        return None;
+    };
+    if not_node.operator != UnaryOperator::LogicalNot {
+        return None;
+    }
+    let Expression::StaticMemberExpression(member) = not_node.argument.get_inner_expression()
+    else {
+        return None;
+    };
+    if member.optional || member.property.name != "nodeType" {
+        return None;
+    }
+    let node = module_identifier(&member.object)?;
+    let (guard, truthy) = and_operands(prefix)?;
+    let truthy = module_identifier(truthy)?;
+    let guard = and_operands(guard).map_or(guard, |(_, right)| right);
+    let Expression::BinaryExpression(guard) = guard.get_inner_expression() else {
+        return None;
+    };
+    if !matches!(
+        guard.operator,
+        BinaryOperator::Equality | BinaryOperator::StrictEquality
+    ) {
+        return None;
+    }
+    let is_object = |expression: &Expression<'_>| matches!(expression.get_inner_expression(), Expression::StringLiteral(s) if s.value == "object");
+    let is_module_type = |expression: &Expression<'_>| {
+        matches!(expression.get_inner_expression(), Expression::UnaryExpression(u)
+            if u.operator == UnaryOperator::Typeof && module_identifier(&u.argument).is_some())
+    };
+    ((is_object(&guard.left) && is_module_type(&guard.right))
+        || (is_module_type(&guard.left) && is_object(&guard.right)))
+    .then_some([truthy, node, last])
 }
 
 impl<'a> Visit<'a> for Policy {
@@ -222,6 +288,11 @@ impl<'a> Visit<'a> for Policy {
     }
 
     fn visit_logical_expression(&mut self, expression: &LogicalExpression<'a>) {
+        if self.commonjs && !self.operation {
+            if let Some(references) = module_detector(expression) {
+                self.module_probes.extend(references);
+            }
+        }
         // Either operand can supply the result. Unlike a conditional test or
         // discarded sequence prefix, conservatively check both as operations.
         walk::walk_logical_expression(self, expression);

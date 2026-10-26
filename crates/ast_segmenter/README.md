@@ -202,6 +202,12 @@ wrapper references only in CommonJS; lexical shadows and ESM environment reads
 are ordinary bindings/references. `module.exports`
 replacement, `exports` alias replacement and `module` assignment remain in the
 body verbatim. No static list of CommonJS named exports is guessed.
+CommonJS also admits `typeof module` and the bounded detector
+`typeof module == 'object' && module && !module.nodeType && module`, optionally
+preceded by an `&&` guard. Equality can be strict or operand-reversed; parentheses
+are transparent. Detector aliases remain ordinary values in the opaque body:
+property getters, short-circuiting and exports identity are not rewritten.
+Alias capability probes do not create dependencies or provide a Node loader.
 
 ## Source-local support matrix
 
@@ -217,7 +223,7 @@ unchanged.
 | Global CJS `require()` | Exactly one literal or relative template/concatenation argument; parenthesized expressions accepted; shadowed calls are ordinary code |
 | Relative template/concatenation import/require | One real occurrence with owned literal pieces, a leading `./` or `../`, and the original argument span; graph capture is a later step |
 | Unconstrained/bare nonliteral import/require, extra/spread require arguments, optional require call | Diagnostic, never a missing dependency |
-| Require reassignment, escaped/aliased loader, `require.resolve`, `module.require`, unknown module access | Diagnostic; only direct loader calls and `module.exports` member reads are supported |
+| Require reassignment, escaped/aliased loader, `require.resolve`, `module.require`, unknown module access | Diagnostic; only direct loader calls, `module.exports`, `typeof module` and the bounded CJS detector above are supported |
 | CJS `require`/`module`/`exports` declarations at module scope | Diagnostic (wrapper parameters and var/function redeclarations must not be misidentified as independent locals); nested shadows and pure type-space declarations supported |
 | CJS `__filename`/`__dirname` declarations | Top-level var/function redeclarations reuse wrapper parameters; lexical redeclarations are diagnostics; nested shadows supported |
 | CJS `module`/`exports` reassignment | Preserved verbatim with reference write flags; no alias or named-export inference |

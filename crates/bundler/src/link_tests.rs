@@ -2681,6 +2681,136 @@ fn executable_files_expose_static_exports_without_any_source_loader() {
 }
 
 #[test]
+fn commonjs_guarded_module_detectors_keep_native_lazy_identity_and_guards() {
+    let input = sources(&[
+        (
+            "entry.mjs",
+            "export function load() { return require('./probe.cjs'); }",
+        ),
+        (
+            "probe.cjs",
+            r#"
+            trace.push('factory');
+            function detect() {
+                var i = "object" == typeof exports && exports && !exports.nodeType && exports,
+                    o = i && "object" == typeof module && module && !module.nodeType && module;
+                var a = o && o.exports === i && host.process;
+                var util;
+                try {
+                    util = o && o.require && o.require("util").types ||
+                        a && a.binding && a.binding("util");
+                } catch (e) { trace.push('caught'); }
+                return {
+                    matched: !!o,
+                    alias: i === exports,
+                    initial: !!o && o.exports === i,
+                    capability: o ? typeof o.require : 'blocked',
+                    util: typeof util,
+                    current() { return !!o && o.exports === this; }
+                };
+            }
+            module.exports = detect();
+        "#,
+        ),
+    ]);
+    for wire in [false, true] {
+        let graph = graph_with_storage(&input, false, ModuleFormat::Esm, wire);
+        let probe = graph.file_id(Path::new("probe.cjs")).unwrap();
+        assert!(graph.file_facts(probe).unwrap().dependencies().is_empty());
+        let entry = graph.file_id(Path::new("entry.mjs")).unwrap();
+        let policy = EffectPolicy::default();
+        let plan = partition(
+            &graph,
+            &[RootSeed {
+                id: RootId::Entry("entry.mjs".into()),
+                evaluation_roots: vec![entry],
+                binding_roots: vec![GraphNode::Module(entry)],
+            }],
+            &policy,
+        )
+        .unwrap();
+        for browser in [false, true] {
+            let output = esm_plan_prepared(
+                &graph,
+                &plan,
+                &policy,
+                &input,
+                &BTreeMap::new(),
+                browser,
+                &BTreeMap::new(),
+            )
+            .unwrap()
+            .render()
+            .unwrap();
+            assert_eq!(output.backend, Backend::Native);
+            if browser {
+                assert!(output
+                    .files
+                    .keys()
+                    .all(|p| p.extension().is_some_and(|e| e == "mjs")));
+            }
+            for blocked in ["none", "exports", "module", "throw"] {
+                let check = format!(
+                    r#"
+                    import assert from 'node:assert/strict';
+                    globalThis.trace = [];
+                    const failure = {{reason: 'nodeType getter'}};
+                    globalThis.host = {{
+                        get process() {{
+                            trace.push('process');
+                            return {{ get binding() {{ trace.push('binding'); return undefined; }} }};
+                        }}
+                    }};
+                    Object.defineProperty(Object.prototype, 'nodeType', {{
+                        configurable: true,
+                        get() {{
+                            const kind = Object.hasOwn(this, 'exports') ? 'module' : 'exports';
+                            trace.push(kind);
+                            if ('{blocked}' === 'throw' && kind === 'module') throw failure;
+                            return kind === '{blocked}';
+                        }}
+                    }});
+                    try {{
+                        const ns = await import('./entry.mjs');
+                        assert.deepEqual(trace, []);
+                        if ('{blocked}' === 'throw') {{
+                            assert.throws(() => ns.load(), error => error === failure);
+                            assert.throws(() => ns.load(), error => error === failure);
+                            assert.deepEqual(trace, [
+                                'factory', 'exports', 'module', 'factory', 'exports', 'module'
+                            ]);
+                        }} else {{
+                        const value = ns.load();
+                        assert.equal(ns.load(), value);
+                        assert.equal(value.matched, '{blocked}' === 'none');
+                        assert.equal(value.alias, '{blocked}' !== 'exports');
+                        assert.equal(value.initial, '{blocked}' === 'none');
+                        assert.equal(value.current(), '{blocked}' === 'none');
+                        assert.equal(value.capability, '{blocked}' === 'none' ? 'undefined' : 'blocked');
+                        assert.equal(value.util, '{blocked}' === 'none' ? 'undefined' : 'boolean');
+                        assert.deepEqual(trace, '{blocked}' === 'exports' ? ['factory', 'exports'] :
+                            '{blocked}' === 'module' ? ['factory', 'exports', 'module'] :
+                            ['factory', 'exports', 'module', 'process', 'binding']);
+                        }}
+                    }} finally {{
+                        delete Object.prototype.nodeType;
+                    }}
+                "#
+                );
+                let mut files = output.files.clone();
+                files.insert("check.mjs".into(), observation(&output, &check));
+                let actual = node(&files, Path::new("check.mjs"));
+                assert!(
+                    actual.status.success(),
+                    "wire={wire}, browser={browser}, blocked={blocked}: {}",
+                    String::from_utf8_lossy(&actual.stderr)
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn commonjs_native_cache_cycles_aliases_replacement_and_retry() {
     let output = compare(&sources(&[
         ("entry.cjs", "const a = require('./a.cjs'); console.log(a === require('./a.cjs'), a); const lazy = require('./lazy.cjs'); console.log('before'); console.log(lazy()); for(let i=0;i<2;i++) { try { require('./fail.cjs'); } catch(e) { console.log(e.message); } } console.log(require('./primitive.cjs')); console.log(require('./return.cjs').value, require('./modulevar.cjs').kept);"),

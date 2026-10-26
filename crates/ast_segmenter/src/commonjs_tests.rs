@@ -239,6 +239,115 @@ fn require_shapes_and_mutation_have_span_diagnostics() {
 }
 
 #[test]
+fn commonjs_guarded_module_detectors_preserve_wrapper_reference_facts() {
+    for detector in [
+        "typeof module == 'object' && module && !module.nodeType && module",
+        "'object' == typeof module && module && !module.nodeType && module",
+        "typeof (module) === 'object' && (module) && !(module).nodeType && (module)",
+        "i && 'object' === typeof module && module && !module.nodeType && module",
+    ] {
+        let source = format!(
+            "function helper() {{
+                var i = typeof exports == 'object' && exports && !exports.nodeType && exports;
+                var o = {detector};
+                var a = o && o.exports === i && host.process;
+                try {{ return o && o.require && o.require('util').types ||
+                    a && a.binding && a.binding('util'); }} catch (e) {{}}
+             }}
+             module.exports = helper;"
+        );
+        let module = parse(&source, "detector.cjs").unwrap();
+        assert!(matches!(module.body(), ModuleBody::CommonJs { .. }));
+        assert_eq!(module.segments().len(), 1);
+        assert!(module.facts().dependencies().is_empty());
+        let references: Vec<_> = module
+            .facts()
+            .references()
+            .iter()
+            .filter(|r| r.name() == "module")
+            .collect();
+        assert_eq!(references.len(), 5);
+        assert!(references.iter().all(|r| r.binding().is_none()
+            && r.commonjs() == Some(CommonJsGlobal::Module)
+            && !r.write()));
+    }
+    let repeated = "var i, o;
+        i = 'object' == typeof exports && exports && !exports.nodeType && exports,
+        o = i && 'object' == typeof module && module && !module.nodeType && module;";
+    let source = format!(
+        "(function() {{ {} }})(); (function() {{ {} }})(); (function() {{ {} }})();",
+        repeated, repeated, repeated
+    );
+    let repeated = parse(&source, "repeated.cjs").unwrap();
+    assert_eq!(
+        repeated
+            .facts()
+            .references()
+            .iter()
+            .filter(|r| r.commonjs() == Some(CommonJsGlobal::Module))
+            .count(),
+        12
+    );
+    let shadow = parse(
+        "function local(module) {
+            return typeof module == 'object' && module && !module.nodeType && module;
+         }
+         module.exports = local;",
+        "shadow.cjs",
+    )
+    .unwrap();
+    assert_eq!(
+        shadow
+            .facts()
+            .references()
+            .iter()
+            .filter(|r| r.name() == "module" && r.binding().is_some() && r.commonjs().is_none())
+            .count(),
+        4
+    );
+    parse("module.exports = typeof module;", "typeof.cjs").unwrap();
+}
+
+#[test]
+fn commonjs_module_detector_admission_stays_bounded() {
+    for source in [
+        "module.require('util');",
+        "module['require']('util');",
+        "module[name]('util');",
+        "const m = module; m.require('util');",
+        "consume(module);",
+        "module();",
+        "new module();",
+        "module`tag`;",
+        "module.nodeType;",
+        "delete module.nodeType;",
+        "module.nodeType = 1;",
+        "module.nodeType++;",
+        "typeof module == 'object' && module;",
+        "typeof module == 'object' && module && module.nodeType && module;",
+        "typeof module == 'object' || module && !module.nodeType && module;",
+        "typeof module == 'function' && module && !module.nodeType && module;",
+        "typeof other == 'object' && module && !module.nodeType && module;",
+        "typeof module == 'object' && module && !module[name] && module;",
+        "typeof module == 'object' && module && !module?.nodeType && module;",
+        "(typeof module == 'object' && module && !module.nodeType && module)();",
+        "new (typeof module == 'object' && module && !module.nodeType && module)();",
+        "(typeof module == 'object' && module && !module.nodeType && module)`tag`;",
+        "(typeof module == 'object' && module && !module.nodeType && module).require('util');",
+        "delete (typeof module == 'object' && module && !module.nodeType && module).x;",
+        "(typeof module == 'object' && module && !module.nodeType && module).x = 1;",
+    ] {
+        let error = format!("{:#}", parse(source, "bad.cjs").unwrap_err());
+        assert!(
+            error.contains("module access") && error.contains("bytes "),
+            "{}: {}",
+            source,
+            error
+        );
+    }
+}
+
+#[test]
 fn commonjs_path_parameters_allow_var_function_and_nested_shadowing() {
     for source in [
         "var __filename; var __dirname; console.log(__filename, __dirname);",

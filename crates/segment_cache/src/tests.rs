@@ -18,6 +18,37 @@ fn envelope(record: &FixtureRecord) -> Vec<u8> {
 }
 
 #[test]
+fn commonjs_module_detectors_roundtrip_without_reparse_or_loader_dependencies() {
+    let source = "function detect() {
+        var i = typeof exports == 'object' && exports && !exports.nodeType && exports;
+        var o = i && 'object' == typeof module && module && !module.nodeType && module;
+        return o && o.exports === i && o.require && o.require('util');
+    } module.exports = detect;";
+    let original = record(source, "probe.cjs", ModuleFormat::CommonJs);
+    let parses = ast_segmenter::module_parse_count();
+    let cached =
+        CacheRecord::decode(&original.encode(source).unwrap(), source, original.config()).unwrap();
+    let parsed = cached.to_parsed(source).unwrap();
+    assert!(matches!(
+        parsed.facts(),
+        ast_segmenter::views::ModuleFacts::Wire(_)
+    ));
+    assert_eq!(parsed.body(), original.module().body());
+    assert_eq!(
+        parsed.facts().references(),
+        original.module().facts().references()
+    );
+    assert_eq!(
+        parsed.facts().emission(),
+        original.module().facts().emission()
+    );
+    assert!(parsed.facts().dependencies().is_empty());
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+    assert_eq!(EXTRACTOR_VERSION, 29);
+    assert_eq!(SCHEMA_VERSION, 19);
+}
+
+#[test]
 fn literal_url_roundtrips_borrowed_and_rejects_corrupted_evidence() {
     let source = "export const load = () => new URL('./parser.worker', import.meta /*base*/ .url);";
     let original = record(source, "url.mjs", ModuleFormat::Esm);

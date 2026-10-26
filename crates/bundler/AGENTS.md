@@ -533,6 +533,9 @@ Each CJS input is one opaque segment bridged by a logical ESM facade; both
 participate in ordinary usage analysis/linking/grouping, never a standalone
 native .cjs-per-input fallback. Preserve early cache allocation, wrapper
 this/exports aliases/current exports and retry after throws.
+Guarded CJS module-detector aliases observe that same lexical cache object;
+preserve getter/short-circuit timing and absent require/process capabilities.
+Never inject a Node loader or fabricate dependencies for alias capability probes.
 Initialize factory-local __filename/__dirname parameters from actual output
 availability paths; retain var/function redeclarations and nested shadows.
 When CJS or a context is retained, add target-appropriate intrinsics as the first
