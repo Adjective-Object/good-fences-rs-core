@@ -226,7 +226,8 @@ unchanged.
 | ESM environment probes | `typeof require`, read-only `module`/`exports` references and property reads remain native globals, including lodash-style short-circuit aliases; no injected bindings or constant replacement |
 | ESM direct unshadowed literal `require()` | Preserves ESM format and occurrence recipes, including parenthesized calls; target/activation support is a linker check. ESM require contexts remain rejected |
 | Mixed-file static ESM/CJS syntax, ESM wrapper writes/deletes/updates/calls/construction/tags, or other ESM loader use except `typeof require` | Diagnostic; direct require support never enables CommonJS wrapper operations |
-| Unshadowed eval, nested `with`, `import.meta` | Diagnostic; lexically shadowed eval is an ordinary call |
+| Unshadowed eval, nested `with`, unsupported `import.meta` | Diagnostic; lexically shadowed eval is an ordinary call |
+| Literal relative `new URL(request, import.meta.url)` with unshadowed URL | Typed URL occurrence and original literal emission slot; target/entry policy belongs to the bundler |
 | Top-level await/for-await | ESM source spans in `facts.top_level_await`, excluding nested functions; CJS diagnostic. Dependency/SCC scheduling belongs to the native bundler host |
 | Import attributes/options/phases (including type import options) | Diagnostic |
 | Erasable TS annotations/types/assertions, TS import types | Owned syntax facts and type-only references/dependencies; **not erased or executable output** |

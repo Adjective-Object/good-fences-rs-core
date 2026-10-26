@@ -25,6 +25,8 @@ enum Part {
     External(String, RequestKind),
     Evaluation(PathBuf),
     BuildRootUrl(String),
+    ResourceUrl(PathBuf, String),
+    EntryUrl(String, String),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -49,6 +51,28 @@ impl From<&str> for Code {
 }
 
 impl Code {
+    pub(crate) fn entry_url(entry: String, base: String) -> Self {
+        Self {
+            parts: vec![Part::EntryUrl(entry, base)],
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn resolve_entry_urls(
+        &mut self,
+        entries: &BTreeMap<String, PathBuf>,
+    ) -> eyre::Result<()> {
+        for part in &mut self.parts {
+            if let Part::EntryUrl(entry, base) = part {
+                let target = entries.get(entry).ok_or_else(|| {
+                    eyre::eyre!("worker URL entry {entry:?} has no emitted artifact")
+                })?;
+                *part = Part::ResourceUrl(target.clone(), base.clone());
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn build_root_url(public_url: String) -> Self {
         Self {
             parts: vec![Part::BuildRootUrl(public_url)],
@@ -90,7 +114,7 @@ impl Code {
         for (path, code) in files.iter() {
             for part in &code.parts {
                 match part {
-                    Part::Request(target, _) => {
+                    Part::Request(target, _) | Part::ResourceUrl(target, _) => {
                         candidates.remove(target);
                     }
                     Part::External(_, _) => {
@@ -338,6 +362,26 @@ impl Code {
                         serde_json::to_string(&root)?
                     ));
                     continue;
+                }
+                Part::ResourceUrl(target, base) => {
+                    let target = destinations
+                        .get(target)
+                        .ok_or_eyre("resource URL target has no artifact")?;
+                    let base = crate::output_url::PublicBase::new(base)?;
+                    let mut request = base.join(target)?;
+                    if base.relative() {
+                        let depth = destination
+                            .parent()
+                            .ok_or_eyre("missing output parent")?
+                            .components()
+                            .count();
+                        request = format!("{}{request}", "../".repeat(depth));
+                    }
+                    output.generated(&serde_json::to_string(&request)?);
+                    continue;
+                }
+                Part::EntryUrl(entry, _) => {
+                    eyre::bail!("worker URL entry {entry:?} was not assigned an artifact");
                 }
                 Part::Request(target, kind) => (target, *kind != RequestKind::Require, false),
                 Part::Evaluation(target) => (target, true, true),

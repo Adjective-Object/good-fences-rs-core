@@ -23,7 +23,7 @@ Graph linking, effect policy, Ecco registration, execution constraints and nativ
 recipe rendering consume owned-or-wire AST views. A byte-backed graph retains
 verified owners, including Ecco's nested storage, without unpacking extraction
 trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
-`.seg.fb` records (schema 18/extractor 27); parse fingerprints include both active
+`.seg.fb` records (schema 19/extractor 28); parse fingerprints include both active
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
 
@@ -1549,13 +1549,33 @@ Caller-loaded CSS remains application-ordered; auto-mount follows activation
 timing. External require, unresolved Node builtins, native addons, unbounded require and loader APIs
 (`require.resolve`, `require.cache`, `module.require`) remain unsupported.
 Explicit nonbuiltin import externals need a host-provided resolution mechanism.
-No worker subtargets, DOM typings, rendering/readiness guarantees, or single-file
+No classic-worker output, DOM typings, rendering/readiness guarantees, or single-file
 runtime are provided. Controlled host-global execution tests cover getter reads,
 DOM mutations, scheduling and lazy native imports. Set `BUNDLER_TEST_FIREFOX` to
 an installed Firefox executable when running `cargo test -p bundler --lib browser_`
 to additionally execute the emitted graph over local HTTP in a real headless
 browser, without downloading a browser or using host CommonJS globals. This
 checks execution, not rendering/readiness.
+
+### Discovered module worker entries
+
+Browser builds recognize unshadowed literal `new URL("./worker.js", import.meta.url)`
+expressions as checked script targets. During the existing preparation frontier,
+each new target becomes a normal evaluation-only entrypoint. Nested targets join
+that same frontier; configured entries for the same file are reused. All entries
+share source preparation, cache owners, resolution, inventory, graph, effect
+analysis and ordinary native multi-file emission. There are no child sessions,
+recursive builds or classic-script backend. Dynamic imports and shared chunks
+follow the same rules as other entries.
+
+URL dependencies do not evaluate the worker in its parent. Typed entry identities
+relocate the literal against final output destinations/public base; original URL
+construction and surrounding constructor/options remain unchanged. Discovered
+entry routes appear in the ordinary entry manifest under stable `worker:` labels.
+Callers must construct `{type: "module"}` workers. Classic `importScripts` Blob
+bootstraps require an explicit application adaptation, not a hidden bundler shim.
+Recognition is URL-based rather than a proof of Worker constructor identity;
+other `import.meta` shapes, non-script targets and external targets remain errors.
 
 ## Package-local resolution storage
 

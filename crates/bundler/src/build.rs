@@ -31,6 +31,7 @@ mod discovery;
 mod entry_outputs;
 mod prepare;
 mod scratch;
+mod worker_entries;
 
 pub use crate::css_selection::CssModules;
 
@@ -381,6 +382,7 @@ impl BuildSession {
             entries.insert(name.clone(), (path.clone(), entry.namespace));
             queue.push_back(path);
         }
+        let mut entry_options = options.clone();
         let mut scheduled = BTreeSet::new();
         let mut resources = BTreeSet::new();
         let mut awaiting = BTreeSet::new();
@@ -640,6 +642,21 @@ impl BuildSession {
                             .get(&path)
                             .or_else(|| previous.get(&path))
                             .expect("loaded source");
+                        let worker_urls = worker_entries::discover(
+                            &path,
+                            source,
+                            &resolved,
+                            &inventory,
+                            options,
+                            &mut entries,
+                            &mut entry_options.entries,
+                        )?;
+                        if !worker_urls.is_empty() {
+                            relocations
+                                .entry(path.clone())
+                                .or_insert_with(Vec::new)
+                                .extend(worker_urls);
+                        }
                         for dependency in source.record.module().facts().dependencies() {
                             if dependency.broad_context() {
                                 let warning = format!(
@@ -967,6 +984,7 @@ impl BuildSession {
                 include_str!("link.rs"),
                 include_str!("assembly.rs"),
                 include_str!("entry_outputs.rs"),
+                include_str!("build/worker_entries.rs"),
                 include_str!("symbols.rs"),
                 include_str!("native.rs"),
                 include_str!("native_chunks.rs"),
@@ -1190,7 +1208,10 @@ impl BuildSession {
                     .wrap_err_with(|| format!("emitting stylesheet {}", path.display()))?;
             }
         }
-        let destinations = entry_outputs::apply(&self.root, options, &mut artifacts)
+        for code in artifacts.files.values_mut() {
+            code.resolve_entry_urls(&artifacts.entries)?;
+        }
+        let destinations = entry_outputs::apply(&self.root, &entry_options, &mut artifacts)
             .wrap_err("assigning entry output paths")?;
         let artifacts = artifacts
             .render_to_with_maps(&destinations, options.output.source_maps)

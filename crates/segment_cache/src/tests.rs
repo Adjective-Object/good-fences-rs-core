@@ -18,6 +18,36 @@ fn envelope(record: &FixtureRecord) -> Vec<u8> {
 }
 
 #[test]
+fn literal_url_roundtrips_borrowed_and_rejects_corrupted_evidence() {
+    let source = "export const load = () => new URL('./parser.worker', import.meta /*base*/ .url);";
+    let original = record(source, "url.mjs", ModuleFormat::Esm);
+    let parses = ast_segmenter::module_parse_count();
+    let cached =
+        CacheRecord::decode(&original.encode(source).unwrap(), source, original.config()).unwrap();
+    let parsed = cached.to_parsed(source).unwrap();
+    assert_eq!(
+        parsed.facts().dependencies(),
+        original.module().facts().dependencies()
+    );
+    assert_eq!(
+        parsed.facts().emission(),
+        original.module().facts().emission()
+    );
+    for edit in [
+        |v: &mut serde_json::Value| v.set("module.facts.dependencies.0.kind", "Require"),
+        |v: &mut serde_json::Value| v.set("module.facts.dependencies.0.type_only", true),
+        |v: &mut serde_json::Value| v.add("module.facts.dependencies.0.specifier_span.start", 1),
+        |v: &mut serde_json::Value| v.set("module.facts.invocations.0.construct", false),
+        |v: &mut serde_json::Value| v.set("module.facts.references.0.name", "Other"),
+    ] {
+        let damaged = corrupt(&original, edit);
+        assert!(damaged.encode(source).is_err());
+        assert!(CacheRecord::decode(&damaged.envelope(true), source, original.config()).is_err());
+    }
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+}
+
+#[test]
 fn source_map_directive_roundtrips_borrowed_and_rejects_invalid_spans() {
     let source = "export const value = 1;\n//# sourceMappingURL=input.mjs.map";
     let original = record(source, "input.mjs", ModuleFormat::Esm);

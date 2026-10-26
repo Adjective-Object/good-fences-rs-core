@@ -74,6 +74,10 @@ impl PublicBase {
         &self.value
     }
 
+    pub(crate) fn relative(&self) -> bool {
+        self.relative
+    }
+
     pub(crate) fn join(&self, target: &Path) -> eyre::Result<String> {
         Ok(format!("{}{}", self.value, artifact_path(target)?))
     }

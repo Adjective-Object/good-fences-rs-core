@@ -27,6 +27,9 @@ Dependency sites retain source spans, binding requests, type namespace and
 sync/async/function-containment metadata.
 Containment does not authorize eager execution. Evaluation and binding demand
 are distinct; this crate does not implement effects or runtime scheduling.
+URL dependencies retain checked file resolutions but create no parent evaluation
+or binding edges. The bundler admits their targets as normal independent entries
+in this same graph; constructing a URL never runs a worker in its parent.
 Local-reference occurrences copy `async_deferred` from owned syntax facts,
 including existing same-segment edges. Mixed async/sync references to one target
 stay separate in both indexes and retain their original sites; the flag neither

@@ -522,6 +522,20 @@ fn load_modules<'a>(
             .text(path)
             .ok_or_else(|| eyre::eyre!("{}: missing linked source text", path.display()))?;
         let parsed = crate::emit::checked_source(graph, file, source)?;
+        for dependency in parsed
+            .facts()
+            .dependencies()
+            .iter()
+            .filter(|dependency| dependency.kind() == ast_segmenter::owned::DependencyKind::Url)
+        {
+            ensure!(
+                relocations.get(path).is_some_and(|relocations| relocations.iter().any(|relocation|
+                    matches!(relocation, crate::css_loading::UrlRelocation::Worker { dependency: id, .. }
+                        if *id == dependency.id()))),
+                "{}: URL occurrence at bytes {}..{} needs a checked module worker entry",
+                path.display(), dependency.span().start, dependency.span().end
+            );
+        }
         path.to_str()
             .ok_or_eyre("emission module paths must be UTF-8")?;
         modules.insert(

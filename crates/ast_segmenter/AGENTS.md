@@ -135,6 +135,9 @@ is computed from validated facts, never paired with a caller-supplied digest.
 Source/body/facts provenance keeps SHA-256 independently.
 Operations address existing occurrence IDs/indices and original spans; preorder
 parents and source-slot roots precompose nesting before the arena drops.
+Literal `new URL(relative, import.meta.url)` with unshadowed URL owns a `Url`
+dependency and literal-slot operation. Worker construction/type and resolved
+entrypoints remain build policy, never source-cache facts.
 PURE callee steps preserve parentheses as chain boundaries and guard awaits in
 the invocation's own function scope. CJS remains one opaque recipe with only
 dependency/hint slots. Never persist chosen names, targets or transform policy.

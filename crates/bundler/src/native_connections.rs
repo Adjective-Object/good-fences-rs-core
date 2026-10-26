@@ -829,6 +829,7 @@ impl Connections {
                     continue;
                 }
                 let kind = match dependency.kind() {
+                    DependencyKind::Url => continue,
                     DependencyKind::Import => RequestKind::Import,
                     DependencyKind::ReExport => RequestKind::ReExport,
                     DependencyKind::DynamicImport => RequestKind::DynamicImport,

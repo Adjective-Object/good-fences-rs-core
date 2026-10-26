@@ -11,6 +11,7 @@ mod discovery;
 mod resolution_cache;
 mod sass;
 mod transpile;
+mod worker_entries;
 
 #[cfg(any(unix, windows))]
 mod linked_inventory;

@@ -1,5 +1,14 @@
 # bundler
 
+Browser literal URL dependencies discover normal evaluation-only module-worker
+entries during the shared preparation frontier. Use the same source owners,
+resolver, inventory, graph, planner and native multi-file emitter; never create
+child BuildSessions, sub-builds or a classic-script output path. Nested workers
+join the same frontier, existing explicit entries are reused, and shared modules
+are analyzed once. URL occurrences add no parent evaluation edges. Resolve typed
+entry URLs through final artifact naming. Callers must request type:module;
+adapt application classic-worker bootstraps explicitly, never silently rewrite them.
+
 Emit high-level phase/count events on bundler::progress without paths/requests.
 Discovery alone samples root-relative file/directory names on the stderr-only
 bundler::progress::discovery target, at most once per second for each kind.

@@ -18,7 +18,9 @@ module body and ordered statement ranges, not lossy legacy dependency/name sets.
 `CacheRecord` and `CachedModule` have private storage. Consumers and validators
 use borrowed accessors such as `record.module().facts()` and
 `record.module().segments()`; no mutable view of sealed records is exposed.
-Production loading/publication uses typed FlatBuffers, schema 18/extractor 27.
+Production loading/publication uses typed FlatBuffers, schema 19/extractor 28.
+URL dependencies retain original relative literals and construction spans, not
+resolved worker paths or build entrypoints.
 The last parser-identified source-map directive span is sealed and validated;
 resolved upstream maps remain separate output-only bundler inputs.
 Facts expose Copy/value-iterator APIs over immutable verified byte owners.

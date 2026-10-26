@@ -363,11 +363,59 @@ impl Extractor<'_, '_> {
     }
 }
 
+fn literal_resource_url<'b, 'a>(
+    expression: &'b NewExpression<'a>,
+) -> Option<&'b StringLiteral<'a>> {
+    if expression.arguments.len() != 2 || expression.type_arguments.is_some() {
+        return None;
+    }
+    let Expression::Identifier(callee) = &expression.callee else {
+        return None;
+    };
+    if callee.name != "URL" {
+        return None;
+    }
+    let Argument::StringLiteral(source) = &expression.arguments[0] else {
+        return None;
+    };
+    let request = source.value.as_str()?;
+    if !(request.starts_with("./") || request.starts_with("../"))
+        || request.contains(['?', '#', '%', '\\'])
+    {
+        return None;
+    }
+    let Argument::StaticMemberExpression(base) = &expression.arguments[1] else {
+        return None;
+    };
+    if base.optional || base.property.name != "url" {
+        return None;
+    }
+    matches!(&base.object, Expression::ImportMeta(_)).then_some(source)
+}
+
 impl<'a> Visit<'a> for Extractor<'_, 'a> {
+    fn visit_new_expression(&mut self, expression: &NewExpression<'a>) {
+        if !self.commonjs {
+            if let Some(source) = literal_resource_url(expression) {
+                if let Expression::Identifier(callee) = expression.callee.get_inner_expression() {
+                    let reference = self
+                        .semantic
+                        .scoping()
+                        .get_reference(callee.reference_id.get().expect("validated URL reference"));
+                    if reference.symbol_id().is_none() {
+                        self.dependency(DependencyKind::Url, expression.span, source, false);
+                    }
+                }
+            }
+        }
+        walk::walk_new_expression(self, expression);
+    }
+
     fn visit_await_expression(&mut self, expression: &AwaitExpression<'a>) {
         if self.enclosing_function.is_none() {
             self.facts.top_level_await_mut().push(expression.span);
         }
+
         walk::walk_await_expression(self, expression);
     }
 

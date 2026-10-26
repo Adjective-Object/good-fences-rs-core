@@ -20,6 +20,32 @@ fn parse(source: &str) -> ModuleFacts {
 }
 
 #[test]
+fn literal_url_has_occurrence_and_literal_operation_without_worker_identity() {
+    let source = "import {CrossDomainWorker as Worker} from './wrapper.js'; export const start = () => new Worker(new URL('./parser.worker', import.meta /*base*/ .url));";
+    let facts = parse(source);
+    let dependency = facts
+        .dependencies()
+        .iter()
+        .find(|dependency| dependency.kind() == DependencyKind::Url)
+        .unwrap();
+    assert_eq!(dependency.specifier(), "./parser.worker");
+    assert!(dependency.enclosing_function().is_some());
+    assert_eq!(
+        &source
+            [dependency.specifier_span().start as usize..dependency.specifier_span().end as usize],
+        "'./parser.worker'"
+    );
+    let recipe = facts.emission().segments().iter().find(|recipe| recipe.operations().iter().any(|operation|
+        matches!(operation.kind(), crate::emission::OperationKind::Dependency { dependency: id } if *id == dependency.id()))).unwrap();
+    let operation = recipe.operations().iter().find(|operation|
+        matches!(operation.kind(), crate::emission::OperationKind::Dependency { dependency: id } if *id == dependency.id())).unwrap();
+    assert_eq!(
+        operation.kind().span(&facts, recipe),
+        dependency.specifier_span()
+    );
+}
+
+#[test]
 fn lone_surrogates_do_not_become_utf8_requests_or_known_properties() {
     for source in [
         r#"import "./\ud800";"#,
