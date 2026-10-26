@@ -92,15 +92,20 @@ that owner without unpacking facts, Ecco precursors or statement ranges.
 `into_facts` transfers storage. Owned-only adapters use `owned_facts`,
 `owned_segments` or `FactsStorage::into_owned`, never a hidden wire conversion.
 
+Extraction encodes the complete typed module once, including Ecco's existing
+encoder, and seals its immutable shared facts, body and ranges with those bytes.
 `ParsedModule::to_flatbuffer(source, oxc_revision)` checks extraction provenance
-before encoding the complete typed module, including Ecco's existing encoder.
+before reusing those exact module bytes and seal for cache framing.
 The wire seal hashes exact nested-module bytes independently of the outer
 checksum. `from_wire` checks source/provenance but is not a semantic validation
 gate: persistent callers must also run `segment_cache::validate_parsed`.
 Source/configuration/range/fact validation, graph linking, effect solving and native
 emission consume these views. Production `segment_cache` loads `.seg.fb` through
 this owner and the shared semantic gate. Owned extraction provenance also hashes
-the typed module, not CBOR; warm provenance checks reuse the verified immutable
+the typed module, not CBOR. Clones and graph adapters share the cold owner;
+arbitrary owned or Serde-projected facts still require comparison against the
+original seal, never a new seal around caller-supplied facts. Wire limits leave
+valid owned extraction available for checked uncached use. Warm provenance checks reuse the verified immutable
 owner and check exact table/range identity without rescanning its tree.
 `to_flatbuffer` on a wire module returns its already checked bytes.
 `facts.emission().source_map()` borrows the last parser-identified

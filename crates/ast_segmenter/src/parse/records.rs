@@ -117,14 +117,14 @@ impl ParsedModule {
         source_type: SourceType,
         body: ModuleBody,
         segments: Vec<Segment>,
-        facts: crate::owned::ModuleFacts,
+        facts: std::sync::Arc<crate::owned::ModuleFacts>,
         provenance: crate::SourceProvenance,
     ) -> Self {
         Self {
             source_type,
             body,
             segments: Some(segments),
-            facts: facts.into(),
+            facts: crate::views::FactsStorage::Owned(facts),
             provenance,
         }
     }

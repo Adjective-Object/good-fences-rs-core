@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use cache_flatbuffers::hash128;
 use eyre::ensure;
@@ -93,6 +94,16 @@ pub struct SourceProvenance {
     records_hash: [u8; 16],
     #[serde(skip)]
     wire: Option<cache_flatbuffers::WireRecord>,
+    #[serde(skip)]
+    extraction: Option<Arc<SealedExtraction>>,
+}
+
+#[derive(Debug)]
+struct SealedExtraction {
+    body: ModuleBody,
+    ranges: Box<[Span]>,
+    facts: Arc<ModuleFacts>,
+    module_bytes: Vec<u8>,
 }
 
 impl PartialEq for SourceProvenance {
@@ -115,13 +126,20 @@ impl SourceProvenance {
         config: ParserConfig,
         body: ModuleBody,
         ranges: &[Span],
-        facts: &ModuleFacts,
+        facts: Arc<ModuleFacts>,
     ) -> eyre::Result<Self> {
+        let module_bytes = facts.encode_module(body, ranges);
         Ok(Self {
             source_hash: hash128(source.as_bytes()),
             config,
-            records_hash: records_hash(body, ranges, facts)?,
+            records_hash: hash128(&module_bytes),
             wire: None,
+            extraction: Some(Arc::new(SealedExtraction {
+                body,
+                ranges: ranges.into(),
+                facts,
+                module_bytes,
+            })),
         })
     }
 
@@ -131,6 +149,14 @@ impl SourceProvenance {
 
     pub(crate) fn wire_record(&self) -> Option<&cache_flatbuffers::WireRecord> {
         self.wire.as_ref()
+    }
+
+    pub(crate) fn module_bytes(&self) -> Option<&[u8]> {
+        self.extraction.as_ref().map(|v| v.module_bytes.as_slice())
+    }
+
+    pub(crate) fn records_hash(&self) -> [u8; 16] {
+        self.records_hash
     }
 
     pub fn verify(
@@ -150,10 +176,19 @@ impl SourceProvenance {
             "source parser configuration mismatch"
         );
         match facts {
-            crate::views::ModuleFacts::Owned(facts) => ensure!(
-                self.wire.is_none() && self.records_hash == records_hash(body, ranges, facts)?,
-                "source facts/ranges do not match extraction provenance"
-            ),
+            crate::views::ModuleFacts::Owned(facts) => {
+                let same_extraction = self.extraction.as_ref().is_some_and(|owner| {
+                    std::ptr::eq(owner.facts.as_ref(), facts)
+                        && owner.body == body
+                        && owner.ranges.as_ref() == ranges
+                });
+                ensure!(
+                    self.wire.is_none()
+                        && (same_extraction
+                            || self.records_hash == records_hash(body, ranges, facts)?),
+                    "source facts/ranges do not match extraction provenance"
+                );
+            }
             crate::views::ModuleFacts::Wire(facts) => {
                 let wire = self
                     .wire
@@ -194,6 +229,7 @@ impl SourceProvenance {
             },
             records_hash: std::array::from_fn(|i| p.records_hash().bytes().get(i)),
             wire: Some(wire.clone()),
+            extraction: None,
         };
         ensure!(
             result.source_hash == hash128(source.as_bytes()),

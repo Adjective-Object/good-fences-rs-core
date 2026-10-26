@@ -572,12 +572,19 @@ impl crate::ParsedModule {
         let v::ModuleFacts::Owned(owned) = self.facts() else {
             eyre::bail!("wire facts already have immutable encoding");
         };
-        let module_bytes = owned.encode_module(self.body(), &ranges);
+        let encoded;
+        let module_bytes = match self.provenance().module_bytes() {
+            Some(bytes) => bytes,
+            None => {
+                encoded = owned.encode_module(self.body(), &ranges);
+                &encoded
+            }
+        };
         let hash = w::Hash128::new(&hash128(source.as_bytes()));
-        let records_hash = w::Hash128::new(&hash128(&module_bytes));
+        let records_hash = w::Hash128::new(&self.provenance().records_hash());
         let config = self.provenance().config().wire();
         let mut outer = FlatBufferBuilder::new();
-        let module = outer.create_vector(&module_bytes);
+        let module = outer.create_vector(module_bytes);
         let oxc = outer.create_string(oxc);
         let provenance = w::SourceProvenance::create(
             &mut outer,
@@ -605,10 +612,17 @@ impl crate::ParsedModule {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static MODULE_ENCODINGS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl o::ModuleFacts {
     /// Construction-only typed module bytes. This does not create provenance or
     /// a checked parsed module; consumers must use the sealed cache boundary.
     pub fn encode_module(&self, body: crate::ModuleBody, ranges: &[oxc_span::Span]) -> Vec<u8> {
+        #[cfg(test)]
+        MODULE_ENCODINGS.with(|count| count.set(count.get() + 1));
         let mut b = FlatBufferBuilder::new();
         let facts = facts(self, &mut b);
         let segments = b.create_vector(

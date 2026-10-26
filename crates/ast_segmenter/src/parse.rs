@@ -166,12 +166,13 @@ pub fn parse_module_with_prepared_declarations(
             &segments.iter().map(|s| s.span).collect::<Vec<_>>(),
         )?);
     }
+    let facts = std::sync::Arc::new(facts);
     let provenance = crate::SourceProvenance::extracted(
         source,
         crate::ParserConfig::for_path(path, package_format)?.resolved(parsed.program.source_type),
         body,
         &segments.iter().map(|s| s.span).collect::<Vec<_>>(),
-        &facts,
+        facts.clone(),
     )?;
     Ok(ParsedModule::new(
         parsed.program.source_type,
@@ -324,6 +325,152 @@ mod tests {
             Path::new(path),
             ModuleFormat::Esm,
         )
+    }
+
+    #[test]
+    fn sealed_extraction_encodes_once_through_clones_and_cache_framing() {
+        use crate::wire_encode::MODULE_ENCODINGS;
+
+        for (path, source) in [
+            ("file.mjs", "export const first = 1, second = first;"),
+            ("file.cjs", "module.exports = require('./dep');"),
+        ] {
+            let before = MODULE_ENCODINGS.with(std::cell::Cell::get);
+            let parsed = parse(source, path).unwrap();
+            let clone = parsed.clone();
+            assert!(std::ptr::eq(
+                parsed.owned_facts().unwrap(),
+                clone.owned_facts().unwrap()
+            ));
+            let bytes = parsed.to_flatbuffer(source, "test").unwrap();
+            assert_eq!(bytes, clone.to_flatbuffer(source, "test").unwrap());
+            let (_, body, segments, facts, provenance) = clone.into_parts();
+            let restored =
+                ParsedModule::from_provenance(source, provenance, body, segments, facts).unwrap();
+            assert_eq!(bytes, restored.to_flatbuffer(source, "test").unwrap());
+            let wire = cache_flatbuffers::WireRecord::new(
+                bytes.clone().into(),
+                source,
+                restored.provenance().config().wire(),
+                "test",
+            )
+            .unwrap();
+            let borrowed = ParsedModule::from_wire(source, wire).unwrap();
+            assert_eq!(bytes, borrowed.to_flatbuffer(source, "test").unwrap());
+            assert!(borrowed.to_flatbuffer(source, "other parser").is_err());
+            assert_eq!(MODULE_ENCODINGS.with(std::cell::Cell::get), before + 1);
+        }
+    }
+
+    #[test]
+    fn sealed_extraction_checks_arbitrary_owned_and_serde_projections() {
+        let source = "export const first = 1, second = first;";
+        let parsed = parse(source, "file.mjs").unwrap();
+        let ranges = parsed.segments().iter().map(|s| s.span).collect::<Vec<_>>();
+        let config = parsed.provenance().config();
+        let verify = |provenance: &crate::SourceProvenance,
+                      source,
+                      body,
+                      ranges: &[Span],
+                      facts: &crate::owned::ModuleFacts| {
+            provenance.verify(source, config, body, ranges, facts.into())
+        };
+        let facts: crate::owned::ModuleFacts =
+            serde_cbor::from_slice(&serde_cbor::to_vec(parsed.owned_facts().unwrap()).unwrap())
+                .unwrap();
+        let provenance: crate::SourceProvenance =
+            serde_cbor::from_slice(&serde_cbor::to_vec(parsed.provenance()).unwrap()).unwrap();
+        let mut changed_ranges = ranges.clone();
+        changed_ranges[0].end -= 1;
+        assert!(verify(
+            parsed.provenance(),
+            source,
+            parsed.body(),
+            &changed_ranges,
+            parsed.owned_facts().unwrap(),
+        )
+        .is_err());
+        assert!(verify(
+            parsed.provenance(),
+            source,
+            ModuleBody::CommonJs { span: ranges[0] },
+            &ranges,
+            parsed.owned_facts().unwrap(),
+        )
+        .is_err());
+        let (_, body, segments, storage, seal) = parsed.clone().into_parts();
+        let crate::views::FactsStorage::Owned(mut shared_facts) = storage else {
+            panic!("cold extraction is owned");
+        };
+        *std::sync::Arc::make_mut(&mut shared_facts).ecco_declarations_hash_mut() =
+            Default::default();
+        assert!(ParsedModule::from_provenance(
+            source,
+            seal,
+            body,
+            segments,
+            crate::views::FactsStorage::Owned(shared_facts),
+        )
+        .is_err());
+        verify(
+            parsed.provenance(),
+            source,
+            parsed.body(),
+            &ranges,
+            parsed.owned_facts().unwrap(),
+        )
+        .unwrap();
+        for provenance in [parsed.provenance(), &provenance] {
+            verify(provenance, source, parsed.body(), &ranges, &facts).unwrap();
+            assert!(verify(provenance, source, parsed.body(), &changed_ranges, &facts).is_err());
+            assert!(verify(
+                provenance,
+                source,
+                ModuleBody::CommonJs { span: ranges[0] },
+                &ranges,
+                &facts,
+            )
+            .is_err());
+            assert!(verify(
+                provenance,
+                "export const other = 1;",
+                parsed.body(),
+                &ranges,
+                &facts
+            )
+            .is_err());
+            let mut projection = serde_cbor::value::to_value(&facts).unwrap();
+            let serde_cbor::Value::Map(fields) = &mut projection else {
+                panic!("facts projection is a map");
+            };
+            fields.insert(
+                serde_cbor::Value::Text("commonjs".into()),
+                serde_cbor::Value::Bool(true),
+            );
+            let changed = serde_cbor::value::from_value(projection).unwrap();
+            assert!(verify(provenance, source, parsed.body(), &ranges, &changed).is_err());
+            let unrelated = parse("export const other = 1;", "file.mjs").unwrap();
+            assert!(verify(
+                provenance,
+                source,
+                parsed.body(),
+                &ranges,
+                unrelated.owned_facts().unwrap(),
+            )
+            .is_err());
+        }
+        let restored = ParsedModule::from_provenance(
+            source,
+            provenance,
+            parsed.body(),
+            parsed.owned_segments().unwrap().to_vec(),
+            facts,
+        )
+        .unwrap();
+        assert_eq!(
+            parsed.to_flatbuffer(source, "test").unwrap(),
+            restored.to_flatbuffer(source, "test").unwrap()
+        );
     }
 
     #[test]

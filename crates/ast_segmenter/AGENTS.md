@@ -8,8 +8,11 @@ wire storage. `ParsedModule` keeps wire ranges lazy; only graph adapters build
 owned ranges. Encoding is cold-path and checks extraction provenance first.
 Wire readers never unpack Ecco or AST trees; semantic validation is a separate
 required gate from structural/source verification.
-Source provenance hashes the typed module on extraction, not a per-file Serde
-projection. Wire provenance retains its verified owner and checks exact table/
+Cold provenance retains one immutable shared facts/ranges/body owner and its
+once-encoded typed module bytes. Identity reuse requires that exact facts owner
+and matching body/ranges; arbitrary owned/Serde projections still recompute and
+compare the original seal. Cache framing reuses the original bytes and seal.
+Wire provenance retains its verified owner and checks exact table/
 range identity without repeatedly verifying or hashing immutable module bytes.
 
 ## Parser stack
