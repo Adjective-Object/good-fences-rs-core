@@ -21,7 +21,8 @@
   property/receiver pairs are sorted and unique. Target safety stays derived.
 - Cache ESM top-level suspension spans only; async dependency/SCC state and
   require compatibility belong to the linker/native host, not sidecars.
-- Bound FlatBuffer byte/depth/table/apparent-size verification; validate source hash,
+- Bound FlatBuffer depth/table verification and apparent size relative to actual
+  buffer bytes, without a fixed facts byte cap; validate source hash,
   parser identity, UTF-8 ranges, local IDs, links and order on both boundaries.
 - Preserve sealed extraction provenance on both boundaries and in `to_parsed`;
   never bless unrelated parsed facts by hashing separately supplied source text.
@@ -77,7 +78,7 @@
   closed tempfile paths and std atomic rename, never unlink-before-rename. Last publisher wins;
   recheck source before publish/return. Cache failures are reported nonfatally,
   source/parse failures are fatal. Never clean another writer's staging files.
-- Valid owned extraction that exceeds wire limits remains an uncached success;
-  never allow untrusted wire input through that cold-only fallback.
+- Cold construction must encode and fully validate wire storage; propagate
+  encoding/validation failures, never retain a checked-owned fallback.
 - Exclude both `.seg.fb`/`.seg.cbor` and their staging siblings from inventory;
   never read legacy formats as valid or delete old user files during migration.

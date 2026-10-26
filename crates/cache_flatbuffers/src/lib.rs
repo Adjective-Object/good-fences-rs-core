@@ -34,6 +34,7 @@ use std::{ops::Range, sync::Arc};
 
 use eyre::{ensure, Result};
 
+/// Independent resolution and upstream-map limit; source facts have no byte cap.
 pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
 pub const SCHEMA_VERSION: u32 = 22;
 pub const EXTRACTOR_VERSION: u32 = 36;
@@ -64,11 +65,11 @@ pub fn parser_config_matches(
         && (requested.detect_esm() || requested.commonjs() == effective.commonjs())
 }
 
-fn options() -> flatbuffers::VerifierOptions {
+fn options(buffer_bytes: usize) -> flatbuffers::VerifierOptions {
     flatbuffers::VerifierOptions {
         max_depth: 64,
         max_tables: 2_097_152,
-        max_apparent_size: MAX_RECORD_BYTES * 4,
+        max_apparent_size: buffer_bytes.saturating_mul(4),
         ..Default::default()
     }
 }
@@ -82,11 +83,8 @@ pub struct WireEcco {
 
 impl WireEcco {
     pub fn new(bytes: Arc<[u8]>) -> Result<Self> {
-        ensure!(
-            bytes.len() <= MAX_RECORD_BYTES,
-            "Ecco buffer exceeds byte limit"
-        );
-        let root = flatbuffers::root_with_opts::<wire::ParsedFile<'_>>(&options(), &bytes)?;
+        let root =
+            flatbuffers::root_with_opts::<wire::ParsedFile<'_>>(&options(bytes.len()), &bytes)?;
         verify::ecco(root)?;
         Ok(Self { bytes })
     }
@@ -120,7 +118,6 @@ impl WireRecord {
         config: wire::ParserConfig,
         oxc: &str,
     ) -> Result<Self> {
-        ensure!(bytes.len() <= MAX_RECORD_BYTES, "cache exceeds byte limit");
         let payload_end = bytes
             .len()
             .checked_sub(CHECKSUM_BYTES)
@@ -216,7 +213,7 @@ fn verified_root(bytes: &[u8]) -> Result<wire::CacheRecord<'_>> {
         "cache size prefix mismatch"
     );
     Ok(wire::size_prefixed_root_as_cache_record_with_opts(
-        &options(),
+        &options(bytes.len()),
         bytes,
     )?)
 }
@@ -227,7 +224,7 @@ fn verified_module(bytes: &[u8]) -> Result<wire::CachedModule<'_>> {
         "invalid module FlatBuffer identifier"
     );
     Ok(flatbuffers::root_with_opts::<wire::CachedModule<'_>>(
-        &options(),
+        &options(bytes.len()),
         bytes,
     )?)
 }
@@ -235,10 +232,6 @@ fn verified_module(bytes: &[u8]) -> Result<wire::CachedModule<'_>> {
 /// Append the content checksum to a finished typed record. Construction only;
 /// readers never rebuild or re-encode the record to validate canonical bytes.
 pub fn frame(payload: &[u8]) -> Result<Vec<u8>> {
-    ensure!(
-        payload.len() <= MAX_RECORD_BYTES - CHECKSUM_BYTES,
-        "cache exceeds byte limit"
-    );
     let root = verified_root(payload)?;
     verify::module(verified_module(root.module().bytes())?)?;
     let mut bytes = Vec::with_capacity(payload.len() + CHECKSUM_BYTES);

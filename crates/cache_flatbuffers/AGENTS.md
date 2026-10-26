@@ -25,6 +25,9 @@
 - `WireRecord` owns immutable shared bytes, not decoded DTOs. Verify both outer
   and nested roots with bounded runtime verification before any generated reads.
   Reject unknown discriminants independently; FlatBuffers permits them by default.
+- Source facts/Ecco have no fixed byte cap; bound verifier apparent size to four
+  times each actual buffer, retaining depth/table limits. `MAX_RECORD_BYTES`
+  applies only to independent resolution and upstream-map records.
 - `WireEcco` provides the same immutable verified ownership for standalone
   precursors; Ecco validates semantic links through borrowed views before solve.
 - The nested module is itself a typed FlatBuffer, never CBOR or an opaque DTO.

@@ -142,6 +142,37 @@ fn reads_borrow_the_shared_buffer_including_nested_strings() {
 }
 
 #[test]
+fn large_facts_and_standalone_ecco_remain_verified_and_borrowed() {
+    let mut module = module();
+    let ecco = module.facts.ecco.as_mut().unwrap();
+    ecco.symbols.push(w::ParsedSymbolT {
+        name: "x".repeat(17 * 1024 * 1024),
+        ..Default::default()
+    });
+    let mut builder = flatbuffers::FlatBufferBuilder::new();
+    let root = ecco.pack(&mut builder);
+    builder.finish(root, None);
+    let ecco_owner = WireEcco::new(builder.finished_data().into()).unwrap();
+    assert_eq!(
+        ecco_owner.root().symbols().get(0).name(),
+        ecco.symbols[0].name
+    );
+
+    let owner = load(frame(&payload(&record(&module))).unwrap()).unwrap();
+    let name = owner
+        .module()
+        .facts()
+        .ecco()
+        .unwrap()
+        .symbols()
+        .get(0)
+        .name();
+    assert_eq!(name, ecco_owner.root().symbols().get(0).name());
+    let start = owner.bytes().as_ptr() as usize;
+    assert!((start..start + owner.bytes().len()).contains(&(name.as_ptr() as usize)));
+}
+
+#[test]
 fn optional_zero_ids_remain_distinct_from_absence() {
     let mut module = module();
     module.facts.references = vec![
@@ -197,13 +228,12 @@ fn rejects_stale_metadata_and_source_or_seal_repairing() {
 }
 
 #[test]
-fn rejects_truncation_oversize_legacy_data_and_bad_roots() {
+fn rejects_truncation_legacy_data_and_bad_roots() {
     let payload = payload(&record(&module()));
     let bytes = frame(&payload).unwrap();
     for length in 0..bytes.len() {
         assert!(load(bytes[..length].to_vec()).is_err(), "{length}");
     }
-    assert!(load(vec![0; MAX_RECORD_BYTES + 1]).is_err());
     assert!(load(checksum(&[0xa1, 0x61, b'x', 0x01])).is_err());
     for (offset, value) in [(0, u32::MAX), (4, u32::MAX), (8, 0)] {
         let mut damaged = payload.clone();

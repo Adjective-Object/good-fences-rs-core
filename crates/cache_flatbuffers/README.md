@@ -38,10 +38,13 @@ vector contains a **typed `CachedModule` FlatBuffer** (`GFSM`). Nesting enables
 an exact immutable module-byte extraction seal without serializing the facts
 again during provenance verification. It is not a CBOR envelope.
 
-`WireRecord::new` bounds the complete record to 16 MiB, verifies the checksum,
+`WireRecord::new` verifies the checksum,
 size prefix, identifier, schema/extractor/parser identities, source hash/length,
 configuration, and extraction module digest. Both roots independently receive
-FlatBuffers runtime verification with bounded depth, tables, and apparent size.
+FlatBuffers runtime verification with bounded depth and tables, and apparent
+size bounded to four times the actual buffer length. Source facts and standalone
+Ecco buffers have no fixed byte cap; wire-format offset/span limits still apply.
+Independent resolution and upstream-map records retain their 16 MiB limits.
 A borrowed traversal then rejects unknown enum/union discriminants, absent union
 values, invalid MultiSpan lengths, duplicate hazard fields, and unordered/duplicate
 effect-map keys. No object API `unpack` is called.
@@ -108,7 +111,7 @@ ordering and indices before construction. Warm `.upstream.seg.fb` readers retain
 immutable bytes and use same-line greatest-lower-bound lookup without JSON/DTO
 unpacking, preserving explicit unmapped boundaries.
 
-Ecco's precursor substage is usable independently: `WireEcco` bounds and
+Ecco's precursor substage is usable independently: `WireEcco`
 structurally verifies a standalone typed `ParsedFile`, then owns its immutable
 bytes. `validate_ecco` also checks discriminants, effect-source order and ID
 widths for embedded roots. Ecco's own view-based semantic validation remains a
@@ -172,6 +175,6 @@ cargo clippy -p cache_flatbuffers --all-targets -- -D warnings
 Tests cover borrowed reads, immutable sharing, optional zero IDs, every union
 family, recursive contracts, ESM/CJS separation, stale identities, source/config
 and extraction-seal mismatches, corrupted/truncated roots and vectors, legacy
-non-FlatBuffer data, size/depth limits, unknown discriminants and ordered maps.
+non-FlatBuffer data, depth limits, large facts, unknown discriminants and ordered maps.
 Synthetic wire-shape tests are not a substitute for executable cache integration
 tests.

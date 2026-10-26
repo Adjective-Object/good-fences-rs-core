@@ -7,7 +7,7 @@ use std::{
 use ast_segmenter::ModuleFormat;
 use eyre::{ensure, WrapErr};
 
-use crate::{CacheRecord, ParserConfig, MAX_RECORD_BYTES};
+use crate::{CacheRecord, ParserConfig};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CacheMode {
@@ -190,7 +190,7 @@ pub fn load_or_parse_with_prepared_declarations(
 
 fn read_cache(path: &Path) -> Result<Vec<u8>, MissReason> {
     let _span = tracing::info_span!("cache.read").entered();
-    let file = File::open(path).map_err(|e| {
+    let mut file = File::open(path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             MissReason::Missing
         } else {
@@ -198,12 +198,8 @@ fn read_cache(path: &Path) -> Result<Vec<u8>, MissReason> {
         }
     })?;
     let mut bytes = Vec::new();
-    file.take(MAX_RECORD_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)
+    file.read_to_end(&mut bytes)
         .map_err(|e| MissReason::ReadFailure(format!("reading cache {}: {e}", path.display())))?;
-    if bytes.len() > MAX_RECORD_BYTES {
-        return Err(MissReason::InvalidRecord("cache exceeds byte limit".into()));
-    }
     Ok(bytes)
 }
 

@@ -1742,7 +1742,6 @@ fn flatbuffer_decoder_rejects_legacy_allocation_and_depth_bombs() {
         vec![0x5b, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
         vec![0x9f, 0xff],
         vec![0x81; 40],
-        vec![0; MAX_RECORD_BYTES + 1],
         [vec![0x9a, 0, 32, 0, 0], vec![0; 2_097_152]].concat(),
     ] {
         let config = ParserConfig::for_path(Path::new("empty.mjs"), ModuleFormat::Esm).unwrap();

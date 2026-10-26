@@ -28,22 +28,15 @@ impl CachedModule {
 /// module and wire allocation; no public constructor accepts an unchecked seal.
 #[derive(Debug, Clone)]
 pub struct CacheRecord {
-    wire: Option<cache_flatbuffers::WireRecord>,
+    wire: cache_flatbuffers::WireRecord,
     module: Arc<CachedModule>,
     source_len: u64,
     source_hash: [u8; 16],
-    write_error: Option<Arc<str>>,
 }
 
 impl PartialEq for CacheRecord {
     fn eq(&self, other: &Self) -> bool {
-        match (&self.wire, &other.wire) {
-            (Some(a), Some(b)) => a.bytes() == b.bytes(),
-            (None, None) => {
-                self.source_len == other.source_len && self.provenance() == other.provenance()
-            }
-            _ => false,
-        }
+        self.wire.bytes() == other.wire.bytes()
     }
 }
 impl Eq for CacheRecord {}
@@ -51,7 +44,7 @@ impl Eq for CacheRecord {}
 impl CacheRecord {
     #[cfg(test)]
     pub(crate) fn wire_bytes_for_test(&self) -> &[u8] {
-        self.wire.as_ref().unwrap().bytes()
+        self.wire.bytes()
     }
 
     pub fn schema(&self) -> u32 {
@@ -112,31 +105,11 @@ impl CacheRecord {
             source.len() <= u32::MAX as usize,
             "cache source exceeds span limit"
         );
-        let encoded = {
+        let bytes = {
             let _span = tracing::info_span!("cache.encode").entered();
             parsed.to_flatbuffer(source, OXC_REVISION)
-        }
-        .and_then(|bytes| Self::decode_owned(bytes, source, parsed.provenance().config()));
-        match encoded {
-            Ok(record) => Ok(record),
-            Err(error) => {
-                // Wire limits must not turn a valid extraction into a fatal
-                // source error. Only checked owned extraction may stay uncached;
-                // malformed persistent input can never enter this fallback.
-                crate::validate_parsed(source, parsed)?;
-                parsed.owned_facts()?;
-                Ok(Self {
-                    wire: None,
-                    module: Arc::new(CachedModule {
-                        parsed: parsed.clone(),
-                        segments: OnceLock::new(),
-                    }),
-                    source_len: source.len() as u64,
-                    source_hash: digest(source.as_bytes()),
-                    write_error: Some(format!("{error:#}").into()),
-                })
-            }
-        }
+        }?;
+        Self::decode_owned(bytes, source, parsed.provenance().config())
     }
 
     fn check_source(&self, source: &str) -> eyre::Result<()> {
@@ -169,13 +142,7 @@ impl CacheRecord {
     pub fn encode(&self, source: &str) -> eyre::Result<Vec<u8>> {
         let _span = tracing::info_span!("cache.encode").entered();
         self.check_source(source)?;
-        match &self.wire {
-            Some(wire) => Ok(wire.bytes().to_vec()),
-            None => eyre::bail!(
-                "{}",
-                self.write_error.as_deref().unwrap_or("uncacheable record")
-            ),
-        }
+        Ok(self.wire.bytes().to_vec())
     }
 
     /// Invalid/stale records are errors here; filesystem callers treat them as misses.
@@ -195,7 +162,6 @@ impl CacheRecord {
         source: &str,
         config: ParserConfig,
     ) -> eyre::Result<Self> {
-        ensure!(bytes.len() <= MAX_RECORD_BYTES, "cache exceeds byte limit");
         Self::decode_shared(Arc::from(bytes), source, config)
     }
 
@@ -228,9 +194,8 @@ impl CacheRecord {
         Ok(Self {
             source_len: wire.root().source_len(),
             source_hash: std::array::from_fn(|i| wire.root().source_hash().bytes().get(i)),
-            wire: Some(wire),
+            wire,
             module: Arc::new(module),
-            write_error: None,
         })
     }
 

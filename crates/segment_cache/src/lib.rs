@@ -21,7 +21,7 @@ use eyre::ensure;
 use oxc_span::Span;
 pub use validate::validate_parsed;
 
-pub use cache_flatbuffers::{EXTRACTOR_VERSION, MAX_RECORD_BYTES, SCHEMA_VERSION};
+pub use cache_flatbuffers::{EXTRACTOR_VERSION, SCHEMA_VERSION};
 pub const OXC_REVISION: &str = "73e6b564737a29ecebf428d276421dcc492836df";
 
 mod records;

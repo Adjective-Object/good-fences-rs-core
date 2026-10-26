@@ -503,14 +503,13 @@ fn declaration_changes_invalidate_disk_and_opaque_commonjs() {
 }
 
 #[test]
-fn corruption_truncation_and_oversize_are_repaired_misses() {
+fn corruption_and_truncation_are_repaired_misses() {
     let (_dir, path) = setup();
     let cold = run(&path).unwrap();
     let bytes = fs::read(sidecar_path(&path)).unwrap();
     for broken in [
         b"not a FlatBuffer".to_vec(),
         bytes[..bytes.len() / 2].to_vec(),
-        vec![0; MAX_RECORD_BYTES + 1],
     ] {
         fs::write(sidecar_path(&path), broken).unwrap();
         let outcome = run(&path).unwrap();
@@ -552,29 +551,6 @@ fn interrupted_publication_preserves_valid_destination_and_cleans_staging() {
         || Ok(())
     )
     .is_err());
-    assert_eq!(fs::read(sidecar_path(&path)).unwrap(), previous);
-    no_staging(&dir);
-}
-
-#[test]
-fn valid_extraction_exceeding_wire_limits_remains_an_uncached_success() {
-    let (dir, path) = setup();
-    run(&path).unwrap();
-    let previous = fs::read(sidecar_path(&path)).unwrap();
-    // The binding and Ecco symbol both persist this name, exceeding the wire
-    // limit without needing a large/deep syntax tree or excessive source size.
-    let source = format!("export const {} = 1;", "x".repeat(MAX_RECORD_BYTES / 2));
-    fs::write(&path, &source).unwrap();
-    let outcome = run(&path).unwrap();
-    assert!(matches!(outcome.status, CacheStatus::Miss(_)));
-    assert!(matches!(outcome.write, CacheWrite::Failed(_)));
-    assert_eq!(outcome.source, source);
-    assert!(outcome
-        .record
-        .to_parsed(&source)
-        .unwrap()
-        .owned_facts()
-        .is_ok());
     assert_eq!(fs::read(sidecar_path(&path)).unwrap(), previous);
     no_staging(&dir);
 }

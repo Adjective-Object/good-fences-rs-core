@@ -95,8 +95,10 @@ impl WireSourceMap {
             flatbuffers::buffer_has_identifier(payload, "GFUM", false),
             "invalid source map cache identifier"
         );
-        let root =
-            flatbuffers::root_with_opts::<wire::UpstreamMap<'_>>(&crate::options(), payload)?;
+        let root = flatbuffers::root_with_opts::<wire::UpstreamMap<'_>>(
+            &crate::options(MAX_RECORD_BYTES),
+            payload,
+        )?;
         ensure!(
             root.schema() == SCHEMA_VERSION && root.extractor() == EXTRACTOR_VERSION,
             "source map cache version mismatch"

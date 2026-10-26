@@ -86,8 +86,10 @@ without parsing again; package-policy changes or changed source bytes invalidate
 the decision. Borrowed semantic validation uses the sealed effective mode.
 
 `CacheRecord::from_parsed` and `decode` validate all UTF-8 ranges,
-source-local IDs, links and ordering. Decode limits input to 16 MiB, 2,097,152
-tables, 64 levels and 64 MiB apparent size before generated access. Both roots
+source-local IDs, links and ordering. Decode limits verification to 2,097,152
+tables, 64 levels and apparent size at most four times each actual buffer length
+before generated access, without a fixed facts byte cap. Wire offset/span limits
+still apply. Both roots
 are structurally verified; unknown discriminants, wrong size prefixes and checksums
 are rejected. No Serde, object `unpack`, owned-tree reconstruction or
 decode/re-encode canonical comparison occurs. This is an untrusted cache, not an
@@ -182,10 +184,9 @@ No negative diagnostics are cached: failures are regenerated with the current
 path. Cache read/write errors are nonfatal and explicitly reported in the
 outcome, not logged behind the caller's back. `ReadOnly` suppresses writes;
 `Disabled` suppresses both cache reads and writes.
-If a valid owned extraction exceeds wire byte/depth/table limits, it remains an
-uncached success and publication reports `CacheWrite::Failed`, preserving any old
-sidecar. This exceptional cold record retains checked owned facts; disk hits
-always retain verified wire storage. Untrusted wire input cannot use this fallback.
+Cold construction and disk hits both retain fully verified wire storage.
+Encoding or validation failures propagate as errors, never as checked-owned
+fallback records. Filesystem publication failures remain nonfatal and reported.
 
 `load_or_parse_with_declarations(..., &LocalFacts)` includes effective contracts
 in identity for ESM and opaque CJS; `load_or_parse` uses the default JavaScript
