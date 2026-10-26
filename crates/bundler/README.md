@@ -2012,6 +2012,12 @@ Read-only `eval` values, including ESM/CJS primordial identity tables, remain
 native free references with the host function's identity. Calls, construction,
 tags and mutations through an unshadowed eval reference remain unsupported.
 The bundler never injects an evaluator or compiles source strings at runtime.
+Legacy bundled global-object helpers that invoke `eval` need an explicit maintained
+package repair, not a relaxed syntax gate. Modern browser/module-worker packages
+can use native `globalThis`; compose their shipped maps through the edit rather
+than retaining stale generated offsets. Regression coverage checks upstream
+provenance, deferred exactly-once CJS activation, host-global identity under
+name collisions and execution without access to `eval`/`Function`.
 
 ESM inputs may read `module`/`exports`, probe `typeof require`, or select bare
 `require` in conditional value branches for environment detection (including

@@ -752,6 +752,92 @@ fn upstream_source_maps_repair_conditional_package_barrels_and_implementations_i
 }
 
 #[test]
+fn upstream_source_maps_preserve_explicit_csp_safe_package_global_helper_repairs() {
+    let dir = TmpDir::new();
+    let path = "node_modules/@vendor/global/index.js";
+    let helper = "var t={};(function(t,e){t.exports=globalThis})(t,t.exports);globalThis.globalHelperRuns++;module.exports=t.exports;";
+    write(
+        dir.root(),
+        "node_modules/@vendor/global/package.json",
+        r#"{"name":"@vendor/global","main":"index.js"}"#,
+    );
+    write(
+        dir.root(),
+        path,
+        &helper.replace("t.exports=globalThis", "t.exports=(0,eval)('this')"),
+    );
+    write(
+        dir.root(),
+        "main.mjs",
+        "export const globalThis = 'source-local'; export function load() { return require('@vendor/global'); }",
+    );
+    let mut config = options();
+    config.resolver.target_env = TargetEnv::Browser;
+    config.output.source_maps = true;
+    config.cache = CacheMode::Disabled;
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let report = format!("{:#}", session.build(&config).err().unwrap());
+    assert!(
+        report.contains("unsupported unshadowed eval operation"),
+        "{report}"
+    );
+
+    let original = "module.exports = globalThis;\nglobalThis.globalHelperRuns++;\n";
+    let mut builder = oxc_sourcemap::SourceMapBuilder::default();
+    let source = builder.add_source_and_content("webpack:///global.js", original);
+    for (needle, generated, line, column) in [
+        ("globalThis", helper.find("globalThis").unwrap(), 0, 17),
+        (
+            "globalHelperRuns",
+            helper.find("globalHelperRuns").unwrap(),
+            1,
+            11,
+        ),
+    ] {
+        let name = builder.add_name(needle);
+        builder.add_token(0, generated as u32, line, column, Some(source), Some(name));
+    }
+    write(
+        dir.root(),
+        "node_modules/@vendor/global/index.js.map",
+        &builder.into_sourcemap().to_json_string(),
+    );
+    write(
+        dir.root(),
+        path,
+        &format!("{helper}\n//# sourceMappingURL=index.js.map\n"),
+    );
+    let repaired = session.build(&config).unwrap();
+    assert_eq!(repaired.product.artifacts.backend, link::Backend::Native);
+    let (map, line, column) = mapped_token(&repaired.product.artifacts, "globalHelperRuns");
+    let table = map.generate_lookup_table();
+    let token = map.lookup_source_view_token(&table, line, column).unwrap();
+    assert_eq!(token.get_source(), Some("webpack:///global.js"));
+    assert_eq!(token.get_source_content(), Some(original));
+    assert_eq!((token.get_src_line(), token.get_src_col()), (1, 11));
+    assert_eq!(
+        observe_named(
+            &repaired.product.artifacts,
+            "globalThis.globalHelperRuns = 0;
+             for (const name of ['eval', 'Function']) {
+                 Object.defineProperty(globalThis, name, {get() { throw new Error('unsafe-eval'); }});
+             }
+             const ns = await import('./main.mjs');
+             console.log(globalThis.globalHelperRuns, ns.globalThis);
+             console.log(ns.load() === globalThis, ns.load() === globalThis, globalThis.globalHelperRuns);",
+        ),
+        b"0 source-local\ntrue true 1\n"
+    );
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&repaired.product, &noop.product));
+    let cold = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(repaired.product.artifacts, cold.product.artifacts);
+}
+
+#[test]
 fn source_maps_reserve_case_insensitive_resource_and_parent_paths() {
     let dir = TmpDir::new();
     write(dir.root(), "main.mjs", "export const value = 1;");
