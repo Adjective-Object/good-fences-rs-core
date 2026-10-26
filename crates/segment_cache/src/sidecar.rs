@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File},
-    io::{Read, Write},
+    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -188,19 +188,18 @@ pub fn load_or_parse_with_prepared_declarations(
     load(logger, path, package, mode, declarations, || Ok(()))
 }
 
-fn read_cache(path: &Path) -> Result<Vec<u8>, MissReason> {
+fn read_cache(path: &Path) -> Result<cache_flatbuffers::SharedBytes, MissReason> {
     let _span = tracing::info_span!("cache.read").entered();
-    let mut file = File::open(path).map_err(|e| {
+    let file = File::open(path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             MissReason::Missing
         } else {
             MissReason::ReadFailure(format!("opening cache {}: {e}", path.display()))
         }
     })?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
-        .map_err(|e| MissReason::ReadFailure(format!("reading cache {}: {e}", path.display())))?;
-    Ok(bytes)
+    cache_flatbuffers::SharedBytes::snapshot(file).map_err(|e| {
+        MissReason::ReadFailure(format!("snapshotting cache {}: {e:#}", path.display()))
+    })
 }
 
 fn unchanged(path: &Path, original: &[u8]) -> eyre::Result<()> {
@@ -271,7 +270,7 @@ fn load_prepared_inner(
         Err(MissReason::Disabled)
     } else {
         read_cache(&sidecar_path(path)).and_then(|bytes| {
-            CacheRecord::decode_owned(bytes, source, config)
+            CacheRecord::decode_backing(bytes, source, config)
                 .and_then(|record| {
                     record.check_declarations(declarations)?;
                     Ok(record)
@@ -307,6 +306,7 @@ fn load_prepared_inner(
                 .wrap_err_with(|| {
                     format!("constructing source cache record for {}", path.display())
                 })?;
+            drop(parsed);
             drop(extraction_span);
             let write = if mode == CacheMode::ReadWrite {
                 match publish(path, source, prepared.original, &record, before_publish) {
@@ -355,8 +355,8 @@ fn publish(
     let _span = tracing::info_span!("cache.publish").entered();
     let destination = sidecar_path(path);
     let bytes = record
-        .encode(source)
-        .wrap_err_with(|| format!("encoding cache {}", destination.display()))?;
+        .wire_bytes(source)
+        .wrap_err_with(|| format!("checking cache source for {}", destination.display()))?;
     let parent = destination
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -371,7 +371,7 @@ fn publish(
         .tempfile_in(parent)
         .wrap_err_with(|| format!("creating cache staging file for {}", destination.display()))?;
     staging
-        .write_all(&bytes)
+        .write_all(bytes)
         .wrap_err_with(|| format!("writing cache staging file for {}", destination.display()))?;
     staging
         .flush()

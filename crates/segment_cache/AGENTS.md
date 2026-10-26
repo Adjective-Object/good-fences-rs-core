@@ -80,5 +80,10 @@
   source/parse failures are fatal. Never clean another writer's staging files.
 - Cold construction must encode and fully validate wire storage; propagate
   encoding/validation failures, never retain a checked-owned fallback.
+- Production cold/hit/disabled/read-only/write-failure records retain shared
+  private mapped snapshots. Stream disk hits before verification; release cold
+  encoded vectors/owned extraction and publish borrowed checked bytes. Snapshot
+  IO/mapping failures are fatal without heap fallback. Mutable sidecar paths
+  are never mapping backing, so old AST/graph/Ecco generations survive edits.
 - Exclude both `.seg.fb`/`.seg.cbor` and their staging siblings from inventory;
   never read legacy formats as valid or delete old user files during migration.

@@ -26,8 +26,10 @@ mod resolution_generated;
 pub use resolution_generated::resolution_cache as resolution_wire;
 pub mod resolution;
 
+mod bytes;
 mod source_map;
 mod verify;
+pub use bytes::SharedBytes;
 pub use source_map::{MapData, MapSource, WireSourceMap};
 
 use std::{ops::Range, sync::Arc};
@@ -78,11 +80,15 @@ fn options(buffer_bytes: usize) -> flatbuffers::VerifierOptions {
 /// Production nested Ecco tables instead borrow their verified module owner.
 #[derive(Clone, Debug)]
 pub struct WireEcco {
-    bytes: Arc<[u8]>,
+    bytes: SharedBytes,
 }
 
 impl WireEcco {
     pub fn new(bytes: Arc<[u8]>) -> Result<Self> {
+        Self::from_backing(bytes.into())
+    }
+
+    pub fn from_backing(bytes: SharedBytes) -> Result<Self> {
         let root =
             flatbuffers::root_with_opts::<wire::ParsedFile<'_>>(&options(bytes.len()), &bytes)?;
         verify::ecco(root)?;
@@ -98,6 +104,10 @@ impl WireEcco {
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
+
+    pub fn backing(&self) -> &SharedBytes {
+        &self.bytes
+    }
 }
 /// Immutable, structurally verified bytes with source/configuration integrity.
 ///
@@ -106,7 +116,7 @@ impl WireEcco {
 /// No mutable byte access, unpacking, or self-referential references are retained.
 #[derive(Clone, Debug)]
 pub struct WireRecord {
-    bytes: Arc<[u8]>,
+    bytes: SharedBytes,
     payload_end: usize,
     module: Range<usize>,
 }
@@ -114,6 +124,15 @@ pub struct WireRecord {
 impl WireRecord {
     pub fn new(
         bytes: Arc<[u8]>,
+        source: &str,
+        config: wire::ParserConfig,
+        oxc: &str,
+    ) -> Result<Self> {
+        Self::from_backing(bytes.into(), source, config, oxc)
+    }
+
+    pub fn from_backing(
+        bytes: SharedBytes,
         source: &str,
         config: wire::ParserConfig,
         oxc: &str,
@@ -199,6 +218,10 @@ impl WireRecord {
     }
 
     pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    pub fn backing(&self) -> &SharedBytes {
         &self.bytes
     }
 }

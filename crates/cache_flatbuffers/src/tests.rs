@@ -142,6 +142,38 @@ fn reads_borrow_the_shared_buffer_including_nested_strings() {
 }
 
 #[test]
+fn mapped_record_and_standalone_ecco_borrow_and_share_private_backing() {
+    let directory = tempfile::tempdir_in(".").unwrap();
+    let bytes = frame(&payload(&record(&module()))).unwrap();
+    let backing = SharedBytes::snapshot_in(directory.path(), bytes.as_slice()).unwrap();
+    let owner = WireRecord::from_backing(backing, SOURCE, w::ParserConfig::default(), OXC).unwrap();
+    assert!(owner.backing().is_mapped());
+    let name = owner.module().facts().bindings().get(0).name();
+    let range =
+        owner.bytes().as_ptr() as usize..owner.bytes().as_ptr() as usize + owner.bytes().len();
+    assert!(range.contains(&(name.as_ptr() as usize)));
+    let clone = owner.clone();
+    assert_eq!(clone.bytes().as_ptr(), owner.bytes().as_ptr());
+    drop(owner);
+    assert_eq!(clone.module().facts().bindings().get(0).name(), "message");
+    drop(clone);
+
+    let mut builder = flatbuffers::FlatBufferBuilder::new();
+    let root = w::ParsedFileT::default().pack(&mut builder);
+    builder.finish(root, None);
+    let backing = SharedBytes::snapshot_in(directory.path(), builder.finished_data()).unwrap();
+    let ecco = WireEcco::from_backing(backing).unwrap();
+    assert!(ecco.backing().is_mapped());
+    let clone = ecco.clone();
+    assert_eq!(ecco.bytes().as_ptr(), clone.bytes().as_ptr());
+    drop(ecco);
+    assert_eq!(clone.root().symbols().len(), 0);
+    drop(clone);
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+    directory.close().unwrap();
+}
+
+#[test]
 fn large_facts_and_standalone_ecco_remain_verified_and_borrowed() {
     let mut module = module();
     let ecco = module.facts.ecco.as_mut().unwrap();

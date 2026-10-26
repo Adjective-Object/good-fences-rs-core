@@ -1,4 +1,5 @@
 use super::*;
+use std::io::Read;
 use test_tmpdir::TmpDir;
 
 const SOURCE: &str = "import {x as y} from './dep'; export const value = y;";
@@ -141,6 +142,7 @@ fn missing_source_retains_filename_and_io_cause() {
 fn cold_warm_and_cache_modes() {
     let (_dir, path) = setup();
     let cold = run(&path).unwrap();
+    assert!(cold.record.is_mapped_for_test());
     assert_eq!(cold.status, CacheStatus::Miss(MissReason::Missing));
     assert_eq!(cold.write, CacheWrite::Stored);
     let bytes = fs::read(sidecar_path(&path)).unwrap();
@@ -150,6 +152,7 @@ fn cold_warm_and_cache_modes() {
         .unwrap();
     let parses = ast_segmenter::module_parse_count();
     let warm = run(&path).unwrap();
+    assert!(warm.record.is_mapped_for_test());
     assert_eq!(warm.status, CacheStatus::Hit);
     assert_eq!(warm.write, CacheWrite::NotRequested);
     assert_eq!(cold.record, warm.record);
@@ -179,6 +182,7 @@ fn cold_warm_and_cache_modes() {
     .unwrap();
     assert_eq!(disabled.status, CacheStatus::Miss(MissReason::Disabled));
     assert_eq!(disabled.write, CacheWrite::NotRequested);
+    assert!(disabled.record.is_mapped_for_test());
     fs::remove_file(sidecar_path(&path)).unwrap();
     let readonly = load_or_parse(
         &logger::StdioLogger::new(),
@@ -188,6 +192,7 @@ fn cold_warm_and_cache_modes() {
     )
     .unwrap();
     assert_eq!(readonly.write, CacheWrite::NotRequested);
+    assert!(readonly.record.is_mapped_for_test());
     assert!(!sidecar_path(&path).exists());
     assert_eq!(cold.record, readonly.record);
 }
@@ -604,6 +609,7 @@ fn replacement_failure_is_nonfatal_and_does_not_remove_destination() {
     fs::create_dir(&destination).unwrap();
     fs::write(destination.join("keep"), b"do not remove").unwrap();
     let outcome = run(&path).unwrap();
+    assert!(outcome.record.is_mapped_for_test());
     assert!(matches!(outcome.write, CacheWrite::Failed(_)));
     assert_eq!(
         fs::read(destination.join("keep")).unwrap(),
@@ -620,6 +626,70 @@ fn replacement_failure_is_nonfatal_and_does_not_remove_destination() {
             .specifier(),
         "./dep"
     );
+    no_staging(&dir);
+}
+
+#[test]
+fn retained_records_and_ast_ecco_owners_survive_cache_replacement_and_corruption() {
+    let (dir, path) = setup();
+    let cold = run(&path).unwrap();
+    let warm = run(&path).unwrap();
+    assert!(cold.record.is_mapped_for_test());
+    assert!(warm.record.is_mapped_for_test());
+    let record = warm.record.clone();
+    let parsed = record.to_parsed(SOURCE).unwrap();
+    let facts = parsed.clone().into_facts();
+    let ecco = facts.ecco_source().unwrap().unwrap();
+    let original = record.wire_bytes_for_test().as_ptr();
+    assert_eq!(
+        record.wire_bytes_for_test().as_ptr(),
+        warm.record.wire_bytes_for_test().as_ptr()
+    );
+    let dependency = parsed
+        .facts()
+        .dependencies()
+        .get(0)
+        .unwrap()
+        .specifier()
+        .as_ptr();
+    drop(parsed);
+    drop(cold);
+    drop(warm);
+
+    // Republish while old generations remain live, then mutate/truncate that
+    // mutable pathname. Neither operation may alter any verified mapped bytes.
+    publish(&path, SOURCE, SOURCE.as_bytes(), &record, || Ok(())).unwrap();
+    fs::write(sidecar_path(&path), b"corrupted").unwrap();
+    assert_eq!(record.wire_bytes_for_test().as_ptr(), original);
+    assert_eq!(
+        facts.view().dependencies().get(0).unwrap().specifier(),
+        "./dep"
+    );
+    assert_eq!(
+        facts
+            .view()
+            .dependencies()
+            .get(0)
+            .unwrap()
+            .specifier()
+            .as_ptr(),
+        dependency
+    );
+    let reparses = ast_segmenter::module_parse_count();
+    let repaired = run(&path).unwrap();
+    assert!(matches!(
+        repaired.status,
+        CacheStatus::Miss(MissReason::InvalidRecord(_))
+    ));
+    assert_eq!(ast_segmenter::module_parse_count(), reparses + 1);
+    assert_eq!(repaired.record, record);
+    assert_eq!(run(&path).unwrap().status, CacheStatus::Hit);
+    fs::remove_file(sidecar_path(&path)).unwrap();
+    drop(record);
+    drop(facts);
+    // The nested Ecco owner independently retains the same immutable backing.
+    let mut analysis = ecco::Analysis::new();
+    analysis.add_file("retained", ecco).unwrap();
     no_staging(&dir);
 }
 

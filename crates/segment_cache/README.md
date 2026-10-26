@@ -184,9 +184,19 @@ No negative diagnostics are cached: failures are regenerated with the current
 path. Cache read/write errors are nonfatal and explicitly reported in the
 outcome, not logged behind the caller's back. `ReadOnly` suppresses writes;
 `Disabled` suppresses both cache reads and writes.
-Cold construction and disk hits both retain fully verified wire storage.
-Encoding or validation failures propagate as errors, never as checked-owned
-fallback records. Filesystem publication failures remain nonfatal and reported.
+Cold construction and disk hits both retain fully verified private file-backed
+mapped wire storage, shared through graph/AST/Ecco owners. Cold encoding happens
+once; temporary encoded vectors and extracted owned facts are released. Publication
+writes the already verified mapped bytes without allocating a second encoded buffer.
+Warm reads stream sidecars into private disk snapshots, not whole-file heap buffers;
+verification runs against those immutable snapshots before checked records escape.
+Mutable sidecars are never mapped directly: replacements, truncation or corruption
+cannot invalidate older generations. Disabled/read-only misses and publication
+failures also retain mapped records, never heap fallbacks. Private snapshots use
+the OS temporary directory independently of the sidecar and working directories.
+Encoding, snapshot IO/mapping or validation failures propagate as errors, never as
+checked-owned fallback records. Filesystem publication failures remain nonfatal and
+reported.
 
 `load_or_parse_with_declarations(..., &LocalFacts)` includes effective contracts
 in identity for ESM and opaque CJS; `load_or_parse` uses the default JavaScript

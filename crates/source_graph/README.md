@@ -47,6 +47,8 @@ Run `cargo test -p source_graph`.
 `file_facts` returns Copy owned-or-wire syntax views (None for legacy/tombstoned
 modules). Collections expose value iterators and `get`, not owned slice layout.
 `file_fact_storage` retains the immutable owner for emission/Ecco adapters.
+Script-cache inputs share private mapped backing across graph generations and
+remain valid after the mutable sidecar is replaced, corrupted or truncated.
 `from_parsed` consumes `ParsedModule::into_parts` without cloning or unpacking the
 fact tree; only graph-owned statement ranges are constructed for wire inputs.
 Graph-derived identities and indexes remain separate from storage.

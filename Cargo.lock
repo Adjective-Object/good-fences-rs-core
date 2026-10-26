@@ -514,6 +514,8 @@ version = "0.1.0"
 dependencies = [
  "eyre",
  "flatbuffers",
+ "memmap2",
+ "tempfile",
  "xxhash-rust",
 ]
 

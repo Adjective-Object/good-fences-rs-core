@@ -25,6 +25,12 @@
 - `WireRecord` owns immutable shared bytes, not decoded DTOs. Verify both outer
   and nested roots with bounded runtime verification before any generated reads.
   Reject unknown discriminants independently; FlatBuffers permits them by default.
+- `SharedBytes` shares private read-only mapped snapshots across record/Ecco/map
+  owners. Stream mutable sidecars into private files before verification; never
+  map source/cache paths directly, even copy-on-write. Unix unlink must succeed;
+  Windows deny-sharing/delete-on-close handles outlive mappings. Drop maps first.
+  Empty snapshots keep private disk backing without an OS map. Default snapshot
+  storage uses the OS temporary directory; explicit directories are supported.
 - Source facts/Ecco have no fixed byte cap; bound verifier apparent size to four
   times each actual buffer, retaining depth/table limits. `MAX_RECORD_BYTES`
   applies only to independent resolution and upstream-map records.

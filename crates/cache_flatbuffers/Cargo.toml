@@ -7,4 +7,6 @@ publish = false
 [dependencies]
 eyre = { workspace = true }
 flatbuffers = "=25.2.10"
+memmap2 = "0.9"
+tempfile = "3.27.0"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }

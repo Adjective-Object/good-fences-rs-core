@@ -25,7 +25,7 @@ impl CachedModule {
 }
 
 /// Construction is the semantic validation gate. Clones share the checked
-/// module and wire allocation; no public constructor accepts an unchecked seal.
+/// module and wire backing; no public constructor accepts an unchecked seal.
 #[derive(Debug, Clone)]
 pub struct CacheRecord {
     wire: cache_flatbuffers::WireRecord,
@@ -45,6 +45,16 @@ impl CacheRecord {
     #[cfg(test)]
     pub(crate) fn wire_bytes_for_test(&self) -> &[u8] {
         self.wire.bytes()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_mapped_for_test(&self) -> bool {
+        self.wire.backing().is_mapped()
+    }
+
+    pub(crate) fn wire_bytes(&self, source: &str) -> eyre::Result<&[u8]> {
+        self.check_source(source)?;
+        Ok(self.wire.bytes())
     }
 
     pub fn schema(&self) -> u32 {
@@ -162,7 +172,7 @@ impl CacheRecord {
         source: &str,
         config: ParserConfig,
     ) -> eyre::Result<Self> {
-        Self::decode_shared(Arc::from(bytes), source, config)
+        Self::decode_backing(Arc::<[u8]>::from(bytes).into(), source, config)
     }
 
     pub(crate) fn decode_owned(
@@ -170,14 +180,20 @@ impl CacheRecord {
         source: &str,
         config: ParserConfig,
     ) -> eyre::Result<Self> {
-        Self::decode_shared(bytes.into(), source, config)
+        let backing = cache_flatbuffers::SharedBytes::snapshot(bytes.as_slice())?;
+        drop(bytes);
+        Self::decode_backing(backing, source, config)
     }
 
-    fn decode_shared(bytes: Arc<[u8]>, source: &str, config: ParserConfig) -> eyre::Result<Self> {
+    pub(crate) fn decode_backing(
+        bytes: cache_flatbuffers::SharedBytes,
+        source: &str,
+        config: ParserConfig,
+    ) -> eyre::Result<Self> {
         let _span = tracing::info_span!("cache.decode", bytes = bytes.len()).entered();
         let wire = {
             let _span = tracing::info_span!("cache.verify_flatbuffer").entered();
-            cache_flatbuffers::WireRecord::new(bytes, source, config.wire(), OXC_REVISION)?
+            cache_flatbuffers::WireRecord::from_backing(bytes, source, config.wire(), OXC_REVISION)?
         };
         let parsed = ParsedModule::from_wire(source, wire.clone())?;
         let module = CachedModule {

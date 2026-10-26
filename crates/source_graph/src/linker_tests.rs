@@ -199,3 +199,89 @@ fn decoded_cache_ranges_and_facts_link_without_legacy_maps() {
         Some(SegmentKey::new(0, 1))
     );
 }
+
+#[test]
+fn mapped_cache_graph_generations_survive_sidecar_replacement_and_truncation() {
+    use ast_segmenter::ModuleFormat;
+    use segment_cache::{load_or_parse, sidecar_path, CacheMode, CacheStatus};
+
+    let directory = test_tmpdir::TmpDir::new();
+    let path = directory.root_join("leaf.mjs");
+    let source = "export const value = 1;";
+    std::fs::write(&path, source).unwrap();
+    let load = || {
+        load_or_parse(
+            &logger::StdioLogger::new(),
+            &path,
+            ModuleFormat::Esm,
+            CacheMode::ReadWrite,
+        )
+        .unwrap()
+    };
+    drop(load());
+    let outcome = load();
+    assert_eq!(outcome.status, CacheStatus::Hit);
+    let parsed = outcome.record.to_parsed(source).unwrap();
+    let first = SourceGraph::from_owned([OwnedSourceFileInput::from_parsed(
+        path.clone(),
+        parsed.clone(),
+        Default::default(),
+    )]);
+    let second = SourceGraph::from_owned([OwnedSourceFileInput::from_parsed(
+        path.clone(),
+        parsed,
+        Default::default(),
+    )]);
+    let name = first
+        .file_facts(0)
+        .unwrap()
+        .bindings()
+        .get(0)
+        .unwrap()
+        .name()
+        .as_ptr();
+    assert_eq!(
+        second
+            .file_facts(0)
+            .unwrap()
+            .bindings()
+            .get(0)
+            .unwrap()
+            .name()
+            .as_ptr(),
+        name
+    );
+    drop(outcome);
+
+    // Force publication of a new generation, then truncate its mutable sidecar.
+    std::fs::write(&path, "export const replacement = 2;").unwrap();
+    drop(load());
+    std::fs::write(sidecar_path(&path), []).unwrap();
+    drop(first);
+    second.validate_links().unwrap();
+    assert_eq!(
+        second
+            .file_facts(0)
+            .unwrap()
+            .bindings()
+            .get(0)
+            .unwrap()
+            .name(),
+        "value"
+    );
+    assert_eq!(
+        second
+            .file_facts(0)
+            .unwrap()
+            .bindings()
+            .get(0)
+            .unwrap()
+            .name()
+            .as_ptr(),
+        name
+    );
+    assert!(second.resolve_export(0, "value", Namespace::Value).is_ok());
+    assert!(second
+        .resolve_export(0, "replacement", Namespace::Value)
+        .is_err());
+}

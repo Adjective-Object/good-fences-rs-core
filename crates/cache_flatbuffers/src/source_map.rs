@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use eyre::{ensure, Result};
 
-use crate::{hash128, wire, CHECKSUM_BYTES, EXTRACTOR_VERSION, MAX_RECORD_BYTES, SCHEMA_VERSION};
+use crate::{
+    hash128, wire, SharedBytes, CHECKSUM_BYTES, EXTRACTOR_VERSION, MAX_RECORD_BYTES, SCHEMA_VERSION,
+};
 
 #[cfg(test)]
 #[path = "source_map_tests.rs"]
@@ -26,7 +28,7 @@ pub struct MapData<'a> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WireSourceMap {
-    bytes: Arc<[u8]>,
+    bytes: SharedBytes,
 }
 
 impl WireSourceMap {
@@ -82,6 +84,15 @@ impl WireSourceMap {
     }
 
     pub fn new(bytes: Arc<[u8]>, source: &str, input: &[u8], location: &str) -> Result<Self> {
+        Self::from_backing(bytes.into(), source, input, location)
+    }
+
+    pub fn from_backing(
+        bytes: SharedBytes,
+        source: &str,
+        input: &[u8],
+        location: &str,
+    ) -> Result<Self> {
         ensure!(
             bytes.len() <= MAX_RECORD_BYTES && bytes.len() >= 8 + CHECKSUM_BYTES,
             "invalid source map cache size"
@@ -143,6 +154,10 @@ impl WireSourceMap {
     }
 
     pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    pub fn backing(&self) -> &SharedBytes {
         &self.bytes
     }
 

@@ -49,11 +49,21 @@ A borrowed traversal then rejects unknown enum/union discriminants, absent union
 values, invalid MultiSpan lengths, duplicate hazard fields, and unordered/duplicate
 effect-map keys. No object API `unpack` is called.
 
-The owner retains only an `Arc<[u8]>`, a payload endpoint and the verified module
-range. Views borrow the owner; cloning it only shares bytes. Two small documented
+The owner retains `SharedBytes`, a payload endpoint and the verified module
+range. `WireRecord`, `WireEcco` and `WireSourceMap` accept the same backing.
+Production script records use an Arc-shared read-only file mapping; low-level
+constructors still accept heap bytes. `SharedBytes::snapshot` streams into a
+private file in the OS temporary directory (or an explicit directory with
+`snapshot_in`), never maps mutable source/cache paths, and never falls back to
+heap storage. Unix files are successfully unlinked before mapping; Windows
+files deny sharing and delete on close. Mappings drop before their private file
+handles, including after the last clone, and empty snapshots need no OS mapping.
+Warm loads pay a disk-to-private-file copy for safety against external mutation,
+truncation and atomic replacement, but never allocate a whole-file heap buffer.
+Views borrow the owner; cloning it only shares bytes. Small documented
 unchecked-root calls reuse the already verified immutable roots. There is no
 lifetime transmute or self-referential storage. Tests prove that nested string
-pointers address this allocation and remain identical across thread-shared clones.
+pointers address this backing and remain identical across thread-shared clones.
 
 **`WireRecord` is not the source-local semantic validator.** Span UTF-8
 boundaries, ID/link/occurrence coverage, ordering, operation-parent rules,

@@ -51,6 +51,31 @@ fn upstream_map_borrows_metadata_and_preserves_sparse_boundaries() {
 }
 
 #[test]
+fn upstream_map_accepts_shared_private_mapped_backing() {
+    let directory = tempfile::tempdir_in(".").unwrap();
+    let encoded = encode(&[wire::MapToken::new(0, 2, 8, 4, 0, 0)]).unwrap();
+    let backing = SharedBytes::snapshot_in(directory.path(), encoded.bytes()).unwrap();
+    let map = WireSourceMap::from_backing(
+        backing,
+        "compiled",
+        b"json",
+        "file:///project/maps/input.map",
+    )
+    .unwrap();
+    assert!(map.backing().is_mapped());
+    assert_eq!(map, encoded);
+    let pointer = map.root().names().get(0).as_ptr();
+    let clone = map.clone();
+    drop(map);
+    drop(encoded);
+    assert_eq!(clone.root().names().get(0).as_ptr(), pointer);
+    assert_eq!(clone.lookup(0, 3).unwrap().original_line(), 8);
+    drop(clone);
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+    directory.close().unwrap();
+}
+
+#[test]
 fn upstream_map_rejects_corruption_stale_inputs_and_invalid_semantic_links() {
     let map = encode(&[wire::MapToken::new(0, 0, 0, 0, 0, 0)]).unwrap();
     for (source, input, location) in [
