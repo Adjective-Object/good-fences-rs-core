@@ -10,7 +10,7 @@ crate-type = ["lib"]
 [dependencies]
 anyhow = { workspace = true }
 eyre.workspace = true
-sha2 = "0.10"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
 parking_lot.workspace = true
 dashmap = "6.0.1"
 tracing = "0.1.40"

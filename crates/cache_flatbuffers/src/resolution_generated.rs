@@ -492,6 +492,104 @@ impl DigestT {
   }
 }
 
+// struct Hash128, aligned to 1
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq)]
+pub struct Hash128(pub [u8; 16]);
+impl Default for Hash128 { 
+  fn default() -> Self { 
+    Self([0; 16])
+  }
+}
+impl core::fmt::Debug for Hash128 {
+  fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+    f.debug_struct("Hash128")
+      .field("bytes", &self.bytes())
+      .finish()
+  }
+}
+
+impl flatbuffers::SimpleToVerifyInSlice for Hash128 {}
+impl<'a> flatbuffers::Follow<'a> for Hash128 {
+  type Inner = &'a Hash128;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    <&'a Hash128>::follow(buf, loc)
+  }
+}
+impl<'a> flatbuffers::Follow<'a> for &'a Hash128 {
+  type Inner = &'a Hash128;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    flatbuffers::follow_cast_ref::<Hash128>(buf, loc)
+  }
+}
+impl<'b> flatbuffers::Push for Hash128 {
+    type Output = Hash128;
+    #[inline]
+    unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
+        let src = ::core::slice::from_raw_parts(self as *const Hash128 as *const u8, <Self as flatbuffers::Push>::size());
+        dst.copy_from_slice(src);
+    }
+    #[inline]
+    fn alignment() -> flatbuffers::PushAlignment {
+        flatbuffers::PushAlignment::new(1)
+    }
+}
+
+impl<'a> flatbuffers::Verifiable for Hash128 {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.in_buffer::<Self>(pos)
+  }
+}
+
+impl<'a> Hash128 {
+  #[allow(clippy::too_many_arguments)]
+  pub fn new(
+    bytes: &[u8; 16],
+  ) -> Self {
+    let mut s = Self([0; 16]);
+    s.set_bytes(bytes);
+    s
+  }
+
+  pub fn bytes(&'a self) -> flatbuffers::Array<'a, u8, 16> {
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid array in this slot
+    unsafe { flatbuffers::Array::follow(&self.0, 0) }
+  }
+
+  pub fn set_bytes(&mut self, items: &[u8; 16]) {
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid array in this slot
+    unsafe { flatbuffers::emplace_scalar_array(&mut self.0, 0, items) };
+  }
+
+  pub fn unpack(&self) -> Hash128T {
+    Hash128T {
+      bytes: self.bytes().into(),
+    }
+  }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Hash128T {
+  pub bytes: [u8; 16],
+}
+impl Hash128T {
+  pub fn pack(&self) -> Hash128 {
+    Hash128::new(
+      &self.bytes,
+    )
+  }
+}
+
 // struct Identity, aligned to 8
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq)]
@@ -1109,11 +1207,11 @@ impl<'a> Input<'a> {
     unsafe { self._tab.get::<Identity>(Input::VT_IDENTITY, None)}
   }
   #[inline]
-  pub fn content(&self) -> Option<&'a Digest> {
+  pub fn content(&self) -> Option<&'a Hash128> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<Digest>(Input::VT_CONTENT, None)}
+    unsafe { self._tab.get::<Hash128>(Input::VT_CONTENT, None)}
   }
   #[inline]
   pub fn links(&self) -> flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Link<'a>>> {
@@ -1135,7 +1233,7 @@ impl flatbuffers::Verifiable for Input<'_> {
      .visit_field::<Kind>("kind", Self::VT_KIND, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<Locator>>("canonical", Self::VT_CANONICAL, false)?
      .visit_field::<Identity>("identity", Self::VT_IDENTITY, false)?
-     .visit_field::<Digest>("content", Self::VT_CONTENT, false)?
+     .visit_field::<Hash128>("content", Self::VT_CONTENT, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Link>>>>("links", Self::VT_LINKS, true)?
      .finish();
     Ok(())
@@ -1146,7 +1244,7 @@ pub struct InputArgs<'a> {
     pub kind: Kind,
     pub canonical: Option<flatbuffers::WIPOffset<Locator<'a>>>,
     pub identity: Option<&'a Identity>,
-    pub content: Option<&'a Digest>,
+    pub content: Option<&'a Hash128>,
     pub links: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Link<'a>>>>>,
 }
 impl<'a> Default for InputArgs<'a> {
@@ -1185,8 +1283,8 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> InputBuilder<'a, 'b, A> {
     self.fbb_.push_slot_always::<&Identity>(Input::VT_IDENTITY, identity);
   }
   #[inline]
-  pub fn add_content(&mut self, content: &Digest) {
-    self.fbb_.push_slot_always::<&Digest>(Input::VT_CONTENT, content);
+  pub fn add_content(&mut self, content: &Hash128) {
+    self.fbb_.push_slot_always::<&Hash128>(Input::VT_CONTENT, content);
   }
   #[inline]
   pub fn add_links(&mut self, links: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<Link<'b >>>>) {
@@ -1228,7 +1326,7 @@ pub struct InputT {
   pub kind: Kind,
   pub canonical: Option<Box<LocatorT>>,
   pub identity: Option<IdentityT>,
-  pub content: Option<DigestT>,
+  pub content: Option<Hash128T>,
   pub links: Vec<LinkT>,
 }
 impl Default for InputT {

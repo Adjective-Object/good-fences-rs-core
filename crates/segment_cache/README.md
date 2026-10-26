@@ -18,7 +18,9 @@ module body and ordered statement ranges, not lossy legacy dependency/name sets.
 `CacheRecord` and `CachedModule` have private storage. Consumers and validators
 use borrowed accessors such as `record.module().facts()` and
 `record.module().segments()`; no mutable view of sealed records is exposed.
-Production loading/publication uses typed FlatBuffers, schema 19/extractor 32.
+Production loading/publication uses typed FlatBuffers, schema 20/extractor 33.
+Schema 20/extractor 33 replace source/provenance seals and framing checksums
+with 16-byte big-endian XXH3-128; earlier sidecars miss/rebuild.
 Extractor 32 restricts worker URLs to the first argument of new Worker and
 validates that enclosing constructor through borrowed invocation facts.
 Extractor 31 admits native read-only eval identity references while rejecting
@@ -57,7 +59,7 @@ async status, SCC schedules and require compatibility remain derived linker/host
 policy, never source truth. CJS records cannot carry top-level suspension sites.
 
 The codec stores a size-prefixed `GFSC` root and typed nested `GFSM` module.
-SHA-256 identifies the exact
+XXH3-128 identifies the exact
 source bytes and protects the payload against accidental corruption. Identity
 includes schema/extractor versions, the pinned OXC revision and effective parser
 language/module/definition mode. Current parser defaults are part of the
@@ -185,7 +187,8 @@ entrypoints remain compatibility wrappers. Declaration identity remains the
 typed 128-bit XXH3 fingerprint; its independent CBOR configuration serialization
 is retained for compatibility, once per prepared configuration, not per-file
 loading. Debug/test Serde projections are not the production codec.
-Source, payload checksum and sealed extraction integrity remain SHA-256.
+Source, payload checksum and sealed extraction integrity use 16-byte big-endian
+XXH3-128, matching declaration fingerprint byte order, not authentication.
 
 Writes use uniquely named sibling `.seg.fb.stage-*` files, flush/sync before
 atomic replacement, and clean up staging files on errors/normal cancellation.

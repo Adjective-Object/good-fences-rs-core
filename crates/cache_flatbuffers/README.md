@@ -1,6 +1,6 @@
 # Typed source-cache FlatBuffers
 
-**Production source-cache backend: schema 19/extractor 32, `.seg.fb`.**
+**Production source-cache backend: schema 20/extractor 33, `.seg.fb`.**
 `segment_cache` reads these immutable buffers through AST/Ecco views and runs
 full semantic validation before exposing checked records. Byte-backed parsed
 modules feed graph linking, effect solving and native emission without unpacking
@@ -16,7 +16,7 @@ persisted record shape, rather than embedding CBOR bytes:
 
 | Schema | Persisted records represented |
 | --- | --- |
-| `common.fbs` | `ParserConfig`; fixed-width spans, SHA-256, declaration fingerprints; optional IDs without sentinel collisions |
+| `common.fbs` | `ParserConfig`; fixed-width spans, XXH3-128, declaration fingerprints; optional IDs without sentinel collisions |
 | `ecco.fbs` | `HazardFields`, `Update`, `Definition`, `LocalFacts`, `GlobalSymbol`, `FunctionSignature`, `CallResult`, `OwnedFunction`, `ParsedSymbol`, `ExternalReference`, `ParsedRoot`, `ParsedValue`, `DefinitionMatch`, `ParsedFile` |
 | `syntax.fbs` | `Binding`, `Reference`, `Dependency`, `ImportBinding`, `Export`, `Directive`, `EffectSite`, `IdentifierCallee`, `InvocationArgument`, `Invocation`, `ExecutionContext`, `ExecutionFacts`, `PlacementFacts`, `NameRestrictions`, `NamespaceUse`, `SourceSlot`, `CalleePlan`, `PureLowering`, `Operation`, `SegmentRecipe`, `DynamicNamespace`, `LazyModuleCandidate`, `LazyOptionProperty`, `LazySelectorCandidate`, `EmissionFacts`, `ModuleFacts` |
 | `module.fbs` | `CachedModule`, ESM/CommonJS body alternatives, ordered statement spans |
@@ -33,7 +33,7 @@ Declaration fingerprints retain their 16-byte representation, not a new hash.
 ## Buffer format and read guarantees
 
 The `.seg.fb` format is a size-prefixed `CacheRecord` FlatBuffer (`GFSC`)
-followed by a 32-byte SHA-256 of the entire size-prefixed record. Its `module`
+followed by a 16-byte big-endian XXH3-128 of the entire size-prefixed record. Its `module`
 vector contains a **typed `CachedModule` FlatBuffer** (`GFSM`). Nesting enables
 an exact immutable module-byte extraction seal without serializing the facts
 again during provenance verification. It is not a CBOR envelope.
@@ -65,7 +65,7 @@ while graph ranges and derived analysis/emission plans are explicitly owned.
 AST and bundler differential tests cover complete record equality, byte borrowing,
 owner lifetime, execution/recipe validation, ESM/CJS outputs and parallel emission.
 
-Schema 19/extractor 32 are active production identities, included in bundler
+Schema 20/extractor 33 are active production identities, included in bundler
 source-parse fingerprints. Atomic sibling publication uses `.seg.fb.stage-*`;
 inventory ignores current and legacy `.seg.cbor` artifacts, without deleting them.
 Old formats miss/rebuild. This crate's handwritten wire path does not use Serde.
@@ -94,7 +94,7 @@ declarator evidence, checked before borrowed consumers inspect captured reads.
 ## Production upstream-map metadata
 
 `WireSourceMap` stores typed tokens, original/resolved source URLs, nullable
-contents, names, file and sourceRoot in verified `GFUM` FlatBuffers with SHA-256
+contents, names, file and sourceRoot in verified `GFUM` FlatBuffers with XXH3-128
 integrity. Script bytes, input bytes and map location are sealed independently
 of AST extraction. Bounded structural and borrowed semantic checks reject invalid
 ordering and indices before construction. Warm `.upstream.seg.fb` readers retain
@@ -112,8 +112,13 @@ not construction; its schema name now matches the existing interpreter meaning.
 
 ## Independent resolution records
 
-`resolution.fbs` defines schema **1** (`GFRS`), independent of source schema
-19/extractor 32. `resolution::WireResolution` retains private `Arc<[u8]>` bytes.
+`resolution.fbs` defines schema **2** (`GFRS`), independent of source schema
+20/extractor 33. `resolution::WireResolution` retains private `Arc<[u8]>` bytes.
+Source/map hashes, extraction module seals, filesystem proof content seals and
+all three framing checksums use 16-byte big-endian XXH3-128, matching existing
+fingerprint byte order. These are corruption checks, not authentication.
+Resolution package/dependency/policy keys remain 32-byte SHA-256 digests.
+Earlier formats are rejected and rebuilt; no padded digests or legacy decoding.
 Size/checksum/framing, bounded verification, all discriminants, portable anchors,
 proof shape and strict request ordering/uniqueness are checked before exposure.
 Import/require requests bind package-instance, named-dependency and policy hashes

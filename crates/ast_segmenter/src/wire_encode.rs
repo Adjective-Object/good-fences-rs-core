@@ -1,9 +1,9 @@
 //! Cold extraction encoding. No object API is used by readers.
 //! AST vectors preserve extraction order; Ecco's encoder canonicalizes its maps.
 use crate::{emission as em, invocation as inv, owned as o, views as v};
+use cache_flatbuffers::hash128;
 use cache_flatbuffers::wire as w;
 use flatbuffers::{FlatBufferBuilder, WIPOffset};
-use sha2::{Digest, Sha256};
 
 macro_rules! table {
     ($ty:ident { $($field:ident: $value:expr),* $(,)? }) => {{
@@ -573,8 +573,8 @@ impl crate::ParsedModule {
             eyre::bail!("wire facts already have immutable encoding");
         };
         let module_bytes = owned.encode_module(self.body(), &ranges);
-        let hash = w::Sha256::new(&Sha256::digest(source.as_bytes()).into());
-        let records_hash = w::Sha256::new(&Sha256::digest(&module_bytes).into());
+        let hash = w::Hash128::new(&hash128(source.as_bytes()));
+        let records_hash = w::Hash128::new(&hash128(&module_bytes));
         let config = self.provenance().config().wire();
         let mut outer = FlatBufferBuilder::new();
         let module = outer.create_vector(&module_bytes);

@@ -17,7 +17,8 @@ InputSnapshot epochs single-flight paths, shared prefixes and exact bytes.
 Snapshot checks compare original observations; final freshness requires a new
 snapshot. Do not use a live build snapshot as a final validation authority.
 PathInput handles share immutable original observation records and link-prefix
-slices; content seals remain per-handle scalars. InputProof clones share immutable
+slices; content seals remain per-handle 16-byte big-endian XXH3-128 scalars
+(corruption checks, not authentication). InputProof clones share immutable
 observation/error arrays, while request collectors remain separately mutable.
 Retained proofs own only their consulted records, never the snapshot/epoch.
 Sharing must not recapture, normalize or discard negative/link/content evidence.

@@ -4131,43 +4131,43 @@ impl SpanT {
   }
 }
 
-// struct Sha256, aligned to 1
+// struct Hash128, aligned to 1
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq)]
-pub struct Sha256(pub [u8; 32]);
-impl Default for Sha256 { 
+pub struct Hash128(pub [u8; 16]);
+impl Default for Hash128 { 
   fn default() -> Self { 
-    Self([0; 32])
+    Self([0; 16])
   }
 }
-impl core::fmt::Debug for Sha256 {
+impl core::fmt::Debug for Hash128 {
   fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-    f.debug_struct("Sha256")
+    f.debug_struct("Hash128")
       .field("bytes", &self.bytes())
       .finish()
   }
 }
 
-impl flatbuffers::SimpleToVerifyInSlice for Sha256 {}
-impl<'a> flatbuffers::Follow<'a> for Sha256 {
-  type Inner = &'a Sha256;
+impl flatbuffers::SimpleToVerifyInSlice for Hash128 {}
+impl<'a> flatbuffers::Follow<'a> for Hash128 {
+  type Inner = &'a Hash128;
   #[inline]
   unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    <&'a Sha256>::follow(buf, loc)
+    <&'a Hash128>::follow(buf, loc)
   }
 }
-impl<'a> flatbuffers::Follow<'a> for &'a Sha256 {
-  type Inner = &'a Sha256;
+impl<'a> flatbuffers::Follow<'a> for &'a Hash128 {
+  type Inner = &'a Hash128;
   #[inline]
   unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    flatbuffers::follow_cast_ref::<Sha256>(buf, loc)
+    flatbuffers::follow_cast_ref::<Hash128>(buf, loc)
   }
 }
-impl<'b> flatbuffers::Push for Sha256 {
-    type Output = Sha256;
+impl<'b> flatbuffers::Push for Hash128 {
+    type Output = Hash128;
     #[inline]
     unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
-        let src = ::core::slice::from_raw_parts(self as *const Sha256 as *const u8, <Self as flatbuffers::Push>::size());
+        let src = ::core::slice::from_raw_parts(self as *const Hash128 as *const u8, <Self as flatbuffers::Push>::size());
         dst.copy_from_slice(src);
     }
     #[inline]
@@ -4176,7 +4176,7 @@ impl<'b> flatbuffers::Push for Sha256 {
     }
 }
 
-impl<'a> flatbuffers::Verifiable for Sha256 {
+impl<'a> flatbuffers::Verifiable for Hash128 {
   #[inline]
   fn run_verifier(
     v: &mut flatbuffers::Verifier, pos: usize
@@ -4186,44 +4186,44 @@ impl<'a> flatbuffers::Verifiable for Sha256 {
   }
 }
 
-impl<'a> Sha256 {
+impl<'a> Hash128 {
   #[allow(clippy::too_many_arguments)]
   pub fn new(
-    bytes: &[u8; 32],
+    bytes: &[u8; 16],
   ) -> Self {
-    let mut s = Self([0; 32]);
+    let mut s = Self([0; 16]);
     s.set_bytes(bytes);
     s
   }
 
-  pub fn bytes(&'a self) -> flatbuffers::Array<'a, u8, 32> {
+  pub fn bytes(&'a self) -> flatbuffers::Array<'a, u8, 16> {
     // Safety:
     // Created from a valid Table for this object
     // Which contains a valid array in this slot
     unsafe { flatbuffers::Array::follow(&self.0, 0) }
   }
 
-  pub fn set_bytes(&mut self, items: &[u8; 32]) {
+  pub fn set_bytes(&mut self, items: &[u8; 16]) {
     // Safety:
     // Created from a valid Table for this object
     // Which contains a valid array in this slot
     unsafe { flatbuffers::emplace_scalar_array(&mut self.0, 0, items) };
   }
 
-  pub fn unpack(&self) -> Sha256T {
-    Sha256T {
+  pub fn unpack(&self) -> Hash128T {
+    Hash128T {
       bytes: self.bytes().into(),
     }
   }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Sha256T {
-  pub bytes: [u8; 32],
+pub struct Hash128T {
+  pub bytes: [u8; 16],
 }
-impl Sha256T {
-  pub fn pack(&self) -> Sha256 {
-    Sha256::new(
+impl Hash128T {
+  pub fn pack(&self) -> Hash128 {
+    Hash128::new(
       &self.bytes,
     )
   }
@@ -26009,11 +26009,11 @@ impl<'a> SourceProvenance<'a> {
   }
 
   #[inline]
-  pub fn source_hash(&self) -> &'a Sha256 {
+  pub fn source_hash(&self) -> &'a Hash128 {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<Sha256>(SourceProvenance::VT_SOURCE_HASH, None).unwrap()}
+    unsafe { self._tab.get::<Hash128>(SourceProvenance::VT_SOURCE_HASH, None).unwrap()}
   }
   #[inline]
   pub fn config(&self) -> &'a ParserConfig {
@@ -26023,11 +26023,11 @@ impl<'a> SourceProvenance<'a> {
     unsafe { self._tab.get::<ParserConfig>(SourceProvenance::VT_CONFIG, None).unwrap()}
   }
   #[inline]
-  pub fn records_hash(&self) -> &'a Sha256 {
+  pub fn records_hash(&self) -> &'a Hash128 {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<Sha256>(SourceProvenance::VT_RECORDS_HASH, None).unwrap()}
+    unsafe { self._tab.get::<Hash128>(SourceProvenance::VT_RECORDS_HASH, None).unwrap()}
   }
 }
 
@@ -26038,17 +26038,17 @@ impl flatbuffers::Verifiable for SourceProvenance<'_> {
   ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
-     .visit_field::<Sha256>("source_hash", Self::VT_SOURCE_HASH, true)?
+     .visit_field::<Hash128>("source_hash", Self::VT_SOURCE_HASH, true)?
      .visit_field::<ParserConfig>("config", Self::VT_CONFIG, true)?
-     .visit_field::<Sha256>("records_hash", Self::VT_RECORDS_HASH, true)?
+     .visit_field::<Hash128>("records_hash", Self::VT_RECORDS_HASH, true)?
      .finish();
     Ok(())
   }
 }
 pub struct SourceProvenanceArgs<'a> {
-    pub source_hash: Option<&'a Sha256>,
+    pub source_hash: Option<&'a Hash128>,
     pub config: Option<&'a ParserConfig>,
-    pub records_hash: Option<&'a Sha256>,
+    pub records_hash: Option<&'a Hash128>,
 }
 impl<'a> Default for SourceProvenanceArgs<'a> {
   #[inline]
@@ -26067,16 +26067,16 @@ pub struct SourceProvenanceBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
 }
 impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> SourceProvenanceBuilder<'a, 'b, A> {
   #[inline]
-  pub fn add_source_hash(&mut self, source_hash: &Sha256) {
-    self.fbb_.push_slot_always::<&Sha256>(SourceProvenance::VT_SOURCE_HASH, source_hash);
+  pub fn add_source_hash(&mut self, source_hash: &Hash128) {
+    self.fbb_.push_slot_always::<&Hash128>(SourceProvenance::VT_SOURCE_HASH, source_hash);
   }
   #[inline]
   pub fn add_config(&mut self, config: &ParserConfig) {
     self.fbb_.push_slot_always::<&ParserConfig>(SourceProvenance::VT_CONFIG, config);
   }
   #[inline]
-  pub fn add_records_hash(&mut self, records_hash: &Sha256) {
-    self.fbb_.push_slot_always::<&Sha256>(SourceProvenance::VT_RECORDS_HASH, records_hash);
+  pub fn add_records_hash(&mut self, records_hash: &Hash128) {
+    self.fbb_.push_slot_always::<&Hash128>(SourceProvenance::VT_RECORDS_HASH, records_hash);
   }
   #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> SourceProvenanceBuilder<'a, 'b, A> {
@@ -26108,9 +26108,9 @@ impl core::fmt::Debug for SourceProvenance<'_> {
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SourceProvenanceT {
-  pub source_hash: Sha256T,
+  pub source_hash: Hash128T,
   pub config: ParserConfigT,
-  pub records_hash: Sha256T,
+  pub records_hash: Hash128T,
 }
 impl Default for SourceProvenanceT {
   fn default() -> Self {
@@ -26250,11 +26250,11 @@ impl<'a> CacheRecord<'a> {
     unsafe { self._tab.get::<u64>(CacheRecord::VT_SOURCE_LEN, Some(0)).unwrap()}
   }
   #[inline]
-  pub fn source_hash(&self) -> &'a Sha256 {
+  pub fn source_hash(&self) -> &'a Hash128 {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<Sha256>(CacheRecord::VT_SOURCE_HASH, None).unwrap()}
+    unsafe { self._tab.get::<Hash128>(CacheRecord::VT_SOURCE_HASH, None).unwrap()}
   }
   #[inline]
   pub fn config(&self) -> &'a ParserConfig {
@@ -26298,7 +26298,7 @@ impl flatbuffers::Verifiable for CacheRecord<'_> {
      .visit_field::<u32>("extractor", Self::VT_EXTRACTOR, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<&str>>("oxc", Self::VT_OXC, true)?
      .visit_field::<u64>("source_len", Self::VT_SOURCE_LEN, false)?
-     .visit_field::<Sha256>("source_hash", Self::VT_SOURCE_HASH, true)?
+     .visit_field::<Hash128>("source_hash", Self::VT_SOURCE_HASH, true)?
      .visit_field::<ParserConfig>("config", Self::VT_CONFIG, true)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u8>>>("module", Self::VT_MODULE, true)?
      .visit_field::<flatbuffers::ForwardsUOffset<SourceProvenance>>("provenance", Self::VT_PROVENANCE, true)?
@@ -26311,7 +26311,7 @@ pub struct CacheRecordArgs<'a> {
     pub extractor: u32,
     pub oxc: Option<flatbuffers::WIPOffset<&'a str>>,
     pub source_len: u64,
-    pub source_hash: Option<&'a Sha256>,
+    pub source_hash: Option<&'a Hash128>,
     pub config: Option<&'a ParserConfig>,
     pub module: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u8>>>,
     pub provenance: Option<flatbuffers::WIPOffset<SourceProvenance<'a>>>,
@@ -26354,8 +26354,8 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> CacheRecordBuilder<'a, 'b, A> {
     self.fbb_.push_slot::<u64>(CacheRecord::VT_SOURCE_LEN, source_len, 0);
   }
   #[inline]
-  pub fn add_source_hash(&mut self, source_hash: &Sha256) {
-    self.fbb_.push_slot_always::<&Sha256>(CacheRecord::VT_SOURCE_HASH, source_hash);
+  pub fn add_source_hash(&mut self, source_hash: &Hash128) {
+    self.fbb_.push_slot_always::<&Hash128>(CacheRecord::VT_SOURCE_HASH, source_hash);
   }
   #[inline]
   pub fn add_config(&mut self, config: &ParserConfig) {
@@ -26410,7 +26410,7 @@ pub struct CacheRecordT {
   pub extractor: u32,
   pub oxc: String,
   pub source_len: u64,
-  pub source_hash: Sha256T,
+  pub source_hash: Hash128T,
   pub config: ParserConfigT,
   pub module: Vec<u8>,
   pub provenance: Box<SourceProvenanceT>,
@@ -26767,18 +26767,18 @@ impl<'a> UpstreamMap<'a> {
     unsafe { self._tab.get::<u32>(UpstreamMap::VT_EXTRACTOR, Some(0)).unwrap()}
   }
   #[inline]
-  pub fn source_hash(&self) -> &'a Sha256 {
+  pub fn source_hash(&self) -> &'a Hash128 {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<Sha256>(UpstreamMap::VT_SOURCE_HASH, None).unwrap()}
+    unsafe { self._tab.get::<Hash128>(UpstreamMap::VT_SOURCE_HASH, None).unwrap()}
   }
   #[inline]
-  pub fn input_hash(&self) -> &'a Sha256 {
+  pub fn input_hash(&self) -> &'a Hash128 {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<Sha256>(UpstreamMap::VT_INPUT_HASH, None).unwrap()}
+    unsafe { self._tab.get::<Hash128>(UpstreamMap::VT_INPUT_HASH, None).unwrap()}
   }
   #[inline]
   pub fn location(&self) -> &'a str {
@@ -26833,8 +26833,8 @@ impl flatbuffers::Verifiable for UpstreamMap<'_> {
     v.visit_table(pos)?
      .visit_field::<u32>("schema", Self::VT_SCHEMA, false)?
      .visit_field::<u32>("extractor", Self::VT_EXTRACTOR, false)?
-     .visit_field::<Sha256>("source_hash", Self::VT_SOURCE_HASH, true)?
-     .visit_field::<Sha256>("input_hash", Self::VT_INPUT_HASH, true)?
+     .visit_field::<Hash128>("source_hash", Self::VT_SOURCE_HASH, true)?
+     .visit_field::<Hash128>("input_hash", Self::VT_INPUT_HASH, true)?
      .visit_field::<flatbuffers::ForwardsUOffset<&str>>("location", Self::VT_LOCATION, true)?
      .visit_field::<flatbuffers::ForwardsUOffset<&str>>("file", Self::VT_FILE, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<&str>>("source_root", Self::VT_SOURCE_ROOT, false)?
@@ -26848,8 +26848,8 @@ impl flatbuffers::Verifiable for UpstreamMap<'_> {
 pub struct UpstreamMapArgs<'a> {
     pub schema: u32,
     pub extractor: u32,
-    pub source_hash: Option<&'a Sha256>,
-    pub input_hash: Option<&'a Sha256>,
+    pub source_hash: Option<&'a Hash128>,
+    pub input_hash: Option<&'a Hash128>,
     pub location: Option<flatbuffers::WIPOffset<&'a str>>,
     pub file: Option<flatbuffers::WIPOffset<&'a str>>,
     pub source_root: Option<flatbuffers::WIPOffset<&'a str>>,
@@ -26889,12 +26889,12 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> UpstreamMapBuilder<'a, 'b, A> {
     self.fbb_.push_slot::<u32>(UpstreamMap::VT_EXTRACTOR, extractor, 0);
   }
   #[inline]
-  pub fn add_source_hash(&mut self, source_hash: &Sha256) {
-    self.fbb_.push_slot_always::<&Sha256>(UpstreamMap::VT_SOURCE_HASH, source_hash);
+  pub fn add_source_hash(&mut self, source_hash: &Hash128) {
+    self.fbb_.push_slot_always::<&Hash128>(UpstreamMap::VT_SOURCE_HASH, source_hash);
   }
   #[inline]
-  pub fn add_input_hash(&mut self, input_hash: &Sha256) {
-    self.fbb_.push_slot_always::<&Sha256>(UpstreamMap::VT_INPUT_HASH, input_hash);
+  pub fn add_input_hash(&mut self, input_hash: &Hash128) {
+    self.fbb_.push_slot_always::<&Hash128>(UpstreamMap::VT_INPUT_HASH, input_hash);
   }
   #[inline]
   pub fn add_location(&mut self, location: flatbuffers::WIPOffset<&'b  str>) {
@@ -26962,8 +26962,8 @@ impl core::fmt::Debug for UpstreamMap<'_> {
 pub struct UpstreamMapT {
   pub schema: u32,
   pub extractor: u32,
-  pub source_hash: Sha256T,
-  pub input_hash: Sha256T,
+  pub source_hash: Hash128T,
+  pub input_hash: Hash128T,
   pub location: String,
   pub file: Option<String>,
   pub source_root: Option<String>,

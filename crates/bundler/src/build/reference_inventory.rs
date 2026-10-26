@@ -3,10 +3,10 @@ use super::*;
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct Inventory {
-    files: BTreeMap<PathBuf, Option<[u8; 32]>>,
+    files: BTreeMap<PathBuf, Option<[u8; 16]>>,
     directories: BTreeMap<PathBuf, BTreeMap<std::ffi::OsString, PathBuf>>,
     aliases: BTreeMap<PathBuf, PathBuf>,
-    configs: BTreeMap<PathBuf, Option<(PathBuf, [u8; 32])>>,
+    configs: BTreeMap<PathBuf, Option<(PathBuf, [u8; 16])>>,
     #[cfg(test)]
     directory_reads: usize,
 }
@@ -215,7 +215,9 @@ pub(super) fn inventory(root: &Path) -> eyre::Result<Inventory> {
                             .copied()
                             .flatten()
                             .map(Ok)
-                            .unwrap_or_else(|| fs::read(&target).map(|bytes| hash(&bytes)))?,
+                            .unwrap_or_else(|| {
+                                fs::read(&target).map(|bytes| cache_flatbuffers::hash128(&bytes))
+                            })?,
                     )
                 } else {
                     None
@@ -301,7 +303,9 @@ pub(super) fn inventory(root: &Path) -> eyre::Result<Inventory> {
                         .copied()
                         .flatten()
                         .map(Ok)
-                        .unwrap_or_else(|| fs::read(&path).map(|bytes| hash(&bytes)))?;
+                        .unwrap_or_else(|| {
+                            fs::read(&path).map(|bytes| cache_flatbuffers::hash128(&bytes))
+                        })?;
                     Some((target, digest))
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,

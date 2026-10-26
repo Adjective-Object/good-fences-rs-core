@@ -2,6 +2,8 @@ namespace resolution_cache;
 
 // Independent of source extraction schema/extractor identities.
 struct Digest { bytes:[ubyte:32]; }
+// Big-endian XXH3-128 filesystem content seal; Digest keys remain SHA-256.
+struct Hash128 { bytes:[ubyte:16]; }
 struct Identity { volume:ulong; file:ulong; }
 enum Mode:ubyte { Import, Require }
 enum Anchor:ubyte {
@@ -23,7 +25,7 @@ table Input {
   kind:Kind;
   canonical:Locator;
   identity:Identity;
-  content:Digest;
+  content:Hash128;
   links:[Link] (required);
 }
 table Target { kind:TargetKind; file:Locator; external:string; }

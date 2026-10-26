@@ -45,7 +45,9 @@ fn data() -> wire::ResolutionT {
                         volume: 10,
                         file: 20,
                     }),
-                    content: Some(wire::DigestT { bytes: [7; 32] }),
+                    content: Some(wire::Hash128T {
+                        bytes: hash128(b"manifest"),
+                    }),
                     links: vec![],
                 },
             ],
@@ -54,8 +56,8 @@ fn data() -> wire::ResolutionT {
 }
 
 fn rechecksum(bytes: &mut [u8]) {
-    let end = bytes.len() - 32;
-    let checksum = Sha256::digest(&bytes[..end]);
+    let end = bytes.len() - CHECKSUM_BYTES;
+    let checksum = hash128(&bytes[..end]);
     bytes[end..].copy_from_slice(&checksum);
 }
 
@@ -69,6 +71,16 @@ fn borrowed_positive_negative_roundtrip_and_shared_ownership() {
     assert!((allocation..allocation + record.bytes().len()).contains(&pointer));
     assert_eq!(request.inputs().get(0).kind(), wire::Kind::Missing);
     assert_eq!(request.inputs().get(1).identity().unwrap().file(), 20);
+    assert!(request
+        .inputs()
+        .get(1)
+        .content()
+        .unwrap()
+        .bytes()
+        .iter()
+        .eq(hash128(b"manifest")));
+    let end = shared.bytes().len() - CHECKSUM_BYTES;
+    assert_eq!(&shared.bytes()[end..], &hash128(&shared.bytes()[..end]));
     drop(record);
     std::thread::spawn(move || {
         assert_eq!(
@@ -125,12 +137,13 @@ fn independent_version_and_each_fingerprint_are_checked() {
             .to_string()
             .contains("fingerprint"));
     }
-    let mut changed = data();
-    changed.schema += 1;
-    assert!(WireResolution::encode(&changed, KEY)
-        .unwrap_err()
-        .to_string()
-        .contains("version"));
+    for schema in [1, SCHEMA_VERSION + 1] {
+        let mut changed = data();
+        changed.schema = schema;
+        assert!(
+            format!("{:#}", WireResolution::encode(&changed, KEY).unwrap_err()).contains("version")
+        );
+    }
 }
 
 #[test]
@@ -219,7 +232,7 @@ fn verifier_table_budget_is_applied_before_semantic_traversal() {
     );
     builder.finish_size_prefixed(root, Some("GFRS"));
     let mut bytes = builder.finished_data().to_vec();
-    bytes.extend_from_slice(&Sha256::digest(builder.finished_data()));
+    bytes.extend_from_slice(&hash128(builder.finished_data()));
     assert!(bytes.len() < MAX_RECORD_BYTES);
     let error = WireResolution::new(bytes.into(), KEY).unwrap_err();
     assert!(error.to_string().contains("Too many tables"), "{error:?}");

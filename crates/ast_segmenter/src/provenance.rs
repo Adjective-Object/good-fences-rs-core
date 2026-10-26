@@ -1,9 +1,9 @@
 use std::path::Path;
 
+use cache_flatbuffers::hash128;
 use eyre::ensure;
 use oxc_span::{SourceType, Span};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::{owned::ModuleFacts, ModuleBody, ModuleFormat};
 
@@ -88,9 +88,9 @@ impl ParserConfig {
 /// Private fields prevent accidentally pairing arbitrary facts with source text.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceProvenance {
-    source_hash: [u8; 32],
+    source_hash: [u8; 16],
     config: ParserConfig,
-    records_hash: [u8; 32],
+    records_hash: [u8; 16],
     #[serde(skip)]
     wire: Option<cache_flatbuffers::WireRecord>,
 }
@@ -105,8 +105,8 @@ impl PartialEq for SourceProvenance {
 }
 impl Eq for SourceProvenance {}
 
-fn records_hash(body: ModuleBody, ranges: &[Span], facts: &ModuleFacts) -> eyre::Result<[u8; 32]> {
-    Ok(Sha256::digest(facts.encode_module(body, ranges)).into())
+fn records_hash(body: ModuleBody, ranges: &[Span], facts: &ModuleFacts) -> eyre::Result<[u8; 16]> {
+    Ok(hash128(&facts.encode_module(body, ranges)))
 }
 
 impl SourceProvenance {
@@ -118,7 +118,7 @@ impl SourceProvenance {
         facts: &ModuleFacts,
     ) -> eyre::Result<Self> {
         Ok(Self {
-            source_hash: Sha256::digest(source.as_bytes()).into(),
+            source_hash: hash128(source.as_bytes()),
             config,
             records_hash: records_hash(body, ranges, facts)?,
             wire: None,
@@ -142,7 +142,7 @@ impl SourceProvenance {
         facts: crate::views::ModuleFacts<'_>,
     ) -> eyre::Result<()> {
         ensure!(
-            self.source_hash == <[u8; 32]>::from(Sha256::digest(source.as_bytes())),
+            self.source_hash == hash128(source.as_bytes()),
             "source provenance content mismatch"
         );
         ensure!(
@@ -196,7 +196,7 @@ impl SourceProvenance {
             wire: Some(wire.clone()),
         };
         ensure!(
-            result.source_hash == <[u8; 32]>::from(Sha256::digest(source.as_bytes())),
+            result.source_hash == hash128(source.as_bytes()),
             "source provenance content mismatch"
         );
         Ok(result)

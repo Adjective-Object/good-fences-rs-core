@@ -36,7 +36,8 @@ context cache together.
 
 `PathInput` clones share their immutable original observation record and
 link-prefix slice rather than duplicating native paths and link buffers.
-Content seals remain independent scalar values on each handle. Immutable
+Content seals remain independent 16-byte big-endian XXH3-128 values on each handle,
+detecting accidental byte changes rather than authenticating publishers. Immutable
 `InputProof` arrays are shared across clones; mutable request collectors
 still snapshot/replay observations in their original order. Retained proofs
 keep only consulted records alive, not the filesystem snapshot, cached file

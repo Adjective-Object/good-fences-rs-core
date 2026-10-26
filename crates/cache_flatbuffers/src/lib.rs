@@ -33,13 +33,18 @@ pub use source_map::{MapData, MapSource, WireSourceMap};
 use std::{ops::Range, sync::Arc};
 
 use eyre::{ensure, Result};
-use sha2::{Digest, Sha256};
 
 pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
-pub const SCHEMA_VERSION: u32 = 19;
-pub const EXTRACTOR_VERSION: u32 = 32;
+pub const SCHEMA_VERSION: u32 = 20;
+pub const EXTRACTOR_VERSION: u32 = 33;
 pub const MODULE_IDENTIFIER: &str = "GFSM";
-const CHECKSUM_BYTES: usize = 32;
+const CHECKSUM_BYTES: usize = 16;
+
+/// XXH3-128 in the same big-endian byte order as internal fingerprints.
+/// Detects accidental corruption, not authentication of cache publishers.
+pub fn hash128(bytes: &[u8]) -> [u8; 16] {
+    xxhash_rust::xxh3::xxh3_128(bytes).to_be_bytes()
+}
 
 /// Check Ecco discriminants, canonical maps and host ID widths after generated
 /// structural verification, including when Ecco is embedded in another root.
@@ -122,7 +127,7 @@ impl WireRecord {
             .ok_or_else(|| eyre::eyre!("truncated cache checksum"))?;
         let (payload, checksum) = bytes.split_at(payload_end);
         ensure!(
-            <[u8; 32]>::from(Sha256::digest(payload)).as_slice() == checksum,
+            hash128(payload).as_slice() == checksum,
             "cache checksum mismatch"
         );
         let root = verified_root(payload)?;
@@ -133,7 +138,7 @@ impl WireRecord {
             "cache version mismatch"
         );
         let provenance = root.provenance();
-        let source_hash: [u8; 32] = Sha256::digest(source.as_bytes()).into();
+        let source_hash = hash128(source.as_bytes());
         ensure!(
             source.len() <= u32::MAX as usize
                 && root.source_len() == source.len() as u64
@@ -149,7 +154,7 @@ impl WireRecord {
         );
         let config = root.config();
         let module_bytes = root.module().bytes();
-        let records_hash: [u8; 32] = Sha256::digest(module_bytes).into();
+        let records_hash = hash128(module_bytes);
         ensure!(
             provenance.records_hash().bytes().iter().eq(records_hash),
             "cache extraction provenance mismatch"
@@ -230,7 +235,7 @@ pub fn frame(payload: &[u8]) -> Result<Vec<u8>> {
     verify::module(verified_module(root.module().bytes())?)?;
     let mut bytes = Vec::with_capacity(payload.len() + CHECKSUM_BYTES);
     bytes.extend_from_slice(payload);
-    bytes.extend_from_slice(&Sha256::digest(payload));
+    bytes.extend_from_slice(&hash128(payload));
     Ok(bytes)
 }
 

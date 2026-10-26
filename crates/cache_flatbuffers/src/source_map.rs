@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 use eyre::{ensure, Result};
-use sha2::{Digest, Sha256};
 
-use crate::{wire, EXTRACTOR_VERSION, MAX_RECORD_BYTES, SCHEMA_VERSION};
+use crate::{hash128, wire, CHECKSUM_BYTES, EXTRACTOR_VERSION, MAX_RECORD_BYTES, SCHEMA_VERSION};
 
 #[cfg(test)]
 #[path = "source_map_tests.rs"]
@@ -66,10 +65,8 @@ impl WireSourceMap {
             &wire::UpstreamMapArgs {
                 schema: SCHEMA_VERSION,
                 extractor: EXTRACTOR_VERSION,
-                source_hash: Some(&wire::Sha256::new(
-                    &Sha256::digest(source.as_bytes()).into(),
-                )),
-                input_hash: Some(&wire::Sha256::new(&Sha256::digest(input).into())),
+                source_hash: Some(&wire::Hash128::new(&hash128(source.as_bytes()))),
+                input_hash: Some(&wire::Hash128::new(&hash128(input))),
                 location: Some(location),
                 file,
                 source_root,
@@ -80,18 +77,18 @@ impl WireSourceMap {
         );
         builder.finish(root, Some("GFUM"));
         let mut bytes = builder.finished_data().to_vec();
-        bytes.extend_from_slice(&Sha256::digest(builder.finished_data()));
+        bytes.extend_from_slice(&hash128(builder.finished_data()));
         Self::new(bytes.into(), source, input, data.location)
     }
 
     pub fn new(bytes: Arc<[u8]>, source: &str, input: &[u8], location: &str) -> Result<Self> {
         ensure!(
-            bytes.len() <= MAX_RECORD_BYTES && bytes.len() >= 40,
+            bytes.len() <= MAX_RECORD_BYTES && bytes.len() >= 8 + CHECKSUM_BYTES,
             "invalid source map cache size"
         );
-        let (payload, checksum) = bytes.split_at(bytes.len() - 32);
+        let (payload, checksum) = bytes.split_at(bytes.len() - CHECKSUM_BYTES);
         ensure!(
-            Sha256::digest(payload).as_slice() == checksum,
+            hash128(payload).as_slice() == checksum,
             "source map cache checksum mismatch"
         );
         ensure!(
@@ -108,12 +105,8 @@ impl WireSourceMap {
             root.source_hash()
                 .bytes()
                 .iter()
-                .eq(<[u8; 32]>::from(Sha256::digest(source.as_bytes())))
-                && root
-                    .input_hash()
-                    .bytes()
-                    .iter()
-                    .eq(<[u8; 32]>::from(Sha256::digest(input)))
+                .eq(hash128(source.as_bytes()))
+                && root.input_hash().bytes().iter().eq(hash128(input))
                 && root.location() == location,
             "source map cache provenance mismatch"
         );
@@ -142,7 +135,7 @@ impl WireSourceMap {
         // nested table and semantic index; no mutable aliases are exposed.
         unsafe {
             flatbuffers::root_unchecked::<wire::UpstreamMap<'_>>(
-                &self.bytes[..self.bytes.len() - 32],
+                &self.bytes[..self.bytes.len() - CHECKSUM_BYTES],
             )
         }
     }
@@ -156,12 +149,8 @@ impl WireSourceMap {
         root.source_hash()
             .bytes()
             .iter()
-            .eq(<[u8; 32]>::from(Sha256::digest(source.as_bytes())))
-            && root
-                .input_hash()
-                .bytes()
-                .iter()
-                .eq(<[u8; 32]>::from(Sha256::digest(input)))
+            .eq(hash128(source.as_bytes()))
+            && root.input_hash().bytes().iter().eq(hash128(input))
             && root.location() == location
     }
 

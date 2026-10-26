@@ -18,7 +18,6 @@ ecco = { path = "../ecco" }
 eyre.workspace = true
 serde.workspace = true
 serde_cbor = "0.11.2"
-sha2 = "0.10.9"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 smallvec = "1"
 ahashmap = { version = "0.2.0", path = "../ahashmap" }

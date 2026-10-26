@@ -1,7 +1,8 @@
 namespace source_cache;
 
 struct Span { start:uint; end:uint; }
-struct Sha256 { bytes:[ubyte:32]; }
+// Big-endian XXH3-128, for corruption detection rather than authentication.
+struct Hash128 { bytes:[ubyte:16]; }
 struct Fingerprint { bytes:[ubyte:16]; }
 struct ParserConfig {
   typescript:bool;

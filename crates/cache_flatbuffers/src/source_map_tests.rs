@@ -81,3 +81,48 @@ fn upstream_map_rejects_corruption_stale_inputs_and_invalid_semantic_links() {
     ])
     .is_err());
 }
+
+#[test]
+fn upstream_map_rejects_previous_identity_with_valid_new_checksum() {
+    let map = encode(&[wire::MapToken::new(0, 0, 0, 0, 0, 0)]).unwrap();
+    let end = map.bytes().len() - CHECKSUM_BYTES;
+    assert_eq!(&map.bytes()[end..], &hash128(&map.bytes()[..end]));
+    assert!(map
+        .root()
+        .source_hash()
+        .bytes()
+        .iter()
+        .eq(hash128(b"compiled")));
+    assert!(map.root().input_hash().bytes().iter().eq(hash128(b"json")));
+    let root = map.root();
+    for (slot, previous) in [
+        (wire::UpstreamMap::VT_SCHEMA, 19_u32),
+        (wire::UpstreamMap::VT_EXTRACTOR, 32_u32),
+    ] {
+        let offset = root._tab.loc() + usize::from(root._tab.vtable().get(slot));
+        let mut bytes = map.bytes().to_vec();
+        bytes[offset..offset + 4].copy_from_slice(&previous.to_le_bytes());
+        let checksum = hash128(&bytes[..end]);
+        bytes[end..].copy_from_slice(&checksum);
+        let error = WireSourceMap::new(
+            bytes.into(),
+            "compiled",
+            b"json",
+            "file:///project/maps/input.map",
+        )
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("version"));
+    }
+    for index in 0..CHECKSUM_BYTES {
+        let mut bytes = map.bytes().to_vec();
+        bytes[end + index] ^= 1;
+        let error = WireSourceMap::new(
+            bytes.into(),
+            "compiled",
+            b"json",
+            "file:///project/maps/input.map",
+        )
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("checksum"));
+    }
+}

@@ -27,8 +27,8 @@ fn record(module: &w::CachedModuleT) -> w::CacheRecordT {
     let root = module.pack(&mut builder);
     builder.finish(root, Some(MODULE_IDENTIFIER));
     let module = builder.finished_data().to_vec();
-    let source_hash = w::Sha256T {
-        bytes: Sha256::digest(SOURCE.as_bytes()).into(),
+    let source_hash = w::Hash128T {
+        bytes: hash128(SOURCE.as_bytes()),
     };
     w::CacheRecordT {
         schema: SCHEMA_VERSION,
@@ -38,8 +38,8 @@ fn record(module: &w::CachedModuleT) -> w::CacheRecordT {
         source_hash: source_hash.clone(),
         provenance: Box::new(w::SourceProvenanceT {
             source_hash,
-            records_hash: w::Sha256T {
-                bytes: Sha256::digest(&module).into(),
+            records_hash: w::Hash128T {
+                bytes: hash128(&module),
             },
             ..Default::default()
         }),
@@ -57,12 +57,54 @@ fn payload(record: &w::CacheRecordT) -> Vec<u8> {
 
 fn checksum(payload: &[u8]) -> Vec<u8> {
     let mut bytes = payload.to_vec();
-    bytes.extend_from_slice(&Sha256::digest(payload));
+    bytes.extend_from_slice(&hash128(payload));
     bytes
 }
 
 fn load(bytes: Vec<u8>) -> Result<WireRecord> {
     WireRecord::new(bytes.into(), SOURCE, w::ParserConfig::default(), OXC)
+}
+
+#[test]
+fn xxh3_framing_and_seals_use_complete_big_endian_128_bit_digests() {
+    assert_eq!(
+        hash128(b""),
+        [
+            0x99, 0xaa, 0x06, 0xd3, 0x01, 0x47, 0x98, 0xd8, 0x60, 0x01, 0xc3, 0x24, 0x46, 0x8d,
+            0x49, 0x7f,
+        ]
+    );
+    let original = record(&module());
+    let encoded = payload(&original);
+    let bytes = frame(&encoded).unwrap();
+    assert_eq!(&bytes[encoded.len()..], &hash128(&encoded));
+    let owner = load(bytes.clone()).unwrap();
+    assert!(owner
+        .root()
+        .source_hash()
+        .bytes()
+        .iter()
+        .eq(hash128(SOURCE.as_bytes())));
+    assert!(owner
+        .root()
+        .provenance()
+        .records_hash()
+        .bytes()
+        .iter()
+        .eq(hash128(&original.module)));
+    for index in 0..CHECKSUM_BYTES {
+        let mut damaged = bytes.clone();
+        damaged[encoded.len() + index] ^= 1;
+        assert!(format!("{:#}", load(damaged).unwrap_err()).contains("checksum"));
+        let mut damaged = original.clone();
+        damaged.provenance.records_hash.bytes[index] ^= 1;
+        assert!(
+            format!("{:#}", load(checksum(&payload(&damaged))).unwrap_err()).contains("provenance")
+        );
+    }
+    let mut old_width = bytes;
+    old_width.extend_from_slice(&[0; 16]);
+    assert!(load(old_width).is_err());
 }
 
 #[test]
@@ -171,7 +213,7 @@ fn independently_verifies_nested_roots_and_vector_lengths() {
     for offset in [0, 4] {
         let mut record = original.clone();
         record.module[offset..offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
-        record.provenance.records_hash.bytes = Sha256::digest(&record.module).into();
+        record.provenance.records_hash.bytes = hash128(&record.module);
         assert!(load(checksum(&payload(&record))).is_err());
     }
     let mut bytes = payload(&original);
@@ -232,7 +274,7 @@ fn rejects_unknown_and_missing_union_discriminants() {
         let field =
             root._tab.loc() + root._tab.vtable().get(w::CachedModule::VT_BODY_TYPE) as usize;
         record.module[field] = discriminator;
-        record.provenance.records_hash.bytes = Sha256::digest(&record.module).into();
+        record.provenance.records_hash.bytes = hash128(&record.module);
         assert!(load(checksum(&payload(&record))).is_err());
     }
 }

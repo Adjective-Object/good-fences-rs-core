@@ -1030,7 +1030,10 @@ impl BuildSession {
                 options.output.source_maps,
                 self.upstreams
                     .iter()
-                    .map(|(path, upstream)| (path, hash(upstream.map().bytes())))
+                    .map(|(path, upstream)| (
+                        path,
+                        cache_flatbuffers::hash128(upstream.map().bytes())
+                    ))
                     .collect::<Vec<_>>(),
                 options.output.source_maps.then(|| self
                     .sources
@@ -1039,7 +1042,7 @@ impl BuildSession {
                         .transpiled
                         .as_ref()
                         .and_then(|transpiled| transpiled.source_map.as_ref())
-                        .map(|map| (path, hash(map.bytes()))))
+                        .map(|map| (path, cache_flatbuffers::hash128(map.bytes()))))
                     .collect::<Vec<_>>()),
             )
             .as_bytes(),

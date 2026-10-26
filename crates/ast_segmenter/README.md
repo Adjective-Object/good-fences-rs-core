@@ -146,7 +146,8 @@ It validates and owns immutable facts together with their typed 128-bit XXH3
 `fingerprint::declaration_fingerprint_count()` counts declaration serialization/
 hash operations on the current thread, including compatibility wrappers.
 The declaration fingerprint replaces the former 32-byte SHA-256 declaration
-field; source and sealed extraction integrity hashes remain SHA-256.
+field. Source and sealed extraction integrity also use big-endian XXH3-128,
+matching fingerprint byte order; these are corruption checks, not authentication.
 ESM `facts.ecco` contains owned lazy roots/functions extracted from the same
 checked AST, at most one root per actual segment (including split declarators).
 CommonJS keeps `None` and remains opaque. `facts.ecco_declarations_hash` seals

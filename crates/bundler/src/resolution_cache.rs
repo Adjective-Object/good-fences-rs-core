@@ -294,7 +294,7 @@ fn encode_input(roots: &Roots, input: &PathInput) -> Result<wire::InputT> {
         .map(|(volume, file)| wire::IdentityT { volume, file });
     record.content = input
         .content_seal()
-        .map(|bytes| wire::DigestT { bytes: *bytes });
+        .map(|bytes| wire::Hash128T { bytes: *bytes });
     record.links = links;
     Ok(record)
 }

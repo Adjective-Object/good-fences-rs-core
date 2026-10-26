@@ -18,7 +18,6 @@ pub use ast_segmenter::ParserConfig;
 use ast_segmenter::{ModuleBody, ParsedModule};
 use eyre::ensure;
 use oxc_span::Span;
-use sha2::{Digest, Sha256};
 pub use validate::validate_parsed;
 
 pub use cache_flatbuffers::{EXTRACTOR_VERSION, MAX_RECORD_BYTES, SCHEMA_VERSION};
@@ -27,8 +26,8 @@ pub const OXC_REVISION: &str = "73e6b564737a29ecebf428d276421dcc492836df";
 mod records;
 pub use records::{CacheRecord, CachedModule};
 
-fn digest(bytes: &[u8]) -> [u8; 32] {
-    Sha256::digest(bytes).into()
+fn digest(bytes: &[u8]) -> [u8; 16] {
+    cache_flatbuffers::hash128(bytes)
 }
 
 #[cfg(test)]

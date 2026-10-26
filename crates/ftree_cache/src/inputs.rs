@@ -1,7 +1,6 @@
 //! Explicit filesystem observations, retained with the values they produced.
 use eyre::WrapErr;
 use parking_lot::Mutex;
-use sha2::{Digest, Sha256};
 use std::{
     fs, io,
     path::{Path, PathBuf},
@@ -23,7 +22,7 @@ pub enum InputKind {
 #[derive(Clone, PartialEq, Eq)]
 pub struct PathInput {
     observation: Arc<PathObservation>,
-    content: Option<[u8; 32]>,
+    content: Option<[u8; 16]>,
 }
 
 impl std::fmt::Debug for PathInput {
@@ -98,7 +97,7 @@ impl PathInput {
         canonical: Option<PathBuf>,
         identity: Option<(u64, u64)>,
         links: Vec<(PathBuf, PathBuf)>,
-        content: Option<[u8; 32]>,
+        content: Option<[u8; 16]>,
     ) -> eyre::Result<Self> {
         eyre::ensure!(path.is_absolute(), "resolution input path is not absolute");
         let input = Self {
@@ -196,13 +195,13 @@ impl PathInput {
         &self.observation.links
     }
 
-    pub fn content_seal(&self) -> Option<&[u8; 32]> {
+    pub fn content_seal(&self) -> Option<&[u8; 16]> {
         self.content.as_ref()
     }
 
     /// Seal the exact bytes used by a content-dependent consumer.
     pub fn seal_content(&mut self, bytes: &[u8]) {
-        self.content = Some(Sha256::digest(bytes).into());
+        self.content = Some(xxhash_rust::xxh3::xxh3_128(bytes).to_be_bytes());
     }
 
     pub fn validate(&self) -> eyre::Result<()> {
@@ -237,7 +236,7 @@ impl PathInput {
         canonical: Option<PathBuf>,
         identity: Option<(u64, u64)>,
         links: Vec<(PathBuf, PathBuf)>,
-        content: Option<[u8; 32]>,
+        content: Option<[u8; 16]>,
     ) -> eyre::Result<Self> {
         eyre::ensure!(path.is_absolute(), "resolution input path is not absolute");
         let input = Self {
@@ -410,7 +409,7 @@ mod tests {
         };
         assert_eq!(reconstruct(&original).unwrap(), original);
         let mut forged = original.clone();
-        forged.content = Some([0; 32]);
+        forged.content = Some([0; 16]);
         assert!(reconstruct(&forged).is_err());
         forged = original.clone();
         Arc::make_mut(&mut forged.observation).identity = Some((0, 0));
@@ -422,7 +421,7 @@ mod tests {
         reconstruct(&missing).unwrap();
         fs::write(missing.path(), "").unwrap();
         assert!(reconstruct(&missing).is_err());
-        fs::write(path, "{\"changed\":true}").unwrap();
+        fs::write(path, "[]").unwrap();
         assert!(reconstruct(&original).is_err());
     }
 }

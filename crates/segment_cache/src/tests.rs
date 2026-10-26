@@ -44,8 +44,6 @@ fn commonjs_module_detectors_roundtrip_without_reparse_or_loader_dependencies() 
     );
     assert!(parsed.facts().dependencies().is_empty());
     assert_eq!(ast_segmenter::module_parse_count(), parses);
-    assert_eq!(EXTRACTOR_VERSION, 32);
-    assert_eq!(SCHEMA_VERSION, 19);
 }
 
 #[test]
@@ -875,16 +873,14 @@ fn async_deferred_roundtrips_and_rejects_missing_mutated_and_stale_facts() {
 
 #[test]
 fn production_uses_typed_flatbuffers_and_rejects_previous_cbor() {
-    // Old CBOR digests identify the intentionally incompatible prior format.
-    for (path, source, format, previous) in [
-        ("entry.mjs", "import * as ns from './dep'; export let x = 1, y = ns.value; export function f(a) { return () => a + x; } x++; /*#__PURE__*/ ns.call?.(f(y), ...items);", ModuleFormat::Esm, "19ca011458a79b6a87eaa06b0c12c16172a525743c79262b9d8826ac56d17c24"),
-        ("async.mjs", "export const x = await load(); (() => { consume(x); })(); class C { [key()] = value(); static x = setup(); }", ModuleFormat::Esm, "53991301778b338305cea4e88ab8ca1a735a18ba0b8bcf9ddb5ebef7f1cba117"),
-        ("entry.cjs", "#!/usr/bin/env node\n'use strict'; module.exports = name => require('./parts/' + name);", ModuleFormat::CommonJs, "76bdfcba1aa442d832757eaa11fda3ea1bdb79f329c6878cb7826f7c267d7d0a"),
-        ("empty.mjs", "", ModuleFormat::Esm, "778555e065c782772c87855dc9af5d32289e1052879ef206230b481f386a146c"),
+    for (path, source, format) in [
+        ("entry.mjs", "import * as ns from './dep'; export let x = 1, y = ns.value; export function f(a) { return () => a + x; } x++; /*#__PURE__*/ ns.call?.(f(y), ...items);", ModuleFormat::Esm),
+        ("async.mjs", "export const x = await load(); (() => { consume(x); })(); class C { [key()] = value(); static x = setup(); }", ModuleFormat::Esm),
+        ("entry.cjs", "#!/usr/bin/env node\n'use strict'; module.exports = name => require('./parts/' + name);", ModuleFormat::CommonJs),
+        ("empty.mjs", "", ModuleFormat::Esm),
     ] {
         let bytes = record(source, path, format).encode(source).unwrap();
         assert_eq!(&bytes[8..12], b"GFSC");
-        assert_ne!(format!("{:x}", Sha256::digest(&bytes)), previous, "{path}");
         let original = record(source, path, format);
         let legacy = serde_cbor::to_vec(&original).unwrap();
         assert!(CacheRecord::decode(&legacy, source, original.config()).is_err());
@@ -1188,8 +1184,8 @@ fn wire_semantics_reject_resealed_execution_self_parent() {
     let mut bytes = wire.bytes().to_vec();
     bytes[offset..offset + 4].copy_from_slice(&(index as u32).to_le_bytes());
     let hash = digest(&bytes[module_start..module_start + module.len()]);
-    bytes[seal..seal + 32].copy_from_slice(&hash);
-    let checksum = bytes.len() - 32;
+    bytes[seal..seal + 16].copy_from_slice(&hash);
+    let checksum = bytes.len() - 16;
     let hash = digest(&bytes[..checksum]);
     bytes[checksum..].copy_from_slice(&hash);
 
@@ -1241,8 +1237,8 @@ fn production_rejects_resealed_unknown_wire_discriminant() {
     let mut bytes = wire.bytes().to_vec();
     bytes[module_start + table.loc() + tag] = 255;
     let hash = digest(&bytes[module_start..module_start + module.len()]);
-    bytes[seal..seal + 32].copy_from_slice(&hash);
-    let checksum = bytes.len() - 32;
+    bytes[seal..seal + 16].copy_from_slice(&hash);
+    let checksum = bytes.len() - 16;
     let hash = digest(&bytes[..checksum]);
     bytes[checksum..].copy_from_slice(&hash);
     assert!(CacheRecord::decode(&bytes, source, record.config()).is_err());

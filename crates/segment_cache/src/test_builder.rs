@@ -31,7 +31,7 @@ pub(super) struct FixtureRecord {
     extractor: u32,
     oxc: String,
     source_len: u64,
-    source_hash: [u8; 32],
+    source_hash: [u8; 16],
     config: ParserConfig,
     module: FixtureModule,
     provenance: ast_segmenter::SourceProvenance,
@@ -77,17 +77,17 @@ impl FixtureRecord {
             .facts
             .encode_module(self.module.body, &self.module.segments);
         let p = serde_json::to_value(&self.provenance).unwrap();
-        let source_hash: [u8; 32] = serde_json::from_value(p["source_hash"].clone()).unwrap();
-        let records_hash: [u8; 32] = if reseal {
+        let source_hash: [u8; 16] = serde_json::from_value(p["source_hash"].clone()).unwrap();
+        let records_hash: [u8; 16] = if reseal {
             digest(&module)
         } else {
             serde_json::from_value(p["records_hash"].clone()).unwrap()
         };
         let config = self.config.wire();
         let provenance_config = self.provenance.config().wire();
-        let hash = w::Sha256::new(&self.source_hash);
-        let p_hash = w::Sha256::new(&source_hash);
-        let records_hash = w::Sha256::new(&records_hash);
+        let hash = w::Hash128::new(&self.source_hash);
+        let p_hash = w::Hash128::new(&source_hash);
+        let records_hash = w::Hash128::new(&records_hash);
         let mut b = flatbuffers::FlatBufferBuilder::new();
         let module = b.create_vector(&module);
         let oxc = b.create_string(&self.oxc);

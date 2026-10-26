@@ -69,7 +69,10 @@ fn sidecar(package: &Path, config: &BuildOptions) -> PathBuf {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    package.join(format!(".bundler-resolution-v1-{policy}.fb"))
+    package.join(format!(
+        ".bundler-resolution-v{}-{policy}.fb",
+        cache_flatbuffers::resolution::SCHEMA_VERSION
+    ))
 }
 
 #[test]

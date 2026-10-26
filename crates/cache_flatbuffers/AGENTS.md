@@ -1,13 +1,13 @@
 # cache_flatbuffers
 
-- Independent `resolution.fbs` schema 1 owns verified borrowed `GFRS` records.
+- Independent `resolution.fbs` schema 2 owns verified borrowed `GFRS` records.
   Package/dependency/policy identities and typed scoped proofs do not change
   source schema/extractor versions. Consumers freshly validate filesystem proofs
   before checked reuse; generated object APIs remain construction-only.
   Aggregate updates copy verified borrowed request tables directly into a new
   builder, preserving untouched requests without unpacking input/proof trees.
 
-- This is the production `.seg.fb` backend (schema 19/extractor 32).
+- This is the production `.seg.fb` backend (schema 20/extractor 33).
   `segment_cache` adds source-local semantic validation before exposing records.
 - Parser config seals effective format and syntax-detection policy. Requested
   CommonJS-default detection may match cached ESM only under identical policy;
@@ -24,8 +24,11 @@
 - `WireEcco` provides the same immutable verified ownership for standalone
   precursors; Ecco validates semantic links through borrowed views before solve.
 - The nested module is itself a typed FlatBuffer, never CBOR or an opaque DTO.
-  Its exact SHA-256 is the extraction seal; the outer checksum covers framing and
+  Its exact XXH3-128 is the extraction seal; the outer checksum covers framing and
   metadata. Generated object APIs are construction-only, never warm-load adapters.
+- Source/map identities, extraction seals, filesystem content proofs and all
+  framing checksums are 16-byte big-endian XXH3-128, not authentication.
+  Independent resolution package/dependency/policy digests retain SHA-256.
 - Wire/source integrity is not semantic validity. Production integration must
   retain source-local span/link/ordering/recipe checks and private extraction seals.
   Do not manufacture seals around arbitrary source/facts or deserialize for checking.

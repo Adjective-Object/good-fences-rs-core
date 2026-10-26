@@ -170,7 +170,6 @@ dependencies = [
  "oxc_utils_parse",
  "serde",
  "serde_cbor",
- "sha2 0.10.9",
  "smallvec",
  "test_tmpdir",
  "thiserror 1.0.69",
@@ -515,7 +514,7 @@ version = "0.1.0"
 dependencies = [
  "eyre",
  "flatbuffers",
- "sha2 0.10.9",
+ "xxhash-rust",
 ]
 
 [[package]]
@@ -1256,9 +1255,9 @@ dependencies = [
  "eyre",
  "hashbrown 0.14.5",
  "parking_lot",
- "sha2 0.10.9",
  "test_tmpdir",
  "tracing",
+ "xxhash-rust",
 ]
 
 [[package]]
@@ -3571,7 +3570,6 @@ dependencies = [
  "serde",
  "serde_cbor",
  "serde_json",
- "sha2 0.10.9",
  "tempfile",
  "test_tmpdir",
  "tracing",

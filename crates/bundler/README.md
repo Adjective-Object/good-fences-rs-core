@@ -23,7 +23,7 @@ Graph linking, effect policy, Ecco registration, execution constraints and nativ
 recipe rendering consume owned-or-wire AST views. A byte-backed graph retains
 verified owners, including Ecco's nested storage, without unpacking extraction
 trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
-`.seg.fb` records (schema 19/extractor 32); parse fingerprints include both active
+`.seg.fb` records (schema 20/extractor 33); parse fingerprints include both active
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
 
@@ -52,7 +52,7 @@ enable ignoring, and explicit false follows normal bundling.
 ### Package-local resolution caches
 
 Production `BuildSession` resolves actual literal/context/resource requests through
-independent `.bundler-resolution-v1-<policy-sha256>.fb` package sidecars. The policy
+independent `.bundler-resolution-v2-<policy-sha256>.fb` package sidecars. The policy
 key covers effective resolver options, externals, platform and implementation,
 not inventory contents. Package keys include physical instance, original mutable
 manifest bytes and mapped lockfile named dependency fingerprints. Importer paths,
@@ -1598,7 +1598,7 @@ routes feed demand admission, not arbitrary external canonical-path authority.
 `Roots::new` supplies runtime package/project anchors. `CheckedResolution::encode`
 accepts complete per-policy request aggregates with original Stage 2 `InputProof`s,
 canonical file targets or explicit externals, and package/dependency/policy hashes.
-`Store::load_scoped` checks independent typed FlatBuffer schema 1, then freshly validates
+`Store::load_scoped` checks independent typed FlatBuffer schema 2, then freshly validates
 borrowed proofs before constructing a checked immutable owner. `find` borrows
 requests; stale requests are discarded without evicting other valid requests.
 `file_target` reconstructs an anchored path; consulted requests are revalidated
@@ -1793,7 +1793,10 @@ change, sharing the facts and declaration fingerprint across memory checks,
 sidecar checks and extraction (no per-source declaration serialization).
 Parse, resolution, roots, runtime and output keys are typed XXH3-128
 `ast_segmenter::fingerprint::Fingerprint` values rather than 32-byte SHA-256
-arrays. The separate effect-policy identity, source/provenance checks,
+arrays. Source/provenance seals, upstream-map identities, filesystem content
+proofs and source/map/resolution framing checksums also use 16-byte big-endian
+XXH3-128 (corruption detection, not authentication). The separate effect-policy
+identity, resolution package/dependency/policy keys, lockfile fingerprints,
 published-file integrity and content-addressed resource names remain SHA-256.
 The session reports actual extraction misses, memory/disk hits, dependency
 resolution calls, linker calls and generated-output/recipe parse calls separately.

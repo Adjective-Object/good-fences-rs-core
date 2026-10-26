@@ -31,7 +31,7 @@ pub struct CacheRecord {
     wire: Option<cache_flatbuffers::WireRecord>,
     module: Arc<CachedModule>,
     source_len: u64,
-    source_hash: [u8; 32],
+    source_hash: [u8; 16],
     write_error: Option<Arc<str>>,
 }
 
@@ -70,7 +70,7 @@ impl CacheRecord {
         self.source_len
     }
 
-    pub fn source_hash(&self) -> [u8; 32] {
+    pub fn source_hash(&self) -> [u8; 16] {
         self.source_hash
     }
 

@@ -100,7 +100,9 @@ identities; never cache solved effects. Share a solve across async partition rou
 Declaration structs key source metadata, memory reuse and parse fingerprints.
 Keep one validated immutable `PreparedDeclarations` per session configuration;
 share its fingerprint through memory/disk checks and extraction. Internal build
-layer keys use typed XXH3-128 fingerprints; publication/content integrity and
+layer keys use typed XXH3-128 fingerprints. Source/preparation identities, upstream
+map identities and cache/proof integrity use big-endian XXH3-128 too, not authentication.
+Independent resolution package/dependency/policy digests, publication/content integrity and
 resource naming retain SHA-256.
 Select Ecco host contracts from resolver target and key preparation by host plus
 declaration config; retain explicit user overrides and wrapper read contracts.

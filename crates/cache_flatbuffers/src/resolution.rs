@@ -2,11 +2,10 @@
 use std::sync::Arc;
 
 use eyre::{ensure, Result};
-use sha2::{Digest, Sha256};
 
-use crate::{resolution_wire as wire, MAX_RECORD_BYTES};
+use crate::{hash128, resolution_wire as wire, CHECKSUM_BYTES, MAX_RECORD_BYTES};
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Key {
@@ -302,7 +301,7 @@ impl WireResolution {
         );
         builder.finish_size_prefixed(root, Some("GFRS"));
         let mut bytes = builder.finished_data().to_vec();
-        bytes.extend_from_slice(&Sha256::digest(builder.finished_data()));
+        bytes.extend_from_slice(&hash128(builder.finished_data()));
         Self::new(bytes.into(), key)
     }
 
@@ -312,18 +311,18 @@ impl WireResolution {
         let root = data.pack(&mut builder);
         builder.finish_size_prefixed(root, Some("GFRS"));
         let mut bytes = builder.finished_data().to_vec();
-        bytes.extend_from_slice(&Sha256::digest(builder.finished_data()));
+        bytes.extend_from_slice(&hash128(builder.finished_data()));
         Self::new(bytes.into(), key)
     }
 
     pub fn new(bytes: Arc<[u8]>, key: Key) -> Result<Self> {
         ensure!(
-            bytes.len() >= 44 && bytes.len() <= MAX_RECORD_BYTES,
+            bytes.len() >= 12 + CHECKSUM_BYTES && bytes.len() <= MAX_RECORD_BYTES,
             "invalid resolution cache size"
         );
-        let (payload, checksum) = bytes.split_at(bytes.len() - 32);
+        let (payload, checksum) = bytes.split_at(bytes.len() - CHECKSUM_BYTES);
         ensure!(
-            Sha256::digest(payload).as_slice() == checksum,
+            hash128(payload).as_slice() == checksum,
             "resolution cache checksum mismatch"
         );
         ensure!(
@@ -349,7 +348,9 @@ impl WireResolution {
         // SAFETY: construction verifies these exact immutable bytes, including
         // all discriminants and borrowed semantic invariants.
         unsafe {
-            wire::size_prefixed_root_as_resolution_unchecked(&self.bytes[..self.bytes.len() - 32])
+            wire::size_prefixed_root_as_resolution_unchecked(
+                &self.bytes[..self.bytes.len() - CHECKSUM_BYTES],
+            )
         }
     }
 

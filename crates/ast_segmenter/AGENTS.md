@@ -142,7 +142,7 @@ root ownership; CJS stays `None`. Effective `ecco_declarations_hash` is a sealed
 configuration input in both formats, never graph conclusions. Share immutable
 `PreparedDeclarations` across checked parses/cache checks; its typed XXH3 identity
 is computed from validated facts, never paired with a caller-supplied digest.
-Source/body/facts provenance keeps SHA-256 independently.
+Source/body/facts provenance uses big-endian XXH3-128 independently.
 Operations address existing occurrence IDs/indices and original spans; preorder
 parents and source-slot roots precompose nesting before the arena drops.
 Only `new Worker(new URL(relative, import.meta.url), ...)` with unshadowed URL
