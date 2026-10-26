@@ -30,6 +30,7 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
         module_receivers: HashSet::new(),
         module_probes: HashSet::new(),
         typeof_names: HashSet::new(),
+        require_selections: HashSet::new(),
         wrapper_operations: HashSet::new(),
         operation: false,
         errors: Vec::new(),
@@ -67,7 +68,8 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
                     && (reference.write()
                         || policy.wrapper_operations.contains(&reference.span().start)
                         || (reference.name() == "require"
-                            && !policy.typeof_names.contains(&reference.span().start))) =>
+                            && !policy.typeof_names.contains(&reference.span().start)
+                            && !policy.require_selections.contains(&reference.span().start))) =>
             {
                 policy.reject(reference.span(), "mixed ESM/CommonJS wrapper reference");
             }
@@ -135,6 +137,7 @@ struct Policy {
     module_receivers: HashSet<u32>,
     module_probes: HashSet<u32>,
     typeof_names: HashSet<u32>,
+    require_selections: HashSet<u32>,
     wrapper_operations: HashSet<u32>,
     operation: bool,
     errors: Vec<String>,
@@ -263,6 +266,15 @@ impl<'a> Visit<'a> for Policy {
 
     fn visit_conditional_expression(&mut self, expression: &ConditionalExpression<'a>) {
         let saved = self.operation;
+        if !self.commonjs && !saved {
+            for branch in [&expression.consequent, &expression.alternate] {
+                if let Expression::Identifier(id) = branch.get_inner_expression() {
+                    if id.name == "require" {
+                        self.require_selections.insert(id.span.start);
+                    }
+                }
+            }
+        }
         self.operation = false;
         self.visit_expression(&expression.test);
         self.operation = saved;

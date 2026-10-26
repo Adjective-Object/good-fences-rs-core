@@ -104,9 +104,12 @@ Direct module.require/computed unknown members and bare wrapper escapes stay rej
 ESM environment reads of module/exports and typeof require stay unresolved native
 references, not CJS wrapper facts or constant-false guards. Preserve host reads,
 short-circuit aliases and lexical TDZ; keep direct wrapper operations rejected.
+Conditional value branches may select bare require as a native host read, without
+inferring loader dependencies. Preserve missing-host errors and selected getters;
+direct operations on conditional wrapper values remain rejected.
 Direct unshadowed literal require calls in ESM retain ESM format and ordinary
-dependency recipes. Reject ESM require contexts, aliases, writes and indirect uses;
-target compatibility and call-site activation remain native linker policy.
+dependency recipes. Reject ESM require contexts, other aliases, writes and
+indirect uses; target compatibility and call-site activation remain linker policy.
 Operation context follows selected conditional branches/final sequence values,
 not tests/discarded prefixes; logical operands remain conservatively checked.
 CommonJS path parameters allow var/function redeclarations and nested shadows;

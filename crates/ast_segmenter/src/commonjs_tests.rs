@@ -416,6 +416,41 @@ fn esm_environment_probes_preserve_shadows_and_unprotected_read_semantics() {
 }
 
 #[test]
+fn esm_environment_probes_select_native_host_loaders_without_dependencies() {
+    for selection in [
+        "typeof __webpack_require__ === 'function' ? __non_webpack_require__ : require",
+        "typeof __webpack_require__ !== 'function' ? (require) : __non_webpack_require__",
+        "outer ? (inner ? require : other) : fallback",
+    ] {
+        let source = format!(
+            "export function load() {{
+                const requireFunc = {selection};
+                return requireFunc('host-only');
+            }}"
+        );
+        let parsed = parse(&source, "host-loader.mjs").unwrap();
+        assert_eq!(parsed.body(), ModuleBody::Esm);
+        assert!(!parsed.facts().commonjs());
+        assert!(parsed.facts().dependencies().is_empty());
+        assert!(parsed
+            .facts()
+            .references()
+            .iter()
+            .filter(|reference| reference.name() == "require")
+            .all(|reference| reference.binding().is_none()
+                && reference.commonjs().is_none()
+                && !reference.write()));
+    }
+    parse(
+        "export function load(require) {
+            const host = flag ? require : fallback; return host(name);
+        }",
+        "shadow.mjs",
+    )
+    .unwrap();
+}
+
+#[test]
 fn esm_environment_probes_do_not_enable_wrapper_operations() {
     for source in [
         "module.exports = 1;",
@@ -431,6 +466,14 @@ fn esm_environment_probes_do_not_enable_wrapper_operations() {
         "new exports.Factory();",
         "exports.tag`value`;",
         "const load = require;",
+        "const load = flag ? require.resolve : fallback;",
+        "const load = flag ? (require = loader) : fallback;",
+        "const load = flag ? require++ : fallback;",
+        "(flag ? require : fallback)('./x');",
+        "new (flag ? require : fallback)('./x');",
+        "(flag ? require : fallback)`./x`;",
+        "(flag ? require : fallback).resolve('./x');",
+        "(flag ? require : fallback).cache = {};",
         "typeof require.resolve;",
         "(module ? module.require : browserImpl)('./x');",
         "(exports ? browserImpl : exports.run)();",

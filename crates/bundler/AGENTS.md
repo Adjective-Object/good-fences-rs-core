@@ -549,6 +549,8 @@ source bindings and free references, including in opaque factories.
 ESM environment probes remain native free reads; name allocation must not capture
 module/exports/require with merged lexical bindings or helpers. Never inject CJS
 globals, fold guards to false, or infer format from those probes.
+Conditional value branches may select native host require aliases (including
+webpack escape-loader selection); never infer dependencies or provide a loader.
 Preserve unresolved probe read sites during Ecco refinement, independently of
 graph-wide TDZ barriers; default global purity cannot erase getters/errors.
 Public builds add missing probe read-effect contracts before preparing/fingerprinting

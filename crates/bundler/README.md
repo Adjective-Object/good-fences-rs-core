@@ -23,7 +23,7 @@ Graph linking, effect policy, Ecco registration, execution constraints and nativ
 recipe rendering consume owned-or-wire AST views. A byte-backed graph retains
 verified owners, including Ecco's nested storage, without unpacking extraction
 trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
-`.seg.fb` records (schema 19/extractor 29); parse fingerprints include both active
+`.seg.fb` records (schema 19/extractor 30); parse fingerprints include both active
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
 
@@ -2003,22 +2003,28 @@ publication promises atomic visibility, not power-loss durability.
 
 ## CommonJS runtime
 
-ESM inputs may read `module`/`exports` or probe `typeof require` for environment
-detection (including lodash-es guards). These stay native free references, not
+ESM inputs may read `module`/`exports`, probe `typeof require`, or select bare
+`require` in conditional value branches for environment detection (including
+lodash-es guards). These stay native free references, not
 CommonJS wrapper bindings: the bundler does not inject Node globals or replace
 guards with `false`. Host-provided values/getters, short-circuit timing, lexical
 shadowing/TDZ and unguarded ReferenceErrors remain observable. Direct wrapper
 writes, deletes, updates, calls, construction and tags remain unsupported in ESM;
-aliases remain ordinary JavaScript values, not inferred loaders.
+aliases remain ordinary JavaScript values, not inferred loaders. In particular,
+`typeof __webpack_require__ === 'function' ? __non_webpack_require__ : require`
+selects the real host loader without bundling its aliased requests. Missing host
+loaders still throw when selected; browser fetch/AbortController branches can
+avoid those reads entirely.
 Direct unshadowed literal `require()` calls are supported in ESM without changing
 its format. Ordinary and reconstructed recipes share whole-call expression
 planning: availability imports do not invoke CJS factories; the original call site
 owns cached activation. Browser ESM/resource targets follow the synchronous leaf
-and shared-default rules above. ESM require contexts, loader aliases/mutations and
-external requires remain rejected. On Node, mixed ESM may require bundled CJS
+and shared-default rules above. ESM require contexts, other loader aliases,
+mutations and external requires remain rejected. On Node, mixed ESM may require bundled CJS
 (including prepared JSON), but synchronous ESM targets remain unsupported there.
-Unused native `module`/`exports` reads and `typeof require` retain their read
-effects through Ecco refinement, including host getters and missing-global errors;
+Unused native `module`/`exports` reads, `typeof require` and conditional host-loader
+selections retain their read effects through Ecco refinement, including host
+getters and missing-global errors;
 this includes unused calls to functions and indirect helpers that perform reads.
 Uncalled probe functions do not disable refinement. Executed host reads use Ecco's
 opaque-execution widening, which can also retain otherwise pure calls whose

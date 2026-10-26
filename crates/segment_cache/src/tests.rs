@@ -44,8 +44,41 @@ fn commonjs_module_detectors_roundtrip_without_reparse_or_loader_dependencies() 
     );
     assert!(parsed.facts().dependencies().is_empty());
     assert_eq!(ast_segmenter::module_parse_count(), parses);
-    assert_eq!(EXTRACTOR_VERSION, 29);
+    assert_eq!(EXTRACTOR_VERSION, 30);
     assert_eq!(SCHEMA_VERSION, 19);
+}
+
+#[test]
+fn esm_host_loader_selections_roundtrip_as_borrowed_native_reads() {
+    let source = "export function load() {
+        const requireFunc = typeof __webpack_require__ === 'function' ? __non_webpack_require__ : require;
+        return requireFunc('host-only');
+    }";
+    let original = record(source, "host-loader.mjs", ModuleFormat::Esm);
+    let parses = ast_segmenter::module_parse_count();
+    let cached =
+        CacheRecord::decode(&original.encode(source).unwrap(), source, original.config()).unwrap();
+    let parsed = cached.to_parsed(source).unwrap();
+    assert!(matches!(
+        parsed.facts(),
+        ast_segmenter::views::ModuleFacts::Wire(_)
+    ));
+    assert_eq!(parsed.body(), ast_segmenter::ModuleBody::Esm);
+    assert!(!parsed.facts().commonjs());
+    assert!(parsed.facts().dependencies().is_empty());
+    assert_eq!(
+        parsed.facts().references(),
+        original.module().facts().references()
+    );
+    assert_eq!(
+        parsed.facts().effects(),
+        original.module().facts().effects()
+    );
+    assert_eq!(
+        parsed.facts().emission(),
+        original.module().facts().emission()
+    );
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
 }
 
 #[test]

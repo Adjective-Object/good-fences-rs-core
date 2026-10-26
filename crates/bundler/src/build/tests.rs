@@ -7249,6 +7249,11 @@ fn unused_esm_environment_probes_preserve_effects_with_ecco_refinement() {
         ("typeof exports", "exports", "loaded"),
         ("exports", "exports", "ReferenceError"),
         ("typeof require", "require", "loaded"),
+        (
+            "typeof __webpack_require__ === 'function' ? __non_webpack_require__ : require",
+            "require",
+            "ReferenceError",
+        ),
     ] {
         let dir = TmpDir::new();
         write(
@@ -7317,6 +7322,11 @@ fn unused_esm_environment_probe_calls_preserve_deferred_reads() {
         ("typeof module", "module", "loaded"),
         ("typeof exports", "exports", "loaded"),
         ("typeof require", "require", "loaded"),
+        (
+            "typeof __webpack_require__ === 'function' ? __non_webpack_require__ : require",
+            "require",
+            "ReferenceError",
+        ),
     ] {
         for indirect in [false, true] {
             let dir = TmpDir::new();

@@ -7,6 +7,146 @@ fn browser_options() -> BuildOptions {
 }
 
 #[test]
+fn browser_esm_environment_probes_preserve_conditional_host_loader_selection() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "names.mjs",
+        "export const require = 'local', __webpack_require__ = 'webpack-local',
+            __non_webpack_require__ = 'non-webpack-local';",
+    );
+    write(
+        dir.root(),
+        "client.mjs",
+        r#"
+export class FetchHttpClient {
+    constructor() {
+        if (typeof fetch === 'undefined') {
+            const requireFunc = typeof __webpack_require__ === 'function' ? __non_webpack_require__ : require;
+            this.fetchType = requireFunc('node-fetch');
+        } else {
+            this.fetchType = fetch;
+        }
+        if (typeof AbortController === 'undefined') {
+            const requireFunc = typeof __webpack_require__ === 'function' ? __non_webpack_require__ : require;
+            this.abortControllerType = requireFunc('abort-controller');
+        } else {
+            this.abortControllerType = AbortController;
+        }
+    }
+}
+"#,
+    );
+    write(
+        dir.root(),
+        "main.mjs",
+        "import {require, __webpack_require__, __non_webpack_require__} from './names.mjs';
+         import {FetchHttpClient} from './client.mjs';
+         export function run() {
+             const client = new FetchHttpClient();
+             return [require, __webpack_require__, __non_webpack_require__,
+                 client.fetchType(), client.abortControllerType()];
+         }",
+    );
+    let mut config = browser_options();
+    config.output.source_maps = true;
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let built = session.build(&config).unwrap();
+    assert_eq!(
+        built.product.artifacts.backend,
+        crate::link::Backend::Native
+    );
+    assert_eq!(built.product.graph.file_count(), 3);
+    assert!(session.sources.values().all(|source| {
+        !source.record.config().commonjs()
+            && source
+                .record
+                .module()
+                .facts()
+                .dependencies()
+                .iter()
+                .all(|dependency| {
+                    dependency.kind() != ast_segmenter::owned::DependencyKind::Require
+                })
+    }));
+    let entry = built.product.artifacts.entries["main"]
+        .to_string_lossy()
+        .replace('\\', "/");
+    for (host, expected) in [
+        (
+            "globalThis.fetch = () => 'browser-fetch';
+             globalThis.AbortController = () => 'browser-abort';",
+            r#"[["local","webpack-local","non-webpack-local","browser-fetch","browser-abort"],[]]"#,
+        ),
+        (
+            "",
+            r#"["ReferenceError",["webpack"]]"#,
+        ),
+        (
+            "Object.defineProperty(globalThis, 'require', {get() { events.push('require'); return loader; }});",
+            r#"[["local","webpack-local","non-webpack-local","node-fetch","abort-controller"],["webpack","require","node-fetch","webpack","require","abort-controller"]]"#,
+        ),
+        (
+            "webpack = loader;",
+            r#"["ReferenceError",["webpack"]]"#,
+        ),
+        (
+            "webpack = loader;
+             Object.defineProperty(globalThis, '__non_webpack_require__', {get() { events.push('non-webpack'); return loader; }});
+             Object.defineProperty(globalThis, 'require', {get() { throw new Error('wrong loader'); }});",
+            r#"[["local","webpack-local","non-webpack-local","node-fetch","abort-controller"],["webpack","non-webpack","node-fetch","webpack","non-webpack","abort-controller"]]"#,
+        ),
+        (
+            "globalThis.fetch = () => 'browser-fetch';
+             Object.defineProperty(globalThis, 'require', {get() { events.push('require'); return loader; }});",
+            r#"[["local","webpack-local","non-webpack-local","browser-fetch","abort-controller"],["webpack","require","abort-controller"]]"#,
+        ),
+        (
+            "Object.defineProperty(globalThis, 'require', {get() { events.push('require'); throw new RangeError('host failure'); }});",
+            r#"["RangeError",["webpack","require"]]"#,
+        ),
+    ] {
+        let check = |entry: &str| format!(
+            "const events = [];
+             let webpack;
+             const loader = name => {{ events.push(name); return () => name; }};
+             globalThis.fetch = undefined;
+             globalThis.AbortController = undefined;
+             Object.defineProperty(globalThis, '__webpack_require__', {{get() {{ events.push('webpack'); return webpack; }} }});
+             {host}
+             const entry = await import('./{entry}');
+             let result;
+             try {{ result = entry.run(); }} catch (error) {{ result = error.name; }}
+             console.log(JSON.stringify([result, events]));"
+        );
+        write(dir.root(), "check.mjs", &check("main.mjs"));
+        let original = observe_entry(&dir.root().join("check.mjs"));
+        assert_eq!(String::from_utf8_lossy(&original).trim(), expected);
+        assert_eq!(
+            observe_named(&built.product.artifacts, &check(&entry)),
+            original,
+            "{host}"
+        );
+    }
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&built.product, &noop.product));
+    assert_eq!(noop.counters.source_parses, 0);
+    let disk = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(disk.counters.source_parses, 0);
+    assert_eq!(disk.counters.disk_hits, 3);
+    assert_eq!(disk.product.artifacts, built.product.artifacts);
+    config.cache = CacheMode::Disabled;
+    let uncached = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(uncached.product.artifacts, built.product.artifacts);
+}
+
+#[test]
 fn browser_native_output_preserves_host_getters_mutations_and_scheduling() {
     let dir = TmpDir::new();
     write(
