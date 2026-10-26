@@ -1542,8 +1542,12 @@ are injected. Bare builtin spellings such as `buffer` may resolve real installed
 packages through normal checked resolution, including import/require conditions,
 exports and cache invalidation. Missing builtin packages and remaining `node:`
 requests fail even if listed as externals; installed packages are bundled, not
-externalized. Alternatively supply a concrete local stub through
-`options.resolver.alias`, for example:
+externalized. A package's `browser: {"crypto": false}` does not authorize an
+empty module or suppress a guarded Node-accelerator dependency. Packages with a
+complete portable implementation can explicitly remove their optional Node
+accelerator in a maintained application dependency patch, preserving the API
+without a polyfill or changing the resolver policy. Alternatively supply a
+concrete local stub through `options.resolver.alias`, for example:
 
 ```rust,ignore
 options.resolver.alias.insert("fs".into(), "./browser-fs.cjs".into());

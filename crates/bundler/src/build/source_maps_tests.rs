@@ -917,6 +917,99 @@ fn source_maps_preserve_explicit_csp_safe_commonjs_global_fallback_repairs() {
 }
 
 #[test]
+fn source_maps_preserve_explicit_portable_commonjs_accelerator_repairs() {
+    let dir = TmpDir::new();
+    let path = "node_modules/@vendor/portable/index.js";
+    let source = r#"(function() {
+        globalThis.portableRuns++;
+        var NODE_JS = typeof process === 'object' && process.versions && process.versions.node;
+        var method = function(message) { return 'portable:' + message; };
+        module.exports = method;
+        method.create = function() {
+            var message = '';
+            return {
+                update: function(part) { message += part; return this; },
+                hex: function() { return method(message); }
+            };
+        };
+    }());"#;
+    write(
+        dir.root(),
+        "node_modules/@vendor/portable/package.json",
+        r#"{"name":"@vendor/portable","main":"index.js","browser":{"crypto":false,"buffer":false}}"#,
+    );
+    let accelerated = source.replace(
+        "module.exports = method;",
+        "if (NODE_JS) {
+            var crypto = require('crypto');
+            var Buffer = require('buffer').Buffer;
+            method = message => crypto.createHash('sha256').update(Buffer.from(message)).digest('hex');
+        }
+        module.exports = method;",
+    );
+    write(dir.root(), path, &accelerated);
+    write(
+        dir.root(),
+        "main.mjs",
+        "export function load() { return require('@vendor/portable'); }",
+    );
+    let mut config = options();
+    config.resolver.target_env = TargetEnv::Browser;
+    config.output.source_maps = true;
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let report = format!("{:#}", session.build(&config).err().unwrap());
+    assert!(
+        report.contains("crypto")
+            && report.contains("browser target")
+            && report.contains("index.js"),
+        "{report}"
+    );
+    write(dir.root(), path, source);
+    let repaired = session.build(&config).unwrap();
+    assert_eq!(repaired.product.artifacts.backend, link::Backend::Native);
+    assert_origin(
+        &repaired.product.artifacts,
+        &dir.root().join(path),
+        source,
+        "'portable:'",
+    );
+    let check = "globalThis.portableRuns = 0;
+        Object.defineProperty(globalThis, 'process', {value: {versions: {node: 'probe'}}});
+        const ns = await import('./main.mjs');
+        console.log(globalThis.portableRuns);
+        const method = ns.load();
+        console.log(method('abc'), method.create().update('a').update('bc').hex());
+        console.log(method === ns.load(), globalThis.portableRuns);";
+    let expected = b"0\nportable:abc portable:abc\ntrue 1\n";
+    assert_eq!(observe_named(&repaired.product.artifacts, check), expected);
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&repaired.product, &noop.product));
+    let warm = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(warm.counters.source_parses, 0);
+    assert_eq!(warm.product.artifacts, repaired.product.artifacts);
+    assert_eq!(observe_named(&warm.product.artifacts, check), expected);
+    config.cache = CacheMode::Disabled;
+    let uncached = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(uncached.product.artifacts, repaired.product.artifacts);
+    write(dir.root(), path, &accelerated);
+    let report = format!("{:#}", session.build(&config).err().unwrap());
+    assert!(
+        report.contains("crypto") && report.contains("browser target"),
+        "{report}"
+    );
+    assert!(Rc::ptr_eq(
+        session.last.as_ref().unwrap(),
+        &repaired.product
+    ));
+}
+
+#[test]
 fn source_maps_reserve_case_insensitive_resource_and_parent_paths() {
     let dir = TmpDir::new();
     write(dir.root(), "main.mjs", "export const value = 1;");
