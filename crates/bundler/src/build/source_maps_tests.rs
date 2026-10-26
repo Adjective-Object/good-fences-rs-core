@@ -538,10 +538,11 @@ fn upstream_source_maps_report_bad_missing_remote_and_out_of_bounds_maps_only_wh
 fn upstream_source_maps_require_explicit_repair_of_dangling_package_directives() {
     let dir = TmpDir::new();
     let source = "module.exports = 'SHIPPED_JS';\n";
+    let host_source = "exports.value = require('../bridge');\nconsole.log('SHIPPED_HOST_JS');\n";
     write(
         dir.root(),
         "main.mjs",
-        "import value from './node_modules/bridge/index.js'; console.log(value);",
+        "import host from './node_modules/host/index.js'; console.log(host);",
     );
     write(
         dir.root(),
@@ -553,16 +554,33 @@ fn upstream_source_maps_require_explicit_repair_of_dangling_package_directives()
         "node_modules/bridge/index.js",
         &format!("{source}//# sourceMappingURL=index.js.map\n"),
     );
+    write(
+        dir.root(),
+        "node_modules/host/package.json",
+        r#"{"name":"host","main":"index.js"}"#,
+    );
+    write(
+        dir.root(),
+        "node_modules/host/index.js",
+        &format!("{host_source}//# sourceMappingURL=host.js.map\n"),
+    );
     let mut config = options();
     config.output.source_maps = true;
     let mut session = BuildSession::new(dir.root()).unwrap();
     let error = session.build(&config).err().unwrap();
     let report = format!("{error:#}");
     assert!(report.contains("upstream source map"), "{report}");
+    assert!(report.contains("host.js.map"), "{report}");
+    assert!(report.contains("missing or unsupported"), "{report}");
+
+    // Repairing one package must not hide a dependency's missing map.
+    write(dir.root(), "node_modules/host/index.js", host_source);
+    let error = session.build(&config).err().unwrap();
+    let report = format!("{error:#}");
+    assert!(report.contains("upstream source map"), "{report}");
     assert!(report.contains("index.js.map"), "{report}");
     assert!(report.contains("missing or unsupported"), "{report}");
 
-    // A maintained package patch removes only the unpublished map reference.
     write(dir.root(), "node_modules/bridge/index.js", source);
     let repaired = session.build(&config).unwrap();
     assert_origin(
@@ -570,6 +588,12 @@ fn upstream_source_maps_require_explicit_repair_of_dangling_package_directives()
         &dir.root().join("node_modules/bridge/index.js"),
         source,
         "'SHIPPED_JS'",
+    );
+    assert_origin(
+        &repaired.product.artifacts,
+        &dir.root().join("node_modules/host/index.js"),
+        host_source,
+        "'SHIPPED_HOST_JS'",
     );
     let cold = BuildSession::new(dir.root())
         .unwrap()

@@ -146,6 +146,8 @@ If a dependency ships a directive but omits its map, repair the package explicit
 restore the authentic map or maintain a package-manager patch removing only the
 stale directive. The latter maps output to the shipped JavaScript, not unavailable
 original sources; it does not disable source maps or relax validation.
+Each reached package is checked independently: repairing a host bridge's directive
+does not repair or exempt its shared bridge dependencies.
 
 Original names and nullable `sourcesContent` survive composition. `sourceRoot`
 and source paths resolve from the linked map location (or script location for
