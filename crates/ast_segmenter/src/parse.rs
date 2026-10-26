@@ -1,4 +1,4 @@
-use std::{convert::TryInto, path::Path};
+use std::{collections::HashSet, convert::TryInto, path::Path};
 
 use eyre::{ensure, WrapErr};
 use logger_srcfile::WrapFileLogger;
@@ -134,22 +134,35 @@ pub fn parse_module_with_prepared_declarations(
         (ModuleBody::Esm, segments)
     };
     if matches!(body, ModuleBody::Esm) {
-        let (mut definitions, symbols) = declarations.facts().clone().into_parts();
-        definitions.retain(|definition| match definition.binding() {
-            ecco::Binding::Global(path) => facts.references().iter().any(|reference| {
-                reference.binding().is_none()
-                    && path.first().map(String::as_str) == Some(reference.name())
-            }),
-            ecco::Binding::Module { module, .. } => facts
-                .dependencies()
-                .iter()
-                .any(|dependency| !dependency.type_only() && *dependency.specifier() == *module),
-            ecco::Binding::Local(_) => true,
-        });
+        let global_names: HashSet<_> = facts
+            .references()
+            .iter()
+            .filter(|reference| reference.binding().is_none())
+            .map(|reference| reference.name())
+            .collect();
+        let module_specifiers: HashSet<_> = facts
+            .dependencies()
+            .iter()
+            .filter(|dependency| !dependency.type_only())
+            .map(|dependency| dependency.specifier())
+            .collect();
+        let definitions = declarations
+            .facts()
+            .definitions()
+            .iter()
+            .filter(|definition| match definition.binding() {
+                ecco::Binding::Global(path) => path
+                    .first()
+                    .is_some_and(|name| global_names.contains(name.as_str())),
+                ecco::Binding::Module { module, .. } => module_specifiers.contains(module.as_str()),
+                ecco::Binding::Local(_) => true,
+            })
+            .cloned()
+            .collect();
         *facts.ecco_mut() = Some(ecco::parse_from_ast_with_segments(
             &parsed.program,
             &semantic.semantic,
-            ecco::LocalFacts::new(definitions, symbols),
+            ecco::LocalFacts::new(definitions, declarations.facts().global_symbols().to_vec()),
             &segments.iter().map(|s| s.span).collect::<Vec<_>>(),
         )?);
     }
@@ -172,6 +185,87 @@ pub fn parse_module_with_prepared_declarations(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prepared_declarations_filter_by_source_without_changing_contracts_or_order() {
+        let declarations = ecco::parse_declarations(
+            r#"
+            global fn unused() { call_effects = true }
+            module "runtime" { export fn run(value) { returns = value } }
+            global fn library.other() { call_effects = true }
+            global fn shadowed() { call_effects = false }
+            fn localContract(value) { returns = value }
+            module "types" { export fn Type() { call_effects = false } }
+            global fn library.used() { call_effects = false returns void }
+            module "mixed" { export fn run() { call_effects = false } }
+            global fn TypeGlobal() { call_effects = false }
+            module "side-effect" { export fn run() { call_effects = true } }
+            module "dynamic" { export fn run() { call_effects = false } }
+            module "absent" { export fn run() { call_effects = true } }
+            global symbol unread { read_effects = true }
+            global symbol library { read_effects = false }
+            "#,
+        )
+        .unwrap();
+        let prepared = crate::PreparedDeclarations::new(declarations.clone()).unwrap();
+        for (source, retained) in [
+            (
+                r#"
+                import type { Type } from "types";
+                import type { Type as MixedType } from "mixed";
+                import { run } from "runtime";
+                import { run as mixedRun } from "mixed";
+                import "side-effect";
+                type OnlyType = TypeGlobal;
+                const shadowed = 1;
+                shadowed;
+                library.used();
+                library.used();
+                run(mixedRun());
+                import("dynamic");
+                "#,
+                &[1, 2, 4, 6, 7, 8, 9, 10][..],
+            ),
+            ("export {};", &[4][..]),
+        ] {
+            let parsed = parse_module_with_prepared_declarations(
+                &logger::StdioLogger::new(),
+                source,
+                Path::new("file.mts"),
+                ModuleFormat::Esm,
+                &prepared,
+            )
+            .unwrap();
+            let expected = ecco::LocalFacts::new(
+                retained
+                    .iter()
+                    .map(|&index| declarations.definitions()[index].clone())
+                    .collect(),
+                declarations.global_symbols().to_vec(),
+            );
+            assert_eq!(
+                parsed
+                    .owned_facts()
+                    .unwrap()
+                    .ecco()
+                    .as_ref()
+                    .unwrap()
+                    .declarations(),
+                &expected
+            );
+            assert_eq!(
+                parsed.facts().ecco_declarations_hash(),
+                prepared.fingerprint()
+            );
+            assert_ne!(
+                parsed.facts().ecco_declarations_hash(),
+                crate::PreparedDeclarations::new(expected)
+                    .unwrap()
+                    .fingerprint()
+            );
+        }
+        assert_eq!(prepared.facts(), &declarations);
+    }
 
     #[test]
     fn prepared_declarations_share_identity_without_rehashing_or_mutable_pairing() {
