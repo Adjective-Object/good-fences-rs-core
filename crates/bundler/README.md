@@ -150,6 +150,9 @@ Each reached package is checked independently: repairing a host bridge's directi
 does not repair or exempt its shared bridge dependencies.
 The same rule covers scoped-package side-effect subpath imports: removing a
 dangling footer preserves runtime initialization and maps to the shipped script.
+Conditional `import`/`require` package exports also check each reached barrel and
+implementation independently, including packages marked `sideEffects: false`.
+Repairing their metadata preserves reexport identity and shipped-code mappings.
 
 Original names and nullable `sourcesContent` survive composition. `sourceRoot`
 and source paths resolve from the linked map location (or script location for

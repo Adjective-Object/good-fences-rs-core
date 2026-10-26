@@ -663,6 +663,95 @@ fn upstream_source_maps_repair_scoped_package_side_effect_subpath_without_changi
 }
 
 #[test]
+fn upstream_source_maps_repair_conditional_package_barrels_and_implementations_independently() {
+    for commonjs in [false, true] {
+        let dir = TmpDir::new();
+        let base = "node_modules/@vendor/type-safety";
+        let folder = if commonjs { "lib-commonjs" } else { "lib" };
+        let barrel_path = format!("{base}/{folder}/index.js");
+        let implementation_path = format!("{base}/{folder}/describe.js");
+        let (main, barrel, implementation) = if commonjs {
+            (
+                "const {describe} = require('@vendor/type-safety'); const direct = require('@vendor/type-safety/describe'); console.log(describe === direct.describe, describe(42));",
+                "exports.describe = require('./describe').describe;\n",
+                "exports.describe = function(value) { return 'SHIPPED_CJS_' + typeof value; };\n",
+            )
+        } else {
+            (
+                "import {describe} from '@vendor/type-safety'; import {describe as direct} from '@vendor/type-safety/describe'; console.log(describe === direct, describe(42));",
+                "export * from './describe';\n",
+                "export function describe(value) { return 'SHIPPED_ESM_' + typeof value; }\n",
+            )
+        };
+        write(
+            dir.root(),
+            "main.mjs",
+            if commonjs {
+                "const {describe} = require('@vendor/type-safety'); console.log(describe(42));"
+            } else {
+                "import {describe} from '@vendor/type-safety'; console.log(describe(42));"
+            },
+        );
+        write(
+            dir.root(),
+            &format!("{base}/package.json"),
+            r#"{"name":"@vendor/type-safety","sideEffects":false,"exports":{".":{"import":"./lib/index.js","require":"./lib-commonjs/index.js"},"./describe":{"import":"./lib/describe.js","require":"./lib-commonjs/describe.js"}}}"#,
+        );
+        write(
+            dir.root(),
+            &barrel_path,
+            &format!("{barrel}//# sourceMappingURL=index.js.map\n"),
+        );
+        write(
+            dir.root(),
+            &implementation_path,
+            &format!("{implementation}//# sourceMappingURL=describe.js.map\n"),
+        );
+        let mut config = options();
+        config.output.source_maps = true;
+        config.cache = CacheMode::Disabled;
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let report = format!("{:#}", session.build(&config).err().unwrap());
+        assert!(report.contains("upstream source map"), "{report}");
+        assert!(report.contains("index.js.map"), "{report}");
+        assert!(report.contains("missing or unsupported"), "{report}");
+
+        write(dir.root(), &barrel_path, barrel);
+        let report = format!("{:#}", session.build(&config).err().unwrap());
+        assert!(report.contains("upstream source map"), "{report}");
+        assert!(report.contains("describe.js.map"), "{report}");
+        assert!(report.contains("missing or unsupported"), "{report}");
+
+        write(dir.root(), &implementation_path, implementation);
+        write(dir.root(), "main.mjs", main);
+        let repaired = session.build(&config).unwrap();
+        assert_eq!(repaired.product.artifacts.backend, link::Backend::Native);
+        let (needle, expected) = if commonjs {
+            ("'SHIPPED_CJS_'", b"true SHIPPED_CJS_number\n".as_slice())
+        } else {
+            ("'SHIPPED_ESM_'", b"true SHIPPED_ESM_number\n".as_slice())
+        };
+        assert_origin(
+            &repaired.product.artifacts,
+            &dir.root().join(&implementation_path),
+            implementation,
+            needle,
+        );
+        assert_eq!(
+            observe_named(&repaired.product.artifacts, "await import('./main.mjs');"),
+            expected
+        );
+        let cold = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&config)
+            .unwrap();
+        assert_eq!(repaired.product.artifacts, cold.product.artifacts);
+        let noop = session.build(&config).unwrap();
+        assert!(Rc::ptr_eq(&repaired.product, &noop.product));
+    }
+}
+
+#[test]
 fn source_maps_reserve_case_insensitive_resource_and_parent_paths() {
     let dir = TmpDir::new();
     write(dir.root(), "main.mjs", "export const value = 1;");
