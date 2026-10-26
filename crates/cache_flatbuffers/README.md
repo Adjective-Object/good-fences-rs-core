@@ -64,6 +64,8 @@ Views borrow the owner; cloning it only shares bytes. Small documented
 unchecked-root calls reuse the already verified immutable roots. There is no
 lifetime transmute or self-referential storage. Tests prove that nested string
 pointers address this backing and remain identical across thread-shared clones.
+`WireSourceMap::snapshot` similarly moves a verified map, including optional
+embedded source contents, to private mapped storage without unpacking or resealing.
 
 **`WireRecord` is not the source-local semantic validator.** Span UTF-8
 boundaries, ID/link/occurrence coverage, ordering, operation-parent rules,

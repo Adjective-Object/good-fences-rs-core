@@ -2,13 +2,14 @@
 use std::{collections::HashMap, path::Path, sync::Arc};
 
 use cache_flatbuffers::WireSourceMap;
+use eyre::WrapErr;
 use oxc_sourcemap::{SourceMap, SourceMapBuilder};
 use oxc_span::Span;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Source {
     url: String,
-    text: Arc<str>,
+    text: crate::prepared_text::Text,
     checkpoints: Vec<(usize, Position)>,
     upstream: Vec<WireSourceMap>,
 }
@@ -32,6 +33,24 @@ impl Source {
         text: &str,
         upstream: Vec<WireSourceMap>,
     ) -> eyre::Result<Arc<Self>> {
+        Self::with_text(
+            path,
+            crate::prepared_text::Text::snapshot(text)
+                .wrap_err_with(|| format!("snapshotting source map text for {}", path.display()))?,
+            upstream,
+        )
+    }
+
+    pub(crate) fn with_text(
+        path: &Path,
+        text: crate::prepared_text::Text,
+        upstream: Vec<WireSourceMap>,
+    ) -> eyre::Result<Arc<Self>> {
+        let upstream = upstream
+            .into_iter()
+            .map(WireSourceMap::snapshot)
+            .collect::<eyre::Result<Vec<_>>>()
+            .wrap_err_with(|| format!("snapshotting source map chain for {}", path.display()))?;
         let url = url::Url::from_file_path(path).map_err(|()| {
             eyre::eyre!(
                 "source map requires an absolute file path: {}",
@@ -48,7 +67,7 @@ impl Source {
         }
         Ok(Arc::new(Self {
             url: url.into(),
-            text: text.into(),
+            text,
             checkpoints,
             upstream,
         }))
@@ -97,7 +116,7 @@ pub(crate) struct Writer<'a> {
     text: String,
     position: Position,
     map: Option<SourceMapBuilder<'a>>,
-    contents: HashMap<String, Option<Arc<str>>>,
+    contents: HashMap<String, Option<&'a str>>,
 }
 
 impl<'a> Writer<'a> {
@@ -137,7 +156,7 @@ impl<'a> Writer<'a> {
                     let mapped = origin.and_then(|(source, _, _, name)| {
                         let mut mapped = (
                             source.url.as_str(),
-                            Some(source.text.as_ref()),
+                            Some(&*source.text),
                             original.line,
                             original.column,
                             name,
@@ -170,7 +189,7 @@ impl<'a> Writer<'a> {
                     let source_id = mapped.map(|(url, content, _, _, _)| {
                         let stored = self.contents.entry(url.to_owned()).or_default();
                         if stored.is_none() {
-                            *stored = content.map(Arc::from);
+                            *stored = content;
                         }
                         map.add_source_and_content(url, content.unwrap_or(""))
                     });

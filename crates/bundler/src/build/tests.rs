@@ -39,6 +39,103 @@ fn options() -> BuildOptions {
 }
 
 #[test]
+fn preparation_retains_only_identities_and_mapped_generated_text_and_reloads_for_emission() {
+    for cache in [
+        CacheMode::ReadWrite,
+        CacheMode::ReadOnly,
+        CacheMode::Disabled,
+    ] {
+        for (name, source, generated) in [
+            ("main.mjs", "export const value = 42;", false),
+            ("main.mts", "export const value: number = 42;", true),
+            ("main.json", r#"{"value":42}"#, true),
+            ("main.bin", "original asset", true),
+        ] {
+            let dir = TmpDir::new();
+            write(dir.root(), name, source);
+            let path = dir.root().join(name);
+            let mut config = options();
+            config.entries.get_mut("main").unwrap().path = name.into();
+            config.cache = cache;
+            config.output.source_maps = true;
+            let mut session = BuildSession::new(dir.root()).unwrap();
+            let cold = session.build(&config).unwrap();
+            let retained = &session.sources[&path];
+            let backing = retained.text.generated_backing();
+            assert_eq!(backing.is_some(), generated, "{name}");
+            assert!(backing.is_none_or(cache_flatbuffers::SharedBytes::is_mapped));
+            if let Some(transpiled) = &retained.transpiled {
+                assert!(transpiled
+                    .source_map
+                    .as_ref()
+                    .unwrap()
+                    .backing()
+                    .is_mapped());
+            }
+            let lease = link::SourceTexts::text(&session.sources, &path)
+                .unwrap()
+                .unwrap();
+            let prepared = lease.to_string();
+            let noop = session.build(&config).unwrap();
+            assert!(Rc::ptr_eq(&cold.product, &noop.product));
+            let disk = BuildSession::new(dir.root())
+                .unwrap()
+                .build(&config)
+                .unwrap();
+            assert_eq!(cold.product.artifacts, disk.product.artifacts, "{name}");
+            assert_eq!(disk.counters.source_reparses, 0);
+            assert_eq!(disk.counters.fragment_reparses, 0);
+            if name == "main.bin" {
+                assert!(cold
+                    .product
+                    .artifacts
+                    .resources
+                    .values()
+                    .any(|bytes| bytes == source.as_bytes()));
+            }
+            let parses = ast_segmenter::module_parse_count();
+            // Equal length, different bytes: an emission access cannot use old facts.
+            write(
+                dir.root(),
+                name,
+                &source.replace('4', "9").replace("original", "modified"),
+            );
+            let product = &cold.product;
+            let error = link::esm_plan_configured(
+                &product.graph,
+                &product.plan,
+                &config.effects,
+                &session.sources,
+                &BTreeMap::new(),
+                false,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                0,
+                &BTreeMap::new(),
+                config.execution,
+            )
+            .err()
+            .unwrap();
+            let report = format!("{error:#}");
+            assert!(report.contains("source changed during build"), "{report}");
+            assert!(report.contains(name), "{report}");
+            assert_eq!(ast_segmenter::module_parse_count(), parses);
+            fs::remove_file(&path).unwrap();
+            let error = link::SourceTexts::text(&session.sources, &path).unwrap_err();
+            assert_eq!(
+                error.downcast_ref::<std::io::Error>().unwrap().kind(),
+                std::io::ErrorKind::NotFound,
+            );
+            assert!(format!("{error:#}").contains(name));
+            // A checked private lease remains immutable, independent of the file/session.
+            drop(session);
+            assert_eq!(&*lease, prepared);
+            assert!(!cold.product.artifacts.files.is_empty());
+        }
+    }
+}
+
+#[test]
 fn lazy_certification_configuration_invalidates_output_not_source_facts() {
     use crate::lazy_modules::{ConstructorExport, LazyRuntime};
     let dir = TmpDir::new();
@@ -329,7 +426,10 @@ fn graph_inputs_are_materialized_only_for_new_successful_products() {
             assert_eq!(count.swap(0, Ordering::Relaxed), 0);
             assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &cold.product));
             assert_eq!(
-                session.sources[&dir.root().join("a.mjs")].text,
+                &*session.sources[&dir.root().join("a.mjs")]
+                    .text
+                    .text(&dir.root().join("a.mjs"))
+                    .unwrap(),
                 "console.log(3);"
             );
 
@@ -371,7 +471,7 @@ fn settled_graph_owns_resource_transpiler_and_context_provenance_after_session_d
     let texts: BTreeMap<_, _> = session
         .sources
         .iter()
-        .map(|(path, source)| (path.clone(), source.text.clone()))
+        .map(|(path, source)| (path.clone(), source.text.text(path).unwrap().to_string()))
         .collect();
     let disk = BuildSession::new(dir.root())
         .unwrap()
@@ -1442,7 +1542,7 @@ fn css_loader_transitions_preserve_resources_mappings_and_sealed_generated_sourc
     let mut session = BuildSession::new(dir.root()).unwrap();
     let caller = session.build(&config).unwrap();
     let path = dir.root().join("style.module.css");
-    let caller_text = session.sources[&path].text.clone();
+    let caller_text = session.sources[&path].text.text(&path).unwrap();
     for load in [CssLoad::AutoMount, CssLoad::CallerLoaded] {
         config.css.load = load;
         let built = session.build(&config).unwrap();
@@ -1460,8 +1560,12 @@ fn css_loader_transitions_preserve_resources_mappings_and_sealed_generated_sourc
         let graph = &built.product.graph;
         let file = graph.file_id(&path).unwrap();
         let before = ast_segmenter::module_parse_count();
-        let parsed =
-            crate::emit::checked_source(graph, file, &session.sources[&path].text).unwrap();
+        let parsed = crate::emit::checked_source(
+            graph,
+            file,
+            &session.sources[&path].text.text(&path).unwrap(),
+        )
+        .unwrap();
         assert!(!parsed.provenance().config().commonjs());
         assert!(parsed.facts().top_level_await().is_empty());
         assert!(crate::emit::checked_source(graph, file, ".used, .unused { color: red }").is_err());
@@ -1483,7 +1587,10 @@ fn css_loader_transitions_preserve_resources_mappings_and_sealed_generated_sourc
             b"loader\n",
         );
     }
-    assert_eq!(session.sources[&path].text, caller_text);
+    assert_eq!(
+        session.sources[&path].text.text(&path).unwrap(),
+        caller_text
+    );
 }
 
 #[test]
@@ -1902,7 +2009,7 @@ fn caller_loaded_css_module_resource_edits_invalidate_output_without_reparsing_m
         let mut session = BuildSession::new(dir.root()).unwrap();
         let mut previous = session.build(&config).unwrap();
         let path = dir.root().join("style.module.css");
-        let text = session.sources[&path].text.clone();
+        let text = session.sources[&path].text.text(&path).unwrap();
         let mut edits = vec![(
             "style.module.css",
             format!("{dependency}.used {{color:blue}}"),
@@ -1928,7 +2035,7 @@ fn caller_loaded_css_module_resource_edits_invalidate_output_without_reparsing_m
                 previous.product.fingerprints.parse,
                 edited.product.fingerprints.parse
             );
-            assert_eq!(session.sources[&path].text, text);
+            assert_eq!(session.sources[&path].text.text(&path).unwrap(), text);
             assert_eq!(edited.counters.source_parses, 0);
             assert_eq!(edited.counters.source_reparses, 0);
             assert_eq!(edited.counters.fragment_reparses, 0);
@@ -2597,7 +2704,11 @@ fn css_modules_cross_file_composition_rechecks_closure_and_invalidates_reverse_u
         write(dir.root(), "base.module.css", &base.replace("old", "new"));
         let changed = session.build(&config).unwrap();
         assert_ne!(before, session.sources[&consumer].record.source_hash());
-        assert!(session.sources[&consumer].text.contains(" new"));
+        assert!(session.sources[&consumer]
+            .text
+            .text(&consumer)
+            .unwrap()
+            .contains(" new"));
         assert_eq!(changed.counters.source_parses, 3);
         for path in [
             "main.mjs",
@@ -2895,12 +3006,16 @@ fn css_modules_stability_content_order_root_and_transitive_selection_invalidate_
         }
         let before = session.sources[&dir.root().join("a.module.css")]
             .text
-            .clone();
+            .text(&dir.root().join("a.module.css"))
+            .unwrap();
         let parent = cold.product.artifacts.stylesheets[&dir.root().join("parent.css")].clone();
         write(dir.root(), "a.module.css", ".same {color:green}");
         let edited = session.build(&config).unwrap();
         assert_eq!(
-            session.sources[&dir.root().join("a.module.css")].text,
+            session.sources[&dir.root().join("a.module.css")]
+                .text
+                .text(&dir.root().join("a.module.css"))
+                .unwrap(),
             before
         );
         assert_ne!(
@@ -2985,7 +3100,7 @@ fn caller_loaded_css_preserves_default_artifacts_across_memory_and_disk_hits() {
     let expected =
         crate::resource::url_module(artifact, &crate::output_url::PublicBase::new("./").unwrap())
             .unwrap();
-    assert_eq!(session.sources[&path].text, expected);
+    assert_eq!(&*session.sources[&path].text.text(&path).unwrap(), expected);
     assert_eq!(
         cold.product.artifacts.entries["main"],
         Path::new("style.cjs")
@@ -5618,7 +5733,7 @@ fn parity(session: &mut BuildSession, options: &BuildOptions) -> BuildResult {
         .module_ids()
         .map(|file| {
             let path = graph.file_path(file).unwrap().to_owned();
-            let source = session.sources[&path].text.clone();
+            let source = session.sources[&path].text.text(&path).unwrap().to_string();
             (path, source)
         })
         .collect();

@@ -352,6 +352,10 @@ fn upstream_source_maps_linked_map_edits_invalidate_warm_and_disk_outputs_withou
     config.output.source_maps = true;
     let first = session.build(&config).unwrap();
     assert_eq!(first.counters.source_parses, 0);
+    assert!(session
+        .upstreams
+        .values()
+        .all(|upstream| upstream.map().backing().is_mapped()));
     assert_eq!(
         disabled.product.fingerprints.parse,
         first.product.fingerprints.parse

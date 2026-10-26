@@ -1075,8 +1075,12 @@ fn reconstruct(
                 shorthand,
             } => {
                 if let Some(expression) = values.generated.get(&(file, *reference)) {
-                    let prefix =
-                        crate::rewrite::shorthand_replacement(module.source, span, "", *shorthand)?;
+                    let prefix = crate::rewrite::shorthand_replacement(
+                        &module.source,
+                        span,
+                        "",
+                        *shorthand,
+                    )?;
                     Some(expression.clone().surrounded(prefix, ""))
                 } else {
                     facts

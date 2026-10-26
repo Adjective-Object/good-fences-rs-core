@@ -22,6 +22,7 @@ mod lockfile;
 pub mod manifest;
 mod output_url;
 pub mod policy;
+mod prepared_text;
 pub mod publish;
 mod resolution_cache;
 mod resource;

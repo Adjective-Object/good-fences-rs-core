@@ -165,7 +165,16 @@ fn transpiled_typescript_tsx_jsx_and_cts_execute_before_native_linking() {
     ] {
         let path = dir.root().join(file);
         let source = &session.sources[&path];
-        assert!(source.transpiled.as_ref().unwrap().source_map.is_some());
+        assert!(source.text.generated_backing().unwrap().is_mapped());
+        assert!(source
+            .transpiled
+            .as_ref()
+            .unwrap()
+            .source_map
+            .as_ref()
+            .unwrap()
+            .backing()
+            .is_mapped());
         assert!(!source.record.config().typescript());
         assert!(!source.record.config().jsx());
         let file = result.product.graph.file_id(&path).unwrap();
@@ -259,7 +268,10 @@ fn transpiler_maps_toggle_warm_disk_and_mapping_only_edits_without_reextracting(
     assert_eq!(disk.counters.source_parses, 0);
     assert_eq!(disk.product.artifacts, on.product.artifacts);
 
-    let prepared = session.sources[&dir.root().join("main.mts")].text.clone();
+    let prepared = session.sources[&dir.root().join("main.mts")]
+        .text
+        .text(&dir.root().join("main.mts"))
+        .unwrap();
     let edited_source = source.replace(
         "type Unused = number;",
         "type Unused = number;\r\ntype Other = string;",
@@ -267,7 +279,13 @@ fn transpiler_maps_toggle_warm_disk_and_mapping_only_edits_without_reextracting(
     write(dir.root(), "main.mts", &edited_source);
     let edited = session.build(&config).unwrap();
     assert_eq!(edited.counters.source_parses, 0);
-    assert_eq!(session.sources[&dir.root().join("main.mts")].text, prepared);
+    assert_eq!(
+        session.sources[&dir.root().join("main.mts")]
+            .text
+            .text(&dir.root().join("main.mts"))
+            .unwrap(),
+        prepared
+    );
     assert_eq!(
         on.product.fingerprints.parse,
         edited.product.fingerprints.parse

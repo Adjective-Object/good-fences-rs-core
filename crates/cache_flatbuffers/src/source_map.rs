@@ -32,6 +32,16 @@ pub struct WireSourceMap {
 }
 
 impl WireSourceMap {
+    /// Move already verified bytes to private disk backing without unpacking.
+    pub fn snapshot(self) -> Result<Self> {
+        if self.bytes.is_mapped() {
+            return Ok(self);
+        }
+        Ok(Self {
+            bytes: SharedBytes::snapshot(self.bytes.as_ref())?,
+        })
+    }
+
     pub fn encode(source: &str, input: &[u8], data: MapData<'_>) -> Result<Self> {
         let mut builder = flatbuffers::FlatBufferBuilder::new();
         let sources = data

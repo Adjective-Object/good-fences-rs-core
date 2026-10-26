@@ -76,6 +76,45 @@ fn upstream_map_accepts_shared_private_mapped_backing() {
 }
 
 #[test]
+fn snapshot_keeps_embedded_contents_in_shared_private_backing() {
+    let map = WireSourceMap::encode(
+        "compiled",
+        b"json",
+        MapData {
+            location: "file:///project/input.map",
+            file: None,
+            source_root: None,
+            sources: &[MapSource {
+                original: "input.ts",
+                url: "file:///project/input.ts",
+                content: Some("export const value: number = 42;"),
+            }],
+            names: &[],
+            tokens: &[wire::MapToken::new(0, 0, 0, 0, 0, -1)],
+        },
+    )
+    .unwrap()
+    .snapshot()
+    .unwrap();
+    assert!(map.backing().is_mapped());
+    let content = map.root().sources().get(0).content().unwrap();
+    let pointer = content.as_ptr();
+    let allocation =
+        map.bytes().as_ptr() as usize..map.bytes().as_ptr() as usize + map.bytes().len();
+    assert!(allocation.contains(&(pointer as usize)));
+    let clone = map.clone().snapshot().unwrap();
+    drop(map);
+    assert_eq!(
+        clone.root().sources().get(0).content().unwrap().as_ptr(),
+        pointer
+    );
+    assert_eq!(
+        clone.root().sources().get(0).content(),
+        Some("export const value: number = 42;")
+    );
+}
+
+#[test]
 fn upstream_map_rejects_corruption_stale_inputs_and_invalid_semantic_links() {
     let map = encode(&[wire::MapToken::new(0, 0, 0, 0, 0, 0)]).unwrap();
     for (source, input, location) in [

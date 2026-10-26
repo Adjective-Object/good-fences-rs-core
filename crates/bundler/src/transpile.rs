@@ -196,7 +196,8 @@ fn checked_map(
             names: &names,
             tokens: &tokens,
         },
-    )
+    )?
+    .snapshot()
 }
 
 #[cfg(test)]

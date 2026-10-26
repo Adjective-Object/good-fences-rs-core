@@ -46,8 +46,13 @@ CJS initialization, missing-module errors and host getters remain intact.
 
 Preparation stages only source identities and settled resolutions, not owning
 graph inputs or a second source-text map. New products construct graph inputs
-once from checked session records after the no-op check; linking borrows the
-settled source owners. Failed attempts retain useful prepared sources without
+once from checked session records after the no-op check. Sessions retain original
+input lengths/XXH3 identities, not original bytes or heap prepared JavaScript.
+Emission reloads and checks original files on access. Generated TS/JSX/resource
+JavaScript uses sealed private disk-backed snapshots without recompiling or
+reparsing; compiler/upstream maps and source-text leases share private mapped
+backing, never mappings of editable input files. Final/no-op checks reread inputs.
+Failed attempts retain useful prepared sources without
 replacing the last product. Returned products own their graph records independently
 of the session; no-op builds retain the existing product.
 

@@ -207,15 +207,16 @@ pub struct BuildResult {
 
 struct Source {
     css_identity: Option<PathBuf>,
-    input: Vec<u8>,
-    text: String,
+    text: crate::prepared_text::PreparedText,
     record: CacheRecord,
     transpiled: Option<Transpiled>,
 }
 
 impl link::SourceTexts for BTreeMap<PathBuf, Source> {
-    fn text(&self, path: &Path) -> Option<&str> {
-        self.get(path).map(|source| source.text.as_str())
+    fn text(&self, path: &Path) -> eyre::Result<Option<crate::prepared_text::Text>> {
+        self.get(path)
+            .map(|source| source.text.text(path))
+            .transpose()
     }
 }
 
@@ -917,14 +918,12 @@ impl BuildSession {
                         {
                             let transpiled =
                                 loaded_transpiled.get(&path).or(source.transpiled.as_ref());
+                            let original = source.text.read_input(&path)?;
                             let (text, hint) = if let Some(transpiled) = transpiled {
-                                (
-                                    std::str::from_utf8(&source.input)?,
-                                    transpiled.source_map_hint,
-                                )
+                                (std::str::from_utf8(&original)?, transpiled.source_map_hint)
                             } else {
                                 (
-                                    source.text.as_str(),
+                                    std::str::from_utf8(&original)?,
                                     source.record.module().facts().emission().source_map(),
                                 )
                             };
@@ -1387,9 +1386,10 @@ impl BuildSession {
             .sources
             .iter()
             .map(|(path, source)| {
+                let text = source.text.text(path)?;
                 let parsed = source
                     .record
-                    .to_parsed_reporting_policies(&source.text)
+                    .to_parsed_reporting_policies(&text)
                     .wrap_err_with(|| {
                         format!("borrowing prepared graph facts for {}", path.display())
                     })?;
@@ -1451,9 +1451,9 @@ impl BuildSession {
                     .transpiled
                     .as_ref()
                     .and_then(|transpiled| transpiled.source_map.clone());
-                crate::sourcemap::Source::with_maps(
+                crate::sourcemap::Source::with_text(
                     path,
-                    &source.text,
+                    source.text.text(path)?,
                     compiler_map
                         .into_iter()
                         .chain(
@@ -1487,10 +1487,10 @@ impl BuildSession {
             let path = graph.file_path(file).expect("retained source");
             let kind = crate::resource::kind(path, &options.css);
             if kind == crate::resource::ResourceKind::Asset {
-                let input = &self.sources[path].input;
+                let input = self.sources[path].text.read_input(path)?;
                 artifacts
                     .resources
-                    .insert(crate::resource::asset_path(path, input), input.clone());
+                    .insert(crate::resource::asset_path(path, &input), input);
             } else if matches!(kind, crate::resource::ResourceKind::Stylesheet { .. }) {
                 styles
                     .emit(path, &mut artifacts)
@@ -1565,12 +1565,7 @@ impl BuildSession {
     fn recheck(sources: &BTreeMap<PathBuf, Source>, before: &Inventory) -> eyre::Result<()> {
         let _span = tracing::info_span!("build.recheck", sources = sources.len()).entered();
         for (path, source) in sources {
-            ensure!(
-                fs::read(path).wrap_err_with(|| format!("rereading source {}", path.display()))?
-                    == source.input,
-                "source changed during build: {}",
-                path.display()
-            );
+            source.text.read_input(path)?;
         }
         before
             .recheck()

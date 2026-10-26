@@ -191,7 +191,13 @@ Product generations are session-local immutable snapshots; never transfer
 graph-local handles/plans between products. No-op retains the same generation.
 Stage source identities/resolutions, never owning graph inputs or copied source
 text. Materialize graph inputs once after success/no-op checks from settled checked
-records; link through borrowed source lookup. Products retain independent owners.
+records with scoped checked reads. Sessions retain input length/XXH3 identity,
+not original bytes or heap prepared text. Plain scripts reload on emission access;
+generated JS uses sealed private mapped snapshots after rechecking the original.
+Text leases and source-map/assembly owners share immutable private disk backing,
+never maps of editable inputs. Compiler/upstream maps (including embedded contents)
+are mapped too; final/no-op checks reread input identities. Products retain
+independent owners. CSS/Sass facts and original-style lifecycle remain separate.
 Never discover/parse/validate tsconfig for resolution, including extends/references.
 Use explicit BuildOptions.resolver.export_conditions; never ingest
 customConditions/customSourceConditions or rewrite paths/baseUrl.

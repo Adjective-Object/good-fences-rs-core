@@ -3,7 +3,6 @@ use std::{
     fs::{self, File},
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::Arc,
 };
 
 use base64::Engine;
@@ -16,7 +15,7 @@ use url::Url;
 pub(crate) struct Upstream {
     map: WireSourceMap,
     linked: Option<PathBuf>,
-    input: Arc<[u8]>,
+    input: crate::prepared_text::InputIdentity,
 }
 
 impl Upstream {
@@ -27,7 +26,7 @@ impl Upstream {
     pub(crate) fn recheck(&self) -> eyre::Result<()> {
         if let Some(path) = &self.linked {
             ensure!(
-                path.canonicalize()? == *path && read(path)? == self.input.as_ref(),
+                path.canonicalize()? == *path && self.input.matches(&read(path)?),
                 "upstream source map changed during build: {}",
                 path.display()
             );
@@ -38,9 +37,11 @@ impl Upstream {
 
 fn read(path: &Path) -> eyre::Result<Vec<u8>> {
     let mut bytes = Vec::new();
-    File::open(path)?
+    File::open(path)
+        .wrap_err_with(|| format!("opening upstream source map {}", path.display()))?
         .take(MAX_RECORD_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)?;
+        .read_to_end(&mut bytes)
+        .wrap_err_with(|| format!("reading upstream source map {}", path.display()))?;
     ensure!(
         bytes.len() <= MAX_RECORD_BYTES,
         "upstream source map exceeds byte limit"
@@ -145,7 +146,7 @@ fn load_inner(
         "upstream source map exceeds byte limit"
     );
     if let Some(previous) = previous {
-        if previous.input.as_ref() == input
+        if previous.input.matches(&input)
             && previous.linked == linked
             && previous
                 .map
@@ -160,8 +161,12 @@ fn load_inner(
     let cached = if mode == CacheMode::Disabled {
         None
     } else {
-        read(&sidecar).ok().and_then(|bytes| {
-            WireSourceMap::new(bytes.into(), source, &input, location.as_str()).ok()
+        File::open(&sidecar).ok().and_then(|file| {
+            cache_flatbuffers::SharedBytes::snapshot(file.take(MAX_RECORD_BYTES as u64 + 1))
+                .ok()
+                .and_then(|bytes| {
+                    WireSourceMap::from_backing(bytes, source, &input, location.as_str()).ok()
+                })
         })
     };
     let mut warning = None;
@@ -253,9 +258,11 @@ fn load_inner(
         encoded
     };
     let upstream = Upstream {
-        map,
+        map: map
+            .snapshot()
+            .wrap_err_with(|| format!("snapshotting upstream map for {}", path.display()))?,
         linked,
-        input: input.into(),
+        input: crate::prepared_text::InputIdentity::new(&input),
     };
     upstream.recheck()?;
     ensure!(

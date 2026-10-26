@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use ast_segmenter::owned::DependencyKind;
 use ast_segmenter::views::{Dependency, ExportValue};
 use ast_segmenter::ParsedModule;
-use eyre::{ensure, OptionExt};
+use eyre::{ensure, OptionExt, WrapErr};
 use oxc_span::Span;
 use sha2::{Digest, Sha256};
 use source_graph::{DependencyTarget, GraphNode, SegmentKey, SourceGraph};
@@ -153,7 +153,7 @@ impl Artifacts {
 
 pub(crate) struct Module<'a> {
     path: &'a std::path::Path,
-    source: &'a str,
+    source: crate::prepared_text::Text,
     mapping: Option<std::sync::Arc<crate::sourcemap::Source>>,
     parsed: ParsedModule,
     surface: BTreeSet<String>,
@@ -264,8 +264,8 @@ pub fn native_placement(
 }
 
 impl<'a> Module<'a> {
-    pub(crate) fn source(&self) -> &'a str {
-        self.source
+    pub(crate) fn source(&self) -> &str {
+        &self.source
     }
     pub(crate) fn facts(&self) -> ast_segmenter::views::ModuleFacts<'_> {
         self.parsed.facts()
@@ -462,12 +462,17 @@ pub(crate) fn esm_plan_activated(
 }
 
 pub(crate) trait SourceTexts {
-    fn text(&self, path: &std::path::Path) -> Option<&str>;
+    fn text(&self, path: &std::path::Path) -> eyre::Result<Option<crate::prepared_text::Text>>;
 }
 
 impl SourceTexts for BTreeMap<PathBuf, String> {
-    fn text(&self, path: &std::path::Path) -> Option<&str> {
-        self.get(path).map(String::as_str)
+    fn text(&self, path: &std::path::Path) -> eyre::Result<Option<crate::prepared_text::Text>> {
+        self.get(path)
+            .map(|text| {
+                crate::prepared_text::Text::snapshot(text)
+                    .wrap_err_with(|| format!("snapshotting linked source {}", path.display()))
+            })
+            .transpose()
     }
 }
 
@@ -537,9 +542,9 @@ fn load_modules<'a>(
     for &file in &plan.retention.modules {
         let path = graph.file_path(file).ok_or_eyre("missing linked module")?;
         let source = sources
-            .text(path)
+            .text(path)?
             .ok_or_else(|| eyre::eyre!("{}: missing linked source text", path.display()))?;
-        let parsed = crate::emit::checked_source(graph, file, source)?;
+        let parsed = crate::emit::checked_source(graph, file, &source)?;
         for dependency in parsed
             .facts()
             .dependencies()

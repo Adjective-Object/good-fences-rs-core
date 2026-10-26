@@ -349,7 +349,7 @@ pub(super) fn read(
     if crate::transpile::required(path) {
         let config = ParserConfig::for_path(path, format)?;
         if let Some(previous) = previous.filter(|previous| {
-            previous.input == input
+            previous.text.matches_input(&input)
                 && previous.transpiled.as_ref().is_some_and(|transpiled| {
                     transpiled.config == config
                         && (!options.output.source_maps || transpiled.source_map.is_some())
@@ -363,7 +363,7 @@ pub(super) fn read(
             let mut loaded = load(
                 path,
                 input,
-                previous.text.clone(),
+                previous.text.text(path)?.to_string(),
                 &parser_path,
                 format,
                 Some(previous),
@@ -437,8 +437,7 @@ pub(super) fn load(
     let config = ParserConfig::for_path(parser_path, package)?;
     let previous = tracing::info_span!("prepare.memory_check").in_scope(|| {
         previous.filter(|s| {
-            s.input == input
-                && s.text == text
+            s.text.matches(&input, &text)
                 && config.accepts(s.record.config())
                 && s.record.matches_prepared_declarations(declarations)
         })
@@ -498,8 +497,12 @@ pub(super) fn load(
         ),
         source: Some(Source {
             css_identity: None,
-            input,
-            text: loaded.source,
+            text: crate::prepared_text::PreparedText::new(
+                &input,
+                &loaded.source,
+                parser_path != path,
+            )
+            .wrap_err_with(|| format!("sealing prepared text for {}", path.display()))?,
             record: loaded.record,
             transpiled: None,
         }),
