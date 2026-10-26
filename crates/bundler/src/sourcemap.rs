@@ -20,6 +20,7 @@ impl Source {
         Self::with_upstream(path, text, None)
     }
 
+    #[cfg(test)]
     pub(crate) fn with_upstream(
         path: &Path,
         text: &str,
@@ -28,6 +29,7 @@ impl Source {
         Self::with_maps(path, text, upstream.into_iter().collect())
     }
 
+    #[cfg(test)]
     pub(crate) fn with_maps(
         path: &Path,
         text: &str,

@@ -197,7 +197,11 @@ generated JS uses sealed private mapped snapshots after rechecking the original.
 Text leases and source-map/assembly owners share immutable private disk backing,
 never maps of editable inputs. Compiler/upstream maps (including embedded contents)
 are mapped too; final/no-op checks reread input identities. Products retain
-independent owners. CSS/Sass facts and original-style lifecycle remain separate.
+independent owners. CSS/Sass use the same identity/snapshot lifecycle; retain
+only original-input fingerprints after extraction, including Sass imports.
+Stylesheet `.style.seg.fb` records own verified mapped source-local URL/module
+syntax. Borrow them for discovery/naming; never unpack or persist resolved targets,
+linked names or output paths. Read-only/disabled misses use private disk backing.
 Never discover/parse/validate tsconfig for resolution, including extends/references.
 Use explicit BuildOptions.resolver.export_conditions; never ingest
 customConditions/customSourceConditions or rewrite paths/baseUrl.
@@ -245,7 +249,8 @@ Stylesheet routes remain input-root → owned output-relative .css paths under
 custom suffixes, public bases and aliases; aliases forward the same native job.
 Compile Sass through Sasso before CSS parsing/scoping. The importer uses checked
 inventory identities and resolver package/alias policy; retain/recheck transitive
-original Sass bytes separately from compiled CSS and include them in resource keys.
+original Sass input identities separately from compiled CSS and reload checked
+bytes for resource keys and final validation.
 `output.source_maps` covers CSS/Sass resources, not their synthetic JS loaders.
 Enable Sasso native maps only on demand; normalize checked original source URLs
 and retain contents in typed borrowed upstream records. Compose selector,

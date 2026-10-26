@@ -7,7 +7,10 @@ use std::{
 use eyre::{ensure, WrapErr};
 use sha2::{Digest, Sha256};
 
-use crate::css_syntax::{self, Edit, Name};
+use crate::{
+    css_facts::{CompositionSource, Name, Syntax},
+    css_syntax::{self, Edit},
+};
 
 pub(crate) const REVISION: &str = "css-local-v1";
 pub(crate) const TRANSFORM_REVISION: &str = "css-animations-v6";
@@ -44,11 +47,13 @@ impl Registry {
         root: &Path,
         path: &Path,
         source: &str,
+        syntax: &Syntax<'_>,
         imported: &impl Fn(&Name, &Name) -> eyre::Result<String>,
     ) -> eyre::Result<PreparedNames> {
-        self.prepare_with(root, path, source, scoped_name, imported)
+        self.prepare_syntax(root, path, source, syntax, scoped_name, imported)
     }
 
+    #[cfg(test)]
     fn prepare_with(
         &mut self,
         root: &Path,
@@ -57,7 +62,26 @@ impl Registry {
         hash: impl Fn(&str, &str) -> String,
         imported: &impl Fn(&Name, &Name) -> eyre::Result<String>,
     ) -> eyre::Result<PreparedNames> {
-        let syntax = css_syntax::parse(path, source)?;
+        let facts = crate::css_facts::extract(path, source.as_bytes(), source, true, [0; 16])?;
+        self.prepare_syntax(
+            root,
+            path,
+            source,
+            &Syntax::new(facts.facts()),
+            hash,
+            imported,
+        )
+    }
+
+    fn prepare_syntax(
+        &mut self,
+        root: &Path,
+        path: &Path,
+        source: &str,
+        syntax: &Syntax<'_>,
+        hash: impl Fn(&str, &str) -> String,
+        imported: &impl Fn(&Name, &Name) -> eyre::Result<String>,
+    ) -> eyre::Result<PreparedNames> {
         let relative = path.strip_prefix(root)?;
         let relative = relative
             .components()
@@ -70,12 +94,12 @@ impl Registry {
             .collect::<eyre::Result<Vec<_>>>()?
             .join("/");
         let mut prepared = PreparedNames::default();
-        let mut exports: BTreeMap<String, &Name> = BTreeMap::new();
+        let mut exports: BTreeMap<String, Name<'_>> = BTreeMap::new();
         for selector in &syntax.names {
             if !selector.local {
                 continue;
             }
-            let name = &selector.name;
+            let name = selector.name;
             let export = camel_case(&name.decoded);
             ensure!(
                 !export.is_empty(),
@@ -84,7 +108,7 @@ impl Registry {
                 name.decoded,
                 name.span
             );
-            if let Some(previous) = exports.insert(export.clone(), name) {
+            if let Some(previous) = exports.insert(export.clone(), name.clone()) {
                 ensure!(
                     previous.decoded == name.decoded,
                     "{}: CSS Modules export collision {:?}: {:?} at {:?} and {:?} at {:?}",
@@ -97,7 +121,11 @@ impl Registry {
                 );
             }
             let scoped = hash(&relative, &name.decoded);
-            let identity = (REVISION.to_owned(), relative.clone(), name.decoded.clone());
+            let identity = (
+                REVISION.to_owned(),
+                relative.clone(),
+                name.decoded.to_owned(),
+            );
             if let Some(previous) = self.identities.insert(scoped.clone(), identity.clone()) {
                 ensure!(
                     previous == identity,
@@ -107,25 +135,25 @@ impl Registry {
             }
             prepared.mappings.insert(export, scoped.clone());
             if selector.kind == css_syntax::SelectorKind::Id {
-                prepared.ids.insert(name.decoded.clone(), scoped.clone());
+                prepared.ids.insert(name.decoded.to_owned(), scoped.clone());
             }
             prepared.edits.push(Edit {
                 span: name.span.clone(),
                 replacement: scoped,
             });
         }
-        prepared.edits = Self::scope_edits(source, &syntax, &prepared.edits)
+        prepared.edits = Self::scope_edits(source, syntax, &prepared.edits)
             .wrap_err_with(|| format!("{}: CSS Modules scopes", path.display()))?;
-        Self::compose(source, &syntax, &mut prepared, imported)
+        Self::compose(source, syntax, &mut prepared, imported)
             .wrap_err_with(|| format!("{}: CSS Modules composes", path.display()))?;
         prepared.locals = syntax
             .names
             .iter()
             .filter(|name| name.local)
             .map(|name| {
-                let decoded = &name.name.decoded;
+                let decoded = name.name.decoded;
                 (
-                    decoded.clone(),
+                    decoded.to_owned(),
                     prepared.mappings[&camel_case(decoded)].clone(),
                 )
             })
@@ -134,19 +162,19 @@ impl Registry {
             .animations
             .iter()
             .filter(|animation| animation.definition && animation.local == Some(true))
-            .map(|animation| animation.name.decoded.as_str())
+            .map(|animation| animation.name.decoded)
             .collect();
         for animation in &syntax.animations {
             let name = &animation.name;
             let local = animation
                 .local
-                .unwrap_or_else(|| local_animations.contains(name.decoded.as_str()));
+                .unwrap_or_else(|| local_animations.contains(name.decoded));
             let mut replacement = if local {
                 let scoped = scoped_name_in(ANIMATION_DOMAIN, &relative, &name.decoded);
                 let identity = (
                     ANIMATION_DOMAIN.to_owned(),
                     relative.clone(),
-                    name.decoded.clone(),
+                    name.decoded.to_owned(),
                 );
                 if let Some(previous) = self.identities.insert(scoped.clone(), identity.clone()) {
                     ensure!(previous == identity,
@@ -200,11 +228,11 @@ impl Registry {
 
     fn compose(
         source: &str,
-        syntax: &css_syntax::ModuleSyntax,
+        syntax: &Syntax<'_>,
         prepared: &mut PreparedNames,
         imported: &impl Fn(&Name, &Name) -> eyre::Result<String>,
     ) -> eyre::Result<()> {
-        use css_syntax::{CompositionSource, SelectorKind};
+        use css_syntax::SelectorKind;
 
         if syntax.compositions.is_empty() {
             return Ok(());
@@ -214,11 +242,11 @@ impl Registry {
             .iter()
             .filter(|name| name.local)
             .map(|name| {
-                let name = name.name.decoded.as_str();
+                let name = name.name.decoded;
                 (name, prepared.mappings[&camel_case(name)].clone())
             })
             .collect();
-        type Values<'a> = (&'a Name, Option<Vec<String>>);
+        type Values<'a> = (Name<'a>, Option<Vec<String>>);
         let mut dependencies: BTreeMap<&str, Vec<Values<'_>>> = BTreeMap::new();
         for composition in &syntax.compositions {
             let span = &composition.span;
@@ -257,14 +285,12 @@ impl Registry {
                     && names[0].kind == SelectorKind::Class,
                 "illegal placement/multi-target selector at {selector:?}, declaration {span:?}; composes requires a single local class rule"
             );
-            let target = dependencies
-                .entry(names[0].name.decoded.as_str())
-                .or_default();
+            let target = dependencies.entry(names[0].name.decoded).or_default();
             for name in &composition.names {
                 let tokens = match &composition.source {
-                    CompositionSource::Global => Some(vec![name.decoded.clone()]),
+                    CompositionSource::Global => Some(vec![name.decoded.to_owned()]),
                     CompositionSource::File(request) => Some(
-                        imported(request, name)?
+                        imported(request, &name)?
                             .split_whitespace()
                             .map(str::to_owned)
                             .collect(),
@@ -272,7 +298,7 @@ impl Registry {
                     CompositionSource::Local => None,
                 };
                 ensure!(
-                    tokens.is_some() || own.contains_key(name.decoded.as_str()),
+                    tokens.is_some() || own.contains_key(name.decoded),
                     "unknown local name {:?} at {:?}, declaration {span:?}",
                     name.decoded,
                     name.span
@@ -296,7 +322,7 @@ impl Registry {
                 let edges = dependencies.get(name).map_or(&[][..], Vec::as_slice);
                 if let Some((dependency, tokens)) = edges.get(*index) {
                     *index += 1;
-                    let next = dependency.decoded.as_str();
+                    let next = dependency.decoded;
                     if tokens.is_some() || resolved.contains_key(next) {
                         continue;
                     }
@@ -318,7 +344,7 @@ impl Registry {
                 for (dependency, imported) in edges {
                     let values = imported
                         .as_deref()
-                        .unwrap_or_else(|| &resolved[dependency.decoded.as_str()]);
+                        .unwrap_or_else(|| &resolved[dependency.decoded]);
                     for token in values {
                         if seen.insert(token.clone()) {
                             tokens.push(token.clone());
@@ -336,11 +362,7 @@ impl Registry {
         Ok(())
     }
 
-    fn scope_edits(
-        source: &str,
-        syntax: &css_syntax::ModuleSyntax,
-        names: &[Edit],
-    ) -> eyre::Result<Vec<Edit>> {
+    fn scope_edits(source: &str, syntax: &Syntax<'_>, names: &[Edit]) -> eyre::Result<Vec<Edit>> {
         use std::ops::Range;
 
         fn contains(outer: &Range<usize>, inner: &Range<usize>) -> bool {
@@ -371,7 +393,7 @@ impl Registry {
 
         fn render(
             source: &str,
-            syntax: &css_syntax::ModuleSyntax,
+            syntax: &Syntax<'_>,
             names: &[Edit],
             region: &Range<usize>,
             depth: usize,
@@ -389,14 +411,14 @@ impl Registry {
                 .selectors
                 .iter()
                 .filter(|child| {
-                    *child != region
+                    child != region
                         && contains(region, child)
                         && !scopes.iter().any(|scope| contains(&scope.span, child))
                         && !syntax.selectors.iter().any(|parent| {
-                            parent != region
+                            parent != *region
                                 && parent != *child
-                                && contains(region, parent)
-                                && contains(parent, child)
+                                && contains(region, &parent)
+                                && contains(&parent, child)
                         })
                 })
                 .collect();
@@ -412,7 +434,7 @@ impl Registry {
             for child in children {
                 edits.push(Edit {
                     span: child.clone(),
-                    replacement: render(source, syntax, names, child, depth + 1)?.join(", "),
+                    replacement: render(source, syntax, names, &child, depth + 1)?.join(", "),
                 });
             }
             let mut variants = vec![edits];
@@ -420,14 +442,14 @@ impl Registry {
                 let alternatives = if let Some(argument) = &scope.argument {
                     let mut alternatives = Vec::new();
                     for (index, selector) in scope.alternatives.iter().enumerate() {
-                        let start = index
-                            .checked_sub(1)
-                            .map_or(argument.start + 1, |previous| scope.commas[previous].end);
+                        let start = index.checked_sub(1).map_or(argument.start + 1, |previous| {
+                            scope.commas.get(previous).expect("checked scope comma").end
+                        });
                         let end = scope
                             .commas
                             .get(index)
                             .map_or(argument.end - 1, |comma| comma.start);
-                        for text in render(source, syntax, names, selector, depth + 1)? {
+                        for text in render(source, syntax, names, &selector, depth + 1)? {
                             if !scope.first_in_compound {
                                 let mut input = cssparser::ParserInput::new(&text);
                                 let mut parser = cssparser::Parser::new(&mut input);
@@ -460,10 +482,11 @@ impl Registry {
                 variants = variants
                     .into_iter()
                     .flat_map(|edits| {
+                        let span = &scope.span;
                         alternatives.iter().map(move |replacement| {
                             let mut edits = edits.clone();
                             edits.push(Edit {
-                                span: scope.span.clone(),
+                                span: span.clone(),
                                 replacement: replacement.clone(),
                             });
                             edits
@@ -488,7 +511,7 @@ impl Registry {
                 .collect()
         }
 
-        let mut regions = syntax.selectors.clone();
+        let mut regions: Vec<_> = syntax.selectors.iter().collect();
         regions.sort_by_key(|span| (span.start, std::cmp::Reverse(span.end)));
         regions.dedup();
         let mut edits: Vec<Edit> = Vec::new();

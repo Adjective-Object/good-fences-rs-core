@@ -1,0 +1,62 @@
+namespace style_cache;
+
+struct Hash128 { bytes:[ubyte:16]; }
+struct Span { start:ulong; end:ulong; }
+enum SelectorKind:ubyte { Class, Id }
+enum ScopeKind:ubyte { Local, Global }
+enum CompositionKind:ubyte { Local, Global, File }
+enum Locality:ubyte { Implicit, Local, Global }
+table Name { decoded:string (required); span:Span (required); }
+table Url {
+  span:Span (required);
+  value:string (required);
+  import:bool;
+  function:bool;
+}
+table SelectorName {
+  kind:SelectorKind;
+  name:Name (required);
+  local:bool;
+}
+table Scope {
+  kind:ScopeKind;
+  span:Span (required);
+  argument:Span;
+  owner:Span (required);
+  alternatives:[Span] (required);
+  commas:[Span] (required);
+  first_in_compound:bool;
+}
+table Composition {
+  span:Span (required);
+  selector:Span;
+  nested:bool;
+  names:[Name] (required);
+  kind:CompositionKind;
+  request:Name;
+}
+table Animation {
+  name:Name (required);
+  span:Span (required);
+  local:Locality;
+  definition:bool;
+}
+table Facts {
+  urls:[Url] (required);
+  names:[SelectorName] (required);
+  scopes:[Scope] (required);
+  compositions:[Composition] (required);
+  selectors:[Span] (required);
+  animations:[Animation] (required);
+}
+table Style {
+  schema:uint;
+  extractor:uint;
+  source_hash:Hash128 (required);
+  prepared_hash:Hash128 (required);
+  config_hash:Hash128 (required);
+  records_hash:Hash128 (required);
+  facts:[ubyte] (required, nested_flatbuffer: "Facts");
+}
+root_type Style;
+file_identifier "GFST";

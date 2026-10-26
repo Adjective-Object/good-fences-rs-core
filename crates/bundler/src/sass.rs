@@ -11,6 +11,16 @@ use eyre::{ensure, WrapErr};
 use import_resolver::structural::{DependencyResolver, ResolutionMode, ResolvedDependency};
 use sasso::{CanonicalUrl, CanonicalizeContext, Importer, ImporterError, ImporterResult};
 
+#[cfg(test)]
+thread_local! {
+    static COMPILATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn compilations() -> usize {
+    COMPILATIONS.with(std::cell::Cell::get)
+}
+
 pub(crate) fn is_sass(path: &Path) -> bool {
     path.extension()
         .is_some_and(|ext| ext == "scss" || ext == "sass")
@@ -279,6 +289,8 @@ pub(crate) fn compile(
     aliases: &BTreeSet<String>,
     source_maps: bool,
 ) -> eyre::Result<Compiled> {
+    #[cfg(test)]
+    COMPILATIONS.with(|count| count.set(count.get() + 1));
     let importer = ResolverImporter {
         entry: path,
         inventory,

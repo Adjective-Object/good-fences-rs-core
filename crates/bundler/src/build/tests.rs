@@ -12,6 +12,7 @@ mod discovery;
 mod policy_tests;
 mod resolution_cache;
 mod sass;
+mod style_facts;
 mod transpile;
 mod worker_entries;
 

@@ -21,6 +21,7 @@ persisted record shape, rather than embedding CBOR bytes:
 | `syntax.fbs` | `Binding`, `Reference`, `Dependency`, `ImportBinding`, `Export`, `Directive`, `EffectSite`, `IdentifierCallee`, `InvocationArgument`, `Invocation`, `ExecutionContext`, `ExecutionFacts`, `PlacementFacts`, `NameRestrictions`, `NamespaceUse`, `SourceSlot`, `CalleePlan`, `PureLowering`, `Operation`, `SegmentRecipe`, `DynamicNamespace`, `LazyModuleCandidate`, `LazyOptionProperty`, `LazySelectorCandidate`, `EmissionFacts`, `PolicyViolation`, `ModuleFacts` |
 | `module.fbs` | `CachedModule`, ESM/CommonJS body alternatives, ordered statement spans |
 | `cache.fbs` | `SourceProvenance`, `CacheRecord` |
+| `style.fbs` | Independent stylesheet original/prepared/config identities, URL occurrences and CSS Modules names/scopes/compositions/animations |
 
 This covers persisted source records, plus explicit union alternatives for
 imports, exports, callees, namespace accesses, operations, export forms, chain
@@ -48,6 +49,12 @@ Independent resolution and upstream-map records retain their 16 MiB limits.
 A borrowed traversal then rejects unknown enum/union discriminants, absent union
 values, invalid MultiSpan lengths, duplicate hazard fields, and unordered/duplicate
 effect-map keys. No object API `unpack` is called.
+
+`WireStyle` uses independent schema 1/extractor 1 (`GFST`), with original and
+prepared source hashes, extraction configuration and nested typed facts integrity.
+Structural verification and UTF-8 span/containment/discriminant checks precede
+borrowed access. Stylesheet facts have no fixed byte cap and production loads use
+the same private mapped backing; resolved targets and linked names are not cached.
 
 The owner retains `SharedBytes`, a payload endpoint and the verified module
 range. `WireRecord`, `WireEcco` and `WireSourceMap` accept the same backing.

@@ -12,17 +12,23 @@ use eyre::{ensure, WrapErr};
 use import_resolver::structural::{DependencyResolver, ResolutionMode, ResolvedDependency};
 use sha2::{Digest, Sha256};
 
-use crate::{link::Artifacts, resource};
+use crate::{
+    link::Artifacts,
+    prepared_text::{InputIdentity, PreparedText},
+    resource,
+};
 
-struct Url {
-    span: Range<usize>,
-    value: String,
-    import: bool,
-    function: bool,
+pub(crate) struct Url {
+    pub(crate) span: Range<usize>,
+    pub(crate) value: String,
+    pub(crate) import: bool,
+    pub(crate) function: bool,
 }
 
 struct Request {
-    url: Url,
+    span: Range<usize>,
+    import: bool,
+    function: bool,
     path: PathBuf,
     suffix: String,
 }
@@ -30,11 +36,13 @@ struct Request {
 pub(crate) struct Styles<'a> {
     root: &'a Path,
     inventory: &'a crate::build::Inventory,
-    inputs: BTreeMap<PathBuf, Vec<u8>>,
-    texts: BTreeMap<PathBuf, String>,
+    inputs: BTreeMap<PathBuf, InputIdentity>,
+    texts: BTreeMap<PathBuf, PreparedText>,
+    facts: BTreeMap<PathBuf, cache_flatbuffers::WireStyle>,
+    cache: segment_cache::CacheMode,
     sources: BTreeMap<PathBuf, Arc<crate::sourcemap::Source>>,
     source_maps: bool,
-    sass_inputs: BTreeMap<PathBuf, Vec<u8>>,
+    sass_inputs: BTreeMap<PathBuf, InputIdentity>,
     sass_dependencies: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
     warnings: BTreeSet<String>,
     sass_aliases: BTreeSet<String>,
@@ -55,12 +63,15 @@ impl<'a> Styles<'a> {
         options: &'a crate::build::CssOptions,
         resolver_options: &import_resolver::node_resolver::caching::NodeModulesResolverOptions,
         source_maps: bool,
+        cache: segment_cache::CacheMode,
     ) -> Self {
         Self {
             root,
             inventory,
             inputs: BTreeMap::new(),
             texts: BTreeMap::new(),
+            facts: BTreeMap::new(),
+            cache,
             sources: BTreeMap::new(),
             source_maps,
             sass_inputs: BTreeMap::new(),
@@ -94,23 +105,25 @@ impl<'a> Styles<'a> {
     ) -> eyre::Result<()> {
         if let Some(previous) = self.inputs.get(path) {
             ensure!(
-                previous == input,
+                previous.matches(input),
                 "CSS dependency changed during build: {}",
                 path.display()
             );
         } else {
-            self.inputs.insert(path.to_owned(), input.to_vec());
+            self.inputs
+                .insert(path.to_owned(), InputIdentity::new(input));
         }
         let mut queue = VecDeque::from([path.to_owned()]);
         while let Some(path) = queue.pop_front() {
             if self.requests.contains_key(&path) {
                 continue;
             }
+            let input = self.inputs[&path].read(&path)?;
             let mut upstream = None;
             let text = if crate::sass::is_sass(&path) {
                 let compiled = crate::sass::compile(
                     &path,
-                    &self.inputs[&path],
+                    &input,
                     self.inventory,
                     sass_resolver,
                     &self.sass_aliases,
@@ -122,37 +135,49 @@ impl<'a> Styles<'a> {
                 for (dependency, bytes) in compiled.inputs {
                     if let Some(previous) = self.sass_inputs.get(&dependency) {
                         ensure!(
-                            previous == &bytes,
+                            previous.matches(&bytes),
                             "Sass dependency changed during build: {}",
                             dependency.display()
                         );
                     } else {
-                        self.sass_inputs.insert(dependency, bytes);
+                        self.sass_inputs
+                            .insert(dependency, InputIdentity::new(&bytes));
                     }
                 }
                 self.warnings.extend(compiled.warnings);
                 compiled.css
             } else {
-                std::str::from_utf8(&self.inputs[&path])
+                std::str::from_utf8(&input)
                     .wrap_err_with(|| format!("{}: CSS is not UTF-8", path.display()))?
                     .to_owned()
             };
+            let module = matches!(
+                resource::stylesheet_kind(&path, self.options),
+                resource::ResourceKind::Stylesheet { module: true }
+            );
+            let (facts, warning) = crate::css_facts::load(&path, &input, &text, module, self.cache)
+                .wrap_err_with(|| format!("{}: stylesheet extraction", path.display()))?;
+            self.warnings.extend(warning);
+            let prepared = PreparedText::new(&input, &text, crate::sass::is_sass(&path))
+                .wrap_err_with(|| format!("snapshotting prepared stylesheet {}", path.display()))?;
             if self.source_maps {
                 self.sources.insert(
                     path.clone(),
-                    crate::sourcemap::Source::with_upstream(&path, &text, upstream)?,
+                    crate::sourcemap::Source::with_text(
+                        &path,
+                        prepared.text(&path)?,
+                        upstream.into_iter().collect(),
+                    )?,
                 );
             }
-            self.texts.insert(path.clone(), text);
-            let text = &self.texts[&path];
-            let urls = urls(text).wrap_err_with(|| format!("{}: invalid CSS", path.display()))?;
+            self.texts.insert(path.clone(), prepared);
             let mut compositions = Vec::new();
-            if matches!(
-                resource::stylesheet_kind(&path, self.options),
-                resource::ResourceKind::Stylesheet { module: true }
-            ) {
-                for composition in crate::css_syntax::parse(&path, text)?.compositions {
-                    let crate::css_syntax::CompositionSource::File(request) = composition.source
+            if module {
+                for composition in crate::css_facts::Syntax::new(facts.facts())
+                    .compositions
+                    .iter()
+                {
+                    let crate::css_facts::CompositionSource::File(request) = composition.source
                     else {
                         continue;
                     };
@@ -197,15 +222,31 @@ impl<'a> Styles<'a> {
                         target.display()
                     );
                     if !self.inputs.contains_key(&target) {
-                        self.inputs.insert(target.clone(), fs::read(&target)?);
+                        let bytes = fs::read(&target).wrap_err_with(|| {
+                            format!("reading CSS composition {}", target.display())
+                        })?;
+                        self.inputs
+                            .insert(target.clone(), InputIdentity::new(&bytes));
                     }
                     queue.push_back(target.clone());
-                    compositions.push((request, target));
+                    compositions.push((
+                        crate::css_syntax::Name {
+                            decoded: request.decoded.to_owned(),
+                            span: request.span,
+                        },
+                        target,
+                    ));
                 }
             }
             self.compositions.insert(path.clone(), compositions);
             let mut requests = Vec::new();
-            for url in urls {
+            for occurrence in facts.facts().urls() {
+                let url = Url {
+                    span: occurrence.span().start() as usize..occurrence.span().end() as usize,
+                    value: occurrence.value().to_owned(),
+                    import: occurrence.import(),
+                    function: occurrence.function(),
+                };
                 let value = url
                     .value
                     .trim_matches(|ch| ch <= '\u{20}')
@@ -243,17 +284,23 @@ impl<'a> Styles<'a> {
                     url.value
                 );
                 if !self.inputs.contains_key(&target) {
-                    self.inputs.insert(target.clone(), fs::read(&target)?);
+                    let bytes = fs::read(&target)
+                        .wrap_err_with(|| format!("reading CSS URL target {}", target.display()))?;
+                    self.inputs
+                        .insert(target.clone(), InputIdentity::new(&bytes));
                 }
                 if url.import {
                     queue.push_back(target.clone());
                 }
                 requests.push(Request {
-                    url,
+                    span: url.span,
+                    import: url.import,
+                    function: url.function,
                     path: target,
                     suffix,
                 });
             }
+            self.facts.insert(path.clone(), facts);
             self.requests.insert(path, requests);
         }
         Ok(())
@@ -292,13 +339,14 @@ impl<'a> Styles<'a> {
                     resource::stylesheet_kind(path, self.options),
                     resource::ResourceKind::Stylesheet { module: true }
                 ) {
-                    let text = &self.texts[path];
+                    let text = self.texts[path].text(path)?;
+                    let syntax = crate::css_facts::Syntax::new(self.facts[path].facts());
                     let identity = self.root.join(self.inventory.relative(self.root, path));
-                    let mut names = self.name_registry.prepare_linked(self.root, &identity, text, &|request, name| {
+                    let mut names = self.name_registry.prepare_linked(self.root, &identity, &text, &syntax, &|request, name| {
                         let target = &self.compositions[path].iter()
                             .find(|(original, _)| original.decoded == request.decoded)
                             .expect("discovered composition request").1;
-                        self.names[target].locals.get(&name.decoded).cloned().ok_or_else(|| eyre::eyre!(
+                        self.names[target].locals.get(name.decoded).cloned().ok_or_else(|| eyre::eyre!(
                             "missing/private exported local mapping {:?} at {:?} from {} (request {:?} at {:?})",
                             name.decoded, name.span, target.display(), request.decoded, request.span
                         ))
@@ -308,26 +356,27 @@ impl<'a> Styles<'a> {
                         .expect("discovered CSS")
                         .retain(|request| {
                             !names.edits.iter().any(|edit| {
-                                edit.span.start <= request.url.span.start
-                                    && request.url.span.end <= edit.span.end
+                                edit.span.start <= request.span.start
+                                    && request.span.end <= edit.span.end
                             })
                         });
-                    for url in urls(text)? {
-                        if !url.import
-                            && url.function
+                    for url in self.facts[path].facts().urls() {
+                        let span = url.span().start() as usize..url.span().end() as usize;
+                        if !url.import()
+                            && url.function()
                             && !names.edits.iter().any(|edit| {
-                                edit.span.start <= url.span.start && url.span.end <= edit.span.end
+                                edit.span.start <= span.start && span.end <= edit.span.end
                             })
                         {
                             let value = url
-                                .value
+                                .value()
                                 .trim_matches(|ch| ch <= '\u{20}')
                                 .replace(['\t', '\r', '\n'], "");
                             if let Some(scoped) =
                                 value.strip_prefix('#').and_then(|id| names.ids.get(id))
                             {
                                 names.edits.push(crate::css_syntax::Edit {
-                                    span: url.span,
+                                    span,
                                     replacement: format!("url(\"#{scoped}\")"),
                                 });
                             }
@@ -354,22 +403,22 @@ impl<'a> Styles<'a> {
         self.compositions[path].iter().map(|(_, target)| target)
     }
 
-    pub(crate) fn identity(&self, path: &Path) -> PathBuf {
+    pub(crate) fn identity(&self, path: &Path) -> eyre::Result<PathBuf> {
         self.output_path(path)
     }
 
     pub(crate) fn public_url(&self, path: &Path) -> eyre::Result<String> {
-        self.public_base.join(&self.output_path(path))
+        self.public_base.join(&self.output_path(path)?)
     }
 
     pub(crate) fn name_mappings(&self, path: &Path) -> Option<&BTreeMap<String, String>> {
         self.names.get(path).map(|names| &names.mappings)
     }
 
-    pub(crate) fn identities(&self) -> BTreeMap<&Path, PathBuf> {
+    pub(crate) fn identities(&self) -> eyre::Result<BTreeMap<&Path, PathBuf>> {
         self.requests
             .keys()
-            .map(|path| (path.as_path(), self.output_path(path)))
+            .map(|path| Ok((path.as_path(), self.output_path(path)?)))
             .collect()
     }
 
@@ -383,7 +432,7 @@ impl<'a> Styles<'a> {
             queue.extend(
                 self.requests[&path]
                     .iter()
-                    .map(|request| (request.path.clone(), request.url.import)),
+                    .map(|request| (request.path.clone(), request.import)),
             );
             queue.extend(
                 self.compositions[&path]
@@ -394,7 +443,7 @@ impl<'a> Styles<'a> {
         seen
     }
 
-    fn output_path(&self, path: &Path) -> PathBuf {
+    fn output_path(&self, path: &Path) -> eyre::Result<PathBuf> {
         let mut digest = Sha256::new();
         digest.update(b"css-resource-v1\0");
         digest.update([u8::from(self.source_maps)]);
@@ -409,7 +458,7 @@ impl<'a> Styles<'a> {
         for (path, style) in self.closure(path) {
             let relative_path = self.inventory.relative(self.root, &path);
             let relative = relative_path.as_os_str().as_encoded_bytes();
-            let input = &self.inputs[&path];
+            let input = self.inputs[&path].read(&path)?;
             digest.update([u8::from(style)]);
             digest.update((relative.len() as u64).to_le_bytes());
             digest.update(relative);
@@ -434,7 +483,8 @@ impl<'a> Styles<'a> {
             }
             if style {
                 if let Some(dependencies) = self.sass_dependencies.get(&path) {
-                    let text = self.texts[&path].as_bytes();
+                    let prepared = self.texts[&path].text(&path)?;
+                    let text = prepared.as_bytes();
                     digest.update((text.len() as u64).to_le_bytes());
                     digest.update(text);
                     digest.update(b"sasso\0");
@@ -448,7 +498,7 @@ impl<'a> Styles<'a> {
                         }
                         let relative_path = self.inventory.relative(self.root, dependency);
                         let relative = relative_path.as_os_str().as_encoded_bytes();
-                        let bytes = &self.sass_inputs[dependency];
+                        let bytes = self.sass_inputs[dependency].read(dependency)?;
                         digest.update((relative.len() as u64).to_le_bytes());
                         digest.update(relative);
                         digest.update((bytes.len() as u64).to_le_bytes());
@@ -457,21 +507,24 @@ impl<'a> Styles<'a> {
                 }
             }
         }
-        PathBuf::from(format!("assets/{:x}.css", digest.finalize()))
+        Ok(PathBuf::from(format!("assets/{:x}.css", digest.finalize())))
     }
 
     fn render(&self, path: &Path) -> eyre::Result<(Vec<u8>, Option<Vec<u8>>)> {
-        let text = &self.texts[path];
-        let stylesheet = self.output_path(path);
+        let text = self.texts[path].text(path)?;
+        let stylesheet = self.output_path(path)?;
         let mut edits = self
             .names
             .get(path)
             .map_or_else(Vec::new, |names| names.edits.clone());
         for request in &self.requests[path] {
-            let target = if request.url.import {
-                self.output_path(&request.path)
+            let target = if request.import {
+                self.output_path(&request.path)?
             } else {
-                resource::asset_path(&request.path, &self.inputs[&request.path])
+                resource::asset_path(
+                    &request.path,
+                    &self.inputs[&request.path].read(&request.path)?,
+                )
             };
             let url = format!(
                 "{}{}",
@@ -479,26 +532,26 @@ impl<'a> Styles<'a> {
                 request.suffix
             );
             let mut replacement = String::new();
-            if request.url.function {
+            if request.function {
                 replacement.push_str("url(");
             }
             cssparser::serialize_string(&url, &mut replacement)?;
-            if request.url.function {
+            if request.function {
                 replacement.push(')');
             }
             edits.push(crate::css_syntax::Edit {
-                span: request.url.span.clone(),
+                span: request.span.clone(),
                 replacement,
             });
         }
         if !self.source_maps {
             return Ok((
-                crate::css_syntax::apply_edits(text, edits)?.into_bytes(),
+                crate::css_syntax::apply_edits(&text, edits)?.into_bytes(),
                 None,
             ));
         }
         // Retain the same overlap and UTF-8 validation as the unmapped pipeline.
-        crate::css_syntax::apply_edits(text, edits.clone())?;
+        crate::css_syntax::apply_edits(&text, edits.clone())?;
         edits.sort_by_key(|edit| (edit.span.start, edit.span.end));
         let source = &self.sources[path];
         let mut writer = crate::sourcemap::Writer::new(true);
@@ -531,10 +584,10 @@ impl<'a> Styles<'a> {
     pub(crate) fn emit<C>(&self, root: &Path, artifacts: &mut Artifacts<C>) -> eyre::Result<()> {
         artifacts
             .stylesheets
-            .insert(root.to_owned(), self.output_path(root));
+            .insert(root.to_owned(), self.output_path(root)?);
         for (path, style) in self.closure(root) {
             let (output, bytes) = if style {
-                let output = self.output_path(&path);
+                let output = self.output_path(&path)?;
                 let (bytes, map) = self.render(&path)?;
                 if let Some(map) = map {
                     artifacts
@@ -543,10 +596,8 @@ impl<'a> Styles<'a> {
                 }
                 (output, bytes)
             } else {
-                (
-                    resource::asset_path(&path, &self.inputs[&path]),
-                    self.inputs[&path].clone(),
-                )
+                let bytes = self.inputs[&path].read(&path)?;
+                (resource::asset_path(&path, &bytes), bytes)
             };
             artifacts.resources.insert(output, bytes);
         }
@@ -555,17 +606,20 @@ impl<'a> Styles<'a> {
 
     pub(crate) fn recheck(&self) -> eyre::Result<()> {
         for (path, input) in self.inputs.iter().chain(&self.sass_inputs) {
-            ensure!(
-                fs::read(path)? == *input,
-                "CSS dependency changed during build: {}",
-                path.display()
-            );
+            input.read(path).wrap_err_with(|| {
+                format!("CSS dependency changed during build: {}", path.display())
+            })?;
         }
         Ok(())
     }
 
     pub(crate) fn warnings(&self) -> impl Iterator<Item = &String> {
         self.warnings.iter()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn storage(&self, path: &Path) -> (&PreparedText, &cache_flatbuffers::WireStyle) {
+        (&self.texts[path], &self.facts[path])
     }
 }
 
@@ -587,7 +641,7 @@ fn decode_path(value: &str) -> eyre::Result<String> {
     String::from_utf8(decoded).wrap_err("CSS URL is not UTF-8")
 }
 
-fn urls(source: &str) -> eyre::Result<Vec<Url>> {
+pub(crate) fn urls(source: &str) -> eyre::Result<Vec<Url>> {
     let mut input = ParserInput::new(source);
     let mut parser = Parser::new(&mut input);
     let mut urls = Vec::new();

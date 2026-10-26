@@ -26,6 +26,20 @@ mod resolution_generated;
 pub use resolution_generated::resolution_cache as resolution_wire;
 pub mod resolution;
 
+#[rustfmt::skip]
+#[expect(
+    unused_imports,
+    mismatched_lifetime_syntaxes,
+    clippy::extra_unused_lifetimes,
+    clippy::derivable_impls,
+    clippy::missing_safety_doc,
+    reason = "unmodified flatc 25.2.10 output"
+)]
+mod style_generated;
+pub use style_generated::style_cache as style_wire;
+mod style;
+pub use style::WireStyle;
+
 mod bytes;
 mod source_map;
 mod verify;

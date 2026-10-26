@@ -855,6 +855,18 @@ cleanup. They never serve as executable module routes.
 
 ## Extracted CSS
 
+CSS/Sass source-local facts persist in typed `.style.seg.fb` sidecars, separately
+from generated JavaScript wrapper facts. Cold and warm facts use private mapped
+backing, including disabled/read-only cache misses and nonfatal publication
+failures. Discovery and name preparation borrow URL, selector, scope, composition
+and animation records without reconstructing syntax trees on hits.
+Original CSS, asset and imported Sass bytes are released after preparation;
+only length/XXH3 identities remain. Emission reloads and checks originals, while
+compiled Sass CSS uses a mapped prepared-text snapshot without recompilation.
+Compiler maps and optional embedded source contents are mapped too. Resource
+hashes still consume checked original bytes, not their fingerprints; resolved
+targets and linked class names remain derived state.
+
 CSS default imports and `require` export a stylesheet URL using the same base;
 side-effect imports also extract the file. `BuildOptions.css.load` selects the
 built-in `CssLoad::CallerLoaded` policy by default (`"caller-loaded"` when

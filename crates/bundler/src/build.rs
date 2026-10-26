@@ -342,6 +342,7 @@ impl BuildSession {
             &options.css,
             &options.resolver,
             options.output.source_maps,
+            options.cache,
         );
         let resolution_fingerprint_span = tracing::info_span!("build.resolver_policy").entered();
         let resolution_key = resolver::BuildResolver::policy(options);
@@ -759,7 +760,8 @@ impl BuildSession {
                                     kind,
                                     crate::resource::ResourceKind::Stylesheet { .. }
                                 )
-                                .then(|| styles.identity(&path));
+                                .then(|| styles.identity(&path))
+                                .transpose()?;
                                 let parser_path = prepared_css.as_ref().map_or_else(
                                     || crate::resource::parser_path(&path, wrapper_format),
                                     |prepared| prepared.parser_path.clone(),
@@ -1180,7 +1182,7 @@ impl BuildSession {
                 self.sources
                     .get_mut(path)
                     .expect("loaded source")
-                    .css_identity = Some(styles.identity(path));
+                    .css_identity = Some(styles.identity(path)?);
             }
         }
         self.pending_invalidated.extend(changed);
@@ -1305,7 +1307,7 @@ impl BuildSession {
                 options.entries,
                 public_base.as_str(),
                 options.css,
-                styles.identities(),
+                styles.identities()?,
                 options.output.min_chunk_bytes,
                 options.output.synthesize_async_boundaries,
                 crate::lazy_modules::configuration_fingerprint(&options.output.lazy_runtimes),

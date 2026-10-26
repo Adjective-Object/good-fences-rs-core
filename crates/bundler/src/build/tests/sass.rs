@@ -270,7 +270,7 @@ fn sass_rechecks_transitive_original_bytes_before_returning() {
             .unwrap()
     );
     assert!(
-        error.contains("CSS dependency changed during build"),
+        error.contains("source changed during build") && error.contains("_colors.scss"),
         "{error}"
     );
 }

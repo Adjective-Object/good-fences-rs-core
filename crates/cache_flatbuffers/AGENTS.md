@@ -9,6 +9,10 @@
 
 - This is the production `.seg.fb` backend (schema 22/extractor 36).
   `segment_cache` adds source-local semantic validation before exposing records.
+- Independent `style.fbs` schema 1/extractor 1 stores source-local URL/module
+  syntax in `GFST` records, sealing original/prepared bytes and extraction config.
+  Validate both roots, typed discriminants and UTF-8 span/containment relationships
+  before borrowed views; style facts have no fixed byte cap. Never unpack on hits.
 - Policy evidence has explicit enum discriminants and source spans, not caller
   decisions; reject unknown policy discriminants before exposing borrowed views.
 - Dependencies retain the static JSON import attribute as an optional typed span;
