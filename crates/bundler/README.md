@@ -1047,6 +1047,10 @@ It requires Rust **1.95 or newer**; the repository's
 at 0.137.0, independently of the JavaScript Oxc pin.
 Recoverable parse errors, raw selectors/unknown pseudo arguments and unsupported
 selector-bearing at-rule preludes fail closed with path/span diagnostics.
+`::highlight()` accepts one identifier, preserving the highlight registry name
+while scoping surrounding classes/IDs; other raw argument forms remain errors.
+Non-selector `@property` registrations preserve their custom-property names and
+descriptor values without adding module exports.
 Classes/IDs default to local. Bare `:local`/`:global` switches the rest of its
 complex selector, resetting at each list comma; functional forms scope only their
 selector arguments. Both forms are removed from emitted CSS.

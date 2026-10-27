@@ -1781,6 +1781,104 @@ fn css_modules_animations_are_file_local_without_extra_exports_under_both_loader
 }
 
 #[test]
+fn css_modules_highlight_and_property_preserve_nonselector_names_in_css_and_sass() {
+    let source = r#"@property --copilot-gradient-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: -36deg;
+}
+.highlightDisabled::highlight(__persistSelection) {
+  background-color: transparent;
+  --copilot-gradient-angle: var(--copilot-gradient-angle);
+}
+.__persistSelection, .copilot-gradient-angle {
+  color: red;
+}
+"#;
+    for extension in ["css", "scss"] {
+        let directory = tempfile::tempdir_in(".").unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let file = format!("style.module.{extension}");
+        let input = if extension == "scss" {
+            format!("$angle: -36deg;\n{}", source.replace("-36deg", "$angle"))
+        } else {
+            source.to_owned()
+        };
+        write(&root, &file, &input);
+        write(&root, "main.mjs", &format!("export * from './{file}';"));
+        let mut config = options();
+        config.resolver.target_env = TargetEnv::Browser;
+        config.css.css_modules = CssModules::Enabled;
+        for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
+            config.css.load = load;
+            let mut session = BuildSession::new(&root).unwrap();
+            let cold = session.build(&config).unwrap();
+            let observation = observe_named(
+                &cold.product.artifacts,
+                &format!(
+                    "{CSS_DOM_RECORDER}\nconst ns = await import('./main.mjs'); assert.deepEqual(Object.keys(ns), ['copilotGradientAngle', 'highlightDisabled', 'persistSelection']); assert.equal(links.length, {}); console.log(JSON.stringify(ns));",
+                    usize::from(load == CssLoad::AutoMount),
+                ),
+            );
+            let mappings: BTreeMap<String, String> = serde_json::from_slice(&observation).unwrap();
+            let resource = &cold.product.artifacts.stylesheets[&root.join(&file)];
+            let text = std::str::from_utf8(&cold.product.artifacts.resources[resource]).unwrap();
+            assert!(
+                text.contains(&format!(
+                    ".{}::highlight(__persistSelection)",
+                    mappings["highlightDisabled"]
+                )),
+                "{text}"
+            );
+            let mut normalized = text.to_owned();
+            for (export, scoped) in &mappings {
+                normalized = normalized.replace(scoped, &format!("_{export}"));
+            }
+            insta::allow_duplicates! {
+                insta::assert_snapshot!(normalized.split_whitespace().collect::<Vec<_>>().join(" "), @r#"@property --copilot-gradient-angle { syntax: "<angle>"; inherits: false; initial-value: -36deg; } ._highlightDisabled::highlight(__persistSelection) { background-color: transparent; --copilot-gradient-angle: var(--copilot-gradient-angle); } ._persistSelection, ._copilotGradientAngle { color: red; }"#);
+            }
+            assert!(Rc::ptr_eq(
+                &cold.product,
+                &session.build(&config).unwrap().product
+            ));
+            let disk = BuildSession::new(&root).unwrap().build(&config).unwrap();
+            assert_eq!(cold.product.artifacts, disk.product.artifacts);
+            assert_eq!(disk.counters.source_reparses, 0);
+        }
+    }
+}
+
+#[test]
+fn css_modules_highlight_and_property_reject_nearby_unsupported_forms_on_rebuild() {
+    let directory = tempfile::tempdir_in(".").unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    write(&root, "main.mjs", "export * from './style.module.css';");
+    write(
+        &root,
+        "style.module.css",
+        ".a::highlight(selection) {} @property --angle { syntax: '<angle>'; inherits: false; initial-value: -36deg; }",
+    );
+    let mut config = options();
+    config.css.css_modules = CssModules::Enabled;
+    let mut session = BuildSession::new(&root).unwrap();
+    let good = session.build(&config).unwrap();
+    for source in [
+        ".a::highlight(.hidden) {}",
+        ".a::unknown(selection) {}",
+        "@property angle { syntax: '<angle>'; }",
+        "@property --angle { inherits false; }",
+    ] {
+        write(&root, "style.module.css", source);
+        let error = format!("{:#}", session.build(&config).err().unwrap());
+        assert!(
+            error.contains("style.module.css: CSS Modules syntax"),
+            "{error}"
+        );
+        assert!(Rc::ptr_eq(&good.product, session.last.as_ref().unwrap()));
+    }
+}
+
+#[test]
 fn css_modules_scopes_fragments_and_urls_share_original_utf8_edits_under_both_loaders() {
     let dir = TmpDir::new();
     let source = r##"@charset "UTF-8";

@@ -214,6 +214,7 @@ impl Collector<'_> {
                             | AtRulePrelude::Media(_)
                             | AtRulePrelude::Layer(_)
                             | AtRulePrelude::Container(_)
+                            | AtRulePrelude::Property(_)
                             | AtRulePrelude::Keyframes(_)) => {}
                         Some(AtRulePrelude::Unknown(_)) if keyframes => {}
                         _ => bail!(
@@ -446,6 +447,10 @@ impl Collector<'_> {
                             }
                             PseudoElementSelectorArgKind::Ident(_)
                             | PseudoElementSelectorArgKind::IdentList(_) => {}
+                            PseudoElementSelectorArgKind::TokenSeq(tokens)
+                                if self.name(&pseudo.name)?.decoded.eq_ignore_ascii_case("highlight")
+                                    && tokens.tokens.len() == 1
+                                    && matches!(tokens.tokens[0].token, Token::Ident(_)) => {}
                             PseudoElementSelectorArgKind::TokenSeq(_) => bail!("raw CSS pseudo-element argument at {:?}; cannot safely transform CSS Modules", self.span(arg.span)?),
                         }
                     }
@@ -1150,6 +1155,91 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["root", "limit", "parent", "child"]
         );
+    }
+
+    #[test]
+    fn highlight_identifiers_are_data_not_selector_names() {
+        let source = r".highlightDisabled::highlight(__persistSelection), :local(.other::HiGhLiGhT( /*keep*/ \5f _persistSelection /*keep*/ )), .__persistSelection {}";
+        let syntax = parse(source).unwrap();
+        let names: Vec<_> = syntax
+            .names
+            .iter()
+            .map(|name| {
+                (
+                    name.name.decoded.as_str(),
+                    &source[name.name.span.clone()],
+                    name.local,
+                )
+            })
+            .collect();
+        insta::assert_debug_snapshot!(names, @r#"
+        [
+            (
+                "highlightDisabled",
+                "highlightDisabled",
+                true,
+            ),
+            (
+                "other",
+                "other",
+                true,
+            ),
+            (
+                "__persistSelection",
+                "__persistSelection",
+                true,
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
+    fn property_registration_names_and_descriptors_are_not_module_symbols() {
+        let source = r#"@property --copilot-gradient-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: -36deg;
+}
+@media screen { @property --other { syntax: '*'; inherits: true; initial-value: ".data"; } }
+.copilot-gradient-angle { --copilot-gradient-angle: 42deg; }
+"#;
+        let syntax = parse(source).unwrap();
+        assert_eq!(syntax.names.len(), 1);
+        assert_eq!(syntax.names[0].name.decoded, "copilot-gradient-angle");
+        assert_eq!(
+            &source[syntax.names[0].name.span.clone()],
+            "copilot-gradient-angle"
+        );
+        assert!(syntax.scopes.is_empty());
+        assert!(syntax.compositions.is_empty());
+        assert!(syntax.animations.is_empty());
+    }
+
+    #[test]
+    fn highlight_and_property_support_does_not_admit_other_raw_or_malformed_syntax() {
+        for source in [
+            ".a::highlight() {}",
+            ".a::highlight(.hidden) {}",
+            ".a::highlight(one two) {}",
+            ".a::highlight(one, two) {}",
+            ".a::highlight('name') {}",
+            ".a::highlight(var(--name)) {}",
+            ".a::highlight(name {}",
+            ".a::unknown(name) {}",
+            ".a:highlight(name) {}",
+            "@property color { syntax: '<color>'; }",
+            "@property '--name' { syntax: '*'; }",
+            "@property --one --two { syntax: '*'; }",
+            "@property --name;",
+            "@property --name { inherits false; }",
+            "@unknown --name { syntax: '*'; }",
+        ] {
+            let error = format!("{:#}", parse(source).unwrap_err());
+            assert!(
+                error.contains("unicode.module.css: CSS Modules syntax"),
+                "{source}: {error}"
+            );
+        }
     }
 
     #[test]
