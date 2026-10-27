@@ -19,6 +19,7 @@ pub mod execution;
 pub mod execution_dependencies;
 pub mod lazy_modules;
 pub mod link;
+pub mod loaders;
 mod lockfile;
 pub mod manifest;
 mod output_url;

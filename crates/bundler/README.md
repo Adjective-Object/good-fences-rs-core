@@ -27,6 +27,18 @@ these path-bearing events are excluded from duration traces.
 
 ## Replacement direction and current status
 
+`loaders::LoaderPolicy` is a standalone typed policy API; it is not yet wired into
+`BuildOptions`, the CLI or build dispatch. Construct defaults with `default()`,
+overlay suffixes with `from_overrides([(".theme", Some(Loader::ScssModules))])`,
+or consume/update a policy with `with_override`. JSON deserialization accepts a
+strict suffix-to-label/null map. Selection matches filenames only, longest suffix
+first; null rejects without fallback. Declaration files and native addons cannot
+be remapped. `rules()` borrows the canonical effective map for cache identities;
+`resolution_extensions()` derives shortest-first, alphabetical resolver suffixes
+without leading dots, preserving compounds and excluding null and wildcard rules.
+`Loader::script_syntax()` and `Loader::stylesheet()` expose syntax/scoping without
+filename inference; module format remains a separate original-input concern.
+
 The [fixture semantic contract](../../fixtures/bundler/README.md#permitted-execution-differences)
 lists permitted execution differences and the observations adversarial tests
 must preserve. TDZ-error preservation is waived; generated suspension and new
