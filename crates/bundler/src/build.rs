@@ -1124,6 +1124,9 @@ impl BuildSession {
                 }
             };
             if expanded.is_empty() {
+                if !errors.is_empty() {
+                    break;
+                }
                 if !deferred_styles.is_empty() {
                     // All checked routes (including maps and composition jobs)
                     // must settle before CSS names, URLs or relocations capture them.

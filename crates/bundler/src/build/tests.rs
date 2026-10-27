@@ -4417,6 +4417,44 @@ fn css_transitive_edits_invalidate_parent_urls_and_failures_preserve_last_produc
 }
 
 #[test]
+fn css_modules_discovery_failures_do_not_finalize_partial_styles() {
+    for composed in [false, true] {
+        let dir = TmpDir::new();
+        write(
+            dir.root(),
+            "main.mjs",
+            if composed {
+                "import './good.module.css'; import './consumer.module.css';"
+            } else {
+                "import './good.module.css'; import './broken.module.css';"
+            },
+        );
+        write(dir.root(), "good.module.css", ".good { color: green }");
+        write(
+            dir.root(),
+            "broken.module.css",
+            ".broken { background: url('./missing.svg') }",
+        );
+        write(
+            dir.root(),
+            "consumer.module.css",
+            ".consumer { composes: broken from './broken.module.css' }",
+        );
+        let mut config = options();
+        config.cache = CacheMode::Disabled;
+        config.css.css_modules = CssModules::Enabled;
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let error = session.build(&config).err().unwrap();
+        let report = format!("{error:#}");
+        assert!(report.contains("broken.module.css"), "{report}");
+        assert!(report.contains("missing.svg"), "{report}");
+        assert!(!report.contains("finishing CSS discovery"), "{report}");
+        write(dir.root(), "missing.svg", "<svg/>");
+        session.build(&config).unwrap();
+    }
+}
+
+#[test]
 fn css_entries_are_extracted_and_invalid_or_escaping_urls_are_errors() {
     let dir = TmpDir::new();
     let project = dir.root().join("project");

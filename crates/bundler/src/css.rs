@@ -340,7 +340,20 @@ impl<'a> Styles<'a> {
                     resource::ResourceKind::Stylesheet { module: true }
                 ) {
                     let text = self.texts[path].text(path)?;
-                    let syntax = crate::css_facts::Syntax::new(self.facts[path].facts());
+                    let facts = self
+                        .facts
+                        .get(path)
+                        .ok_or_else(|| eyre::eyre!("stylesheet facts are missing"))
+                        .wrap_err_with(|| {
+                            format!(
+                                "finishing CSS discovery for {}; discovery state: texts={}, compositions={}, requests={}",
+                                path.display(),
+                                self.texts.contains_key(path),
+                                self.compositions.contains_key(path),
+                                self.requests.contains_key(path),
+                            )
+                        })?;
+                    let syntax = crate::css_facts::Syntax::new(facts.facts());
                     let identity = self.root.join(self.inventory.relative(self.root, path));
                     let mut names = self.name_registry.prepare_linked(self.root, &identity, &text, &syntax, &|request, name| {
                         let target = &self.compositions[path].iter()

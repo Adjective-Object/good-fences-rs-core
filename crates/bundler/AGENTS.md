@@ -187,6 +187,8 @@ remain canonical/root-relative. External entries require explicit safe output
 names; input links never relax publication/output path checks.
 Discover CSS/composition evaluation jobs before finalizing CSS Modules names,
 closure URLs and wrapper relocations, after all checked routes have settled.
+After the discovery frontier settles, aggregate preparation errors before finalizing
+styles; failed discovery may leave partial stylesheet state.
 Product generations are session-local immutable snapshots; never transfer
 graph-local handles/plans between products. No-op retains the same generation.
 Stage source identities/resolutions, never owning graph inputs or copied source
