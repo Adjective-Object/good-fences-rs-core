@@ -66,6 +66,81 @@ fn sass_modules_compile_before_scoping_and_keep_asset_and_css_imports() {
 }
 
 #[test]
+fn sass_modules_allow_comment_only_trailing_bare_global_scopes() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "export * from './style.module.scss';",
+    );
+    write(
+        dir.root(),
+        "style.module.scss",
+        r#".container {
+  .picker {
+    :global {
+      /* stylelint-disable-next-line selector-class-pattern */
+      .ms-BasePicker-selectedItems { display: flex; flex-wrap: wrap; }
+    }
+  }
+}
+"#,
+    );
+    let mut config = options();
+    config.resolver.target_env = TargetEnv::Browser;
+    config.css.css_modules = CssModules::Enabled;
+    let built = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    let text = css(&built, &dir.root().join("style.module.scss"));
+    let rules: Vec<_> = text
+        .split('}')
+        .filter_map(|rule| rule.split_once('{'))
+        .collect();
+    assert_eq!(rules.len(), 2, "{text}");
+    assert_eq!(
+        rules[0].1.trim(),
+        "/* stylelint-disable-next-line selector-class-pattern */",
+        "{text}"
+    );
+    let locals: Vec<_> = rules[0].0.split_whitespace().collect();
+    assert_eq!(locals.len(), 2, "{text}");
+    let descendant: Vec<_> = rules[1].0.split_whitespace().collect();
+    assert_eq!(
+        descendant,
+        [locals[0], locals[1], ".ms-BasePicker-selectedItems"],
+        "{text}"
+    );
+    assert!(
+        text.contains("display: flex") && text.contains("flex-wrap: wrap"),
+        "{text}"
+    );
+    assert!(
+        !text.contains(":global") && !text.contains(".container") && !text.contains(".picker"),
+        "{text}"
+    );
+    let graph = &built.product.graph;
+    let file = graph
+        .file_id(&dir.root().join("style.module.scss").canonicalize().unwrap())
+        .unwrap();
+    for name in ["container", "picker"] {
+        graph
+            .resolve_export(file, name, source_graph::Namespace::Value)
+            .unwrap();
+    }
+    for name in ["ms-BasePicker-selectedItems", "msBasePickerSelectedItems"] {
+        assert!(
+            graph
+                .resolve_optional_export(file, name, source_graph::Namespace::Value)
+                .unwrap()
+                .is_none(),
+            "exported global class {name}"
+        );
+    }
+}
+
+#[test]
 fn sass_importer_honors_packages_conditions_aliases_and_import_only_partials() {
     let dir = TmpDir::new();
     write(dir.root(), "main.mjs", "import './style.scss';");

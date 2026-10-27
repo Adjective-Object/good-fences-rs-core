@@ -279,10 +279,13 @@ spans, scope markers and composition requests; never persist its arena nodes.
 Normalize pinned CSS decoder NULs to U+FFFD at owned identifier/string boundaries.
 Recovery/raw selector syntax is an explicit error, not partially scoped success.
 Selected modules default classes/IDs to local; bare scopes last to the selector
-list boundary, functional scopes restore their caller's scope. Selector-bearing
-pseudos and @supports selector() recurse through Oxc. Reparse only Oxc's raw
-functional scope arguments as complete synthetic rules, rejecting recovery,
-extra statements and incomplete consumption; translate every owned span back.
+list boundary, functional scopes restore their caller's scope.
+Empty/trailing bare scope switches are no-ops, including comment-only Sass rules;
+strip their markers while preserving preceding local exports and comment text.
+Selector-bearing pseudos and @supports selector() recurse through Oxc.
+Reparse only Oxc's raw functional scope arguments as complete synthetic rules,
+rejecting recovery, extra statements and incomplete consumption; translate every
+owned span back.
 Expand functional scope lists at their owning complex selector, never through
 :is() (which changes specificity). Preserve comment trivia without introducing
 descendant whitespace; cap expansions and reject ambiguous type-selector joins.

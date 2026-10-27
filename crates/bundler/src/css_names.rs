@@ -631,6 +631,19 @@ mod tests {
     #[test]
     fn scopes_follow_ast_boundaries_and_expand_lists_without_changing_specificity() {
         for (source, expected, exports) in [
+            (":local {}", " {}", vec![]),
+            (":global {}", " {}", vec![]),
+            (":local /*empty*/ {}", " /*empty*/ {}", vec![]),
+            (":global /*empty*/ {}", " /*empty*/ {}", vec![]),
+            (".a :local {}", "._a  {}", vec!["a"]),
+            (".a :global {}", "._a  {}", vec!["a"]),
+            (".a :local /*empty*/ {}", "._a  /*empty*/ {}", vec!["a"]),
+            (".a :global /*empty*/ {}", "._a  /*empty*/ {}", vec!["a"]),
+            (
+                ".container .picker :global { /* stylelint-disable-next-line selector-class-pattern */ }\n.container .picker :global .ms-BasePicker-selectedItems {display:flex;flex-wrap:wrap}",
+                "._container ._picker  { /* stylelint-disable-next-line selector-class-pattern */ }\n._container ._picker  .ms-BasePicker-selectedItems {display:flex;flex-wrap:wrap}",
+                vec!["container", "picker"],
+            ),
             (
                 ":global(.theme) :local(.button) {}",
                 ".theme ._button {}",
@@ -752,13 +765,11 @@ mod tests {
     }
 
     #[test]
-    fn scopes_reject_empty_recovered_raw_and_ambiguous_selectors_with_original_spans() {
+    fn scopes_reject_empty_functional_recovered_raw_and_ambiguous_selectors_with_original_spans() {
         for source in [
             ":local() {}",
             ":global() {}",
             ":local(/*empty*/) {}",
-            ":local {}",
-            ":global /*empty*/ {}",
             ":global > .a {}",
             ":local(.a,) {}",
             ":local(.a; .b) {}",

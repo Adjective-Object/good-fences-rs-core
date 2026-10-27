@@ -381,13 +381,6 @@ impl Collector<'_> {
                             }
                         } else {
                             *local = scoped_local;
-                            ensure!(
-                                self.source[self.span(pseudo.span)?.end..owner.end]
-                                    .chars()
-                                    .any(|ch| !ch.is_whitespace()),
-                                "empty bare CSS scope at {:?}",
-                                self.span(pseudo.span)?
-                            );
                         }
                         ensure!(
                             pseudo.arg.is_none() || !alternatives.is_empty(),

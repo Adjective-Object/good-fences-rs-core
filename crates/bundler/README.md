@@ -1041,7 +1041,9 @@ Recoverable parse errors, raw selectors/unknown pseudo arguments and unsupported
 selector-bearing at-rule preludes fail closed with path/span diagnostics.
 Classes/IDs default to local. Bare `:local`/`:global` switches the rest of its
 complex selector, resetting at each list comma; functional forms scope only their
-selector arguments. Both forms are removed from emitted CSS. Lists, combinators,
+selector arguments. Both forms are removed from emitted CSS.
+Empty/trailing bare switches are no-ops, including comment-only Sass rules;
+preceding local exports and comment text are preserved. Lists, combinators,
 nesting, selector-bearing pseudos (`:is`, `:not`, `:has`, nth matchers and slotted
 selectors), `@scope`, `@nest` and `@supports selector(...)` preserve their selector
 boundaries. Functional lists expand into alternatives, not `:is()` wrappers that
