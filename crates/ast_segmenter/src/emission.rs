@@ -151,6 +151,20 @@ pub(crate) fn extract(
     };
     if !facts.commonjs() {
         visitor.visit_program(program);
+        let env: std::collections::HashSet<_> = facts
+            .dependencies()
+            .iter()
+            .filter(|dependency| dependency.kind() == crate::owned::DependencyKind::ImportMetaEnv)
+            .map(|dependency| dependency.id().0)
+            .collect();
+        for (index, reference) in facts.references().iter().enumerate() {
+            if env.contains(&reference.span().start) {
+                visitor.namespace_uses.insert(
+                    index as u32,
+                    NamespaceAccess::Native(NamespaceReason::Other),
+                );
+            }
+        }
     }
     let awaits = &visitor.awaits;
     for operation in &mut visitor.operations {

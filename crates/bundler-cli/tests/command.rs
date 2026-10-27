@@ -25,6 +25,52 @@ fn help_and_version_exit_successfully_without_building() {
 }
 
 #[test]
+fn import_meta_env_project_configuration_builds_and_runs() {
+    let dir = TmpDir::new();
+    std::fs::write(
+        dir.root().join("main.mjs"),
+        "console.log(import.meta.env ? import.meta.env.MODE : void 0);",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.root().join("bundler.config.json"),
+        r#"{"entries":["main.mjs"],"target":"browser","env":{"MODE":"production"}}"#,
+    )
+    .unwrap();
+    for _ in 0..2 {
+        let result = command(&dir, &[]);
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+        let entry = std::path::Path::new(report["directory"].as_str().unwrap())
+            .join(report["entries"]["main.mjs"].as_str().unwrap());
+        let observed = Command::new("node")
+            .arg(entry.file_name().unwrap())
+            .current_dir(entry.parent().unwrap())
+            .output()
+            .unwrap();
+        assert!(
+            observed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&observed.stderr)
+        );
+        assert_eq!(observed.stdout, b"production\n");
+    }
+    std::fs::write(
+        dir.root().join("bundler.config.json"),
+        r#"{"entries":["main.mjs"],"env":[]}"#,
+    )
+    .unwrap();
+    let result = command(&dir, &[]);
+    assert!(!result.status.success());
+    assert!(result.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("parsing configuration"));
+}
+
+#[test]
 fn invalid_arguments_use_clap_diagnostics_without_building() {
     let dir = TmpDir::new();
     for args in [

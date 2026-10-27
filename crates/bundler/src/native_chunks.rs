@@ -231,7 +231,12 @@ fn emit_inner(
                 .iter()
                 .filter(|d| {
                     !d.type_only()
-                        && matches!(d.kind(), DependencyKind::Import | DependencyKind::ReExport)
+                        && matches!(
+                            d.kind(),
+                            DependencyKind::Import
+                                | DependencyKind::ImportMetaEnv
+                                | DependencyKind::ReExport
+                        )
                 })
                 .filter(|d| {
                     !matches!(
@@ -525,6 +530,18 @@ fn emit_inner(
         }
     }
     let mut changed = BTreeSet::new();
+    for (&file, module) in modules {
+        if !native_seams
+            && module
+                .parsed
+                .facts()
+                .dependencies()
+                .iter()
+                .any(|dependency| dependency.kind() == DependencyKind::ImportMetaEnv)
+        {
+            changed.insert(owners[&file]);
+        }
+    }
     if plan.precise_dynamic_imports && !native_seams {
         // Canonical routes may bypass an import declaration used only by a local
         // export. Such clauses cannot be emitted verbatim without their binding.
@@ -671,97 +688,153 @@ fn emit_inner(
             return Ok((owner.path(graph), output, None));
         };
         let artifact_path = path(graph, root);
-        let output =
-            if changed.contains(&root) {
-                segments::emit(
-                    graph,
-                    segments::Owner::Evaluation(root),
-                    modules,
-                    prepared,
-                    &placement,
-                    &connections,
-                    &recipes,
-                    &cjs,
-                    activations,
-                    plan,
-                )?
-            } else {
-                let module = &modules[&root];
-                let facts = &module.parsed.facts();
-                let edits = facts
-                    .dependencies()
-                    .iter()
-                    .filter(|d| !d.type_only())
-                    .filter(|dependency| {
-                        let index = module
-                            .parsed
-                            .segments()
-                            .partition_point(|segment| segment.span.end <= dependency.span().start);
-                        live.contains(&SegmentKey::new(root, index as u32))
-                    })
-                    .filter(|d| d.pattern().is_none())
-                    .map(|dependency| {
-                        let request = connections
-                            .native_requests
-                            .get(&(root, dependency.id()))
-                            .ok_or_eyre("missing planned native request")?;
-                        Ok((dependency, request))
-                    })
-                    .collect::<eyre::Result<Vec<_>>>()?;
-                let mut imports = connections
-                    .evaluation
-                    .get(&segments::Owner::Evaluation(root))
-                    .cloned()
-                    .unwrap_or_default();
-                if let Some(availability) = connections.require_imports.get(&owner) {
-                    imports.push(availability.clone());
+        let output = if changed.contains(&root) {
+            segments::emit(
+                graph,
+                segments::Owner::Evaluation(root),
+                modules,
+                prepared,
+                &placement,
+                &connections,
+                &recipes,
+                &cjs,
+                activations,
+                plan,
+            )?
+        } else {
+            let module = &modules[&root];
+            let facts = &module.parsed.facts();
+            // Native external clauses stay intact; virtual env references
+            // still consume the same checked owner-local binding connections.
+            let env_ids: HashSet<_> = facts
+                .dependencies()
+                .iter()
+                .filter(|dependency| dependency.kind() == DependencyKind::ImportMetaEnv)
+                .map(|dependency| ast_segmenter::owned::BindingId(dependency.id().0))
+                .collect();
+            let env_bindings: Vec<_> = connections
+                .bindings
+                .get(&owner)
+                .into_iter()
+                .flatten()
+                .filter(|binding| binding.symbol.0 == root && env_ids.contains(&binding.symbol.1))
+                .collect();
+            let env_names: HashMap<_, _> = env_bindings
+                .iter()
+                .map(|binding| (binding.symbol.1, binding.alias.as_str()))
+                .collect();
+            let edits = facts
+                .dependencies()
+                .iter()
+                .filter(|d| !d.type_only())
+                .filter(|dependency| {
+                    let index = module
+                        .parsed
+                        .segments()
+                        .partition_point(|segment| segment.span.end <= dependency.span().start);
+                    live.contains(&SegmentKey::new(root, index as u32))
+                })
+                .filter(|d| d.pattern().is_none())
+                .map(|dependency| {
+                    let request = connections
+                        .native_requests
+                        .get(&(root, dependency.id()))
+                        .ok_or_eyre("missing planned native request")?;
+                    Ok((dependency, request))
+                })
+                .collect::<eyre::Result<Vec<_>>>()?;
+            let mut imports = connections
+                .evaluation
+                .get(&segments::Owner::Evaluation(root))
+                .cloned()
+                .unwrap_or_default();
+            if let Some(availability) = connections.require_imports.get(&owner) {
+                imports.push(availability.clone());
+            }
+            for binding in &env_bindings {
+                imports.push(
+                    Code::request(
+                        binding
+                            .owner
+                            .ok_or_eyre("missing environment binding owner")?
+                            .path(graph),
+                        RequestKind::Import,
+                    )
+                    .surrounded(
+                        format!(
+                            "import {{{} as {}}} from ",
+                            quote("import_meta_env"),
+                            binding.alias
+                        ),
+                        ";\n",
+                    ),
+                );
+            }
+            for &key in placement.schedule(segments::Owner::Evaluation(root)) {
+                eyre::ensure!(
+                    key.file_id == root,
+                    "relocated segment in unchanged native job"
+                );
+                let index = key.segment_idx as usize;
+                let recipe = facts.emission().segments().get(index).unwrap();
+                if let Some(exports) = connections.native_exports.get(&key) {
+                    imports.push(exports.clone());
+                    continue;
                 }
-                for &key in placement.schedule(segments::Owner::Evaluation(root)) {
-                    eyre::ensure!(
-                        key.file_id == root,
-                        "relocated segment in unchanged native job"
-                    );
-                    let index = key.segment_idx as usize;
-                    let recipe = facts.emission().segments().get(index).unwrap();
-                    if let Some(exports) = connections.native_exports.get(&key) {
-                        imports.push(exports.clone());
-                        continue;
-                    }
-                    let mut renderer = crate::emit::CachedRenderer::for_module(
-                        module,
-                        recipe,
-                        recipes.get(&key).copied().unwrap_or_default(),
-                    );
-                    renderer.relocate_urls(module.relocations)?;
-                    for (dependency, request) in &edits {
-                        renderer.dependency(*dependency, request.code.clone(), request.whole);
-                    }
-                    for dependency in facts.dependencies().iter().filter(|d| {
-                        d.pattern().is_some()
-                            && contains(module.parsed.segments().get(index).unwrap().span, d.span())
-                    }) {
-                        if let Some(dispatch) =
-                            cjs.context_dynamic(graph, root, dependency, &connections.namespaces)?
+                let mut renderer = crate::emit::CachedRenderer::for_module(
+                    module,
+                    recipe,
+                    recipes.get(&key).copied().unwrap_or_default(),
+                );
+                renderer.relocate_urls(module.relocations)?;
+                for (operation_index, operation) in recipe.operations().iter().enumerate() {
+                    if let ast_segmenter::views::OperationKind::Reference {
+                        reference,
+                        shorthand,
+                    } = operation.kind()
+                    {
+                        let reference = facts.references().get(reference as usize).unwrap();
+                        if let Some(name) = reference
+                            .binding()
+                            .and_then(|binding| env_names.get(&binding))
                         {
-                            renderer.context(dependency, dispatch);
+                            let replacement =
+                                renderer.renamed(reference.span(), name, shorthand)?;
+                            renderer.replace(operation_index as u32, replacement);
                         }
                     }
-                    imports.push(renderer.materialize()?);
-                    imports.push_str("\n;\n");
                 }
-                imports.default_export |=
-                    facts.exports().iter().any(|export| {
-                        !export.type_only()
-                            && export.name().as_deref() == Some("default")
-                            && module.parsed.segments().iter().enumerate().any(
-                                |(index, segment)| {
-                                    live.contains(&SegmentKey::new(root, index as u32))
-                                        && contains(segment.span, export.span())
-                                },
-                            )
-                    });
-                imports
-            };
+                for (dependency, request) in &edits {
+                    renderer.dependency(*dependency, request.code.clone(), request.whole);
+                }
+                for dependency in facts.dependencies().iter().filter(|d| {
+                    d.pattern().is_some()
+                        && contains(module.parsed.segments().get(index).unwrap().span, d.span())
+                }) {
+                    if let Some(dispatch) =
+                        cjs.context_dynamic(graph, root, dependency, &connections.namespaces)?
+                    {
+                        renderer.context(dependency, dispatch);
+                    }
+                }
+                imports.push(renderer.materialize()?);
+                imports.push_str("\n;\n");
+            }
+            imports.default_export |= facts.exports().iter().any(|export| {
+                !export.type_only()
+                    && export.name().as_deref() == Some("default")
+                    && module
+                        .parsed
+                        .segments()
+                        .iter()
+                        .enumerate()
+                        .any(|(index, segment)| {
+                            live.contains(&SegmentKey::new(root, index as u32))
+                                && contains(segment.span, export.span())
+                        })
+            });
+            imports
+        };
         let namespace = surfaces
             .contains(&root)
             .then_some(root)

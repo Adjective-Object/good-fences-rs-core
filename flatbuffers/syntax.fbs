@@ -2,7 +2,7 @@ include "ecco.fbs";
 namespace source_cache;
 
 enum CommonJsGlobal:ubyte { Require, Module, Exports }
-enum DependencyKind:ubyte { Import, ReExport, DynamicImport, Require, ImportType, Url }
+enum DependencyKind:ubyte { Import, ReExport, DynamicImport, Require, ImportType, Url, ImportMetaEnv }
 enum EffectReason:ubyte {
   UnknownExpression, UnknownControl, Invocation, Construction, PropertyRead,
   Coercion, Mutation, SpreadOrIteration, Destructuring, ClassHeritage,

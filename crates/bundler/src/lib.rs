@@ -355,6 +355,7 @@ impl Retention<'_, '_> {
                         && matches!(
                             dependency.kind(),
                             ast_segmenter::owned::DependencyKind::Import
+                                | ast_segmenter::owned::DependencyKind::ImportMetaEnv
                                 | ast_segmenter::owned::DependencyKind::ReExport
                         )
                         && link::contains(statement.span, dependency.span())

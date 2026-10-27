@@ -279,7 +279,9 @@ fn resolve(
                 && !dependency.type_only()
                 && matches!(
                     dependency.kind(),
-                    DependencyKind::Import | DependencyKind::ReExport
+                    DependencyKind::Import
+                        | DependencyKind::ImportMetaEnv
+                        | DependencyKind::ReExport
                 )
         })
         .ok_or_eyre("effect import has no structural dependency")?;

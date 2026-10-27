@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use oxc_ast::ast::*;
 use oxc_ast_visit::{walk, Visit};
 use oxc_semantic::ScopeFlags;
-use oxc_span::Span;
+use oxc_span::{GetSpan, Span};
 
 use crate::owned::{DependencyKind, ModuleFacts};
 
@@ -423,6 +423,25 @@ impl<'a> Visit<'a> for Policy {
     }
 
     fn visit_unary_expression(&mut self, expression: &UnaryExpression<'a>) {
+        if expression.operator == UnaryOperator::Delete
+            && match expression.argument.get_inner_expression() {
+                Expression::ChainExpression(chain) => match &chain.expression {
+                    ChainElement::StaticMemberExpression(member) => {
+                        crate::owned::is_import_meta_env(
+                            &member.object,
+                            member.property.name.as_str(),
+                        )
+                    }
+                    ChainElement::ComputedMemberExpression(member) => {
+                        crate::owned::computed_import_meta_env(member)
+                    }
+                    _ => false,
+                },
+                argument => crate::owned::import_meta_env(argument),
+            }
+        {
+            self.reject(expression.span, PolicyName::ImportMeta);
+        }
         if expression.operator == UnaryOperator::Typeof {
             if let Expression::Identifier(id) = expression.argument.get_inner_expression() {
                 self.typeof_names.insert(id.span.start);
@@ -435,6 +454,18 @@ impl<'a> Visit<'a> for Policy {
     }
 
     fn visit_assignment_target(&mut self, target: &AssignmentTarget<'a>) {
+        let env = match target {
+            AssignmentTarget::StaticMemberExpression(member) => {
+                crate::owned::is_import_meta_env(&member.object, member.property.name.as_str())
+            }
+            AssignmentTarget::ComputedMemberExpression(member) => {
+                crate::owned::computed_import_meta_env(member)
+            }
+            _ => false,
+        };
+        if env {
+            self.reject(target.span(), PolicyName::ImportMeta);
+        }
         let saved = self.operation;
         self.operation = true;
         walk::walk_assignment_target(self, target);
@@ -514,6 +545,18 @@ impl<'a> Visit<'a> for Policy {
     }
 
     fn visit_update_expression(&mut self, expression: &UpdateExpression<'a>) {
+        let env = match &expression.argument {
+            SimpleAssignmentTarget::StaticMemberExpression(member) => {
+                crate::owned::is_import_meta_env(&member.object, member.property.name.as_str())
+            }
+            SimpleAssignmentTarget::ComputedMemberExpression(member) => {
+                crate::owned::computed_import_meta_env(member)
+            }
+            _ => false,
+        };
+        if env {
+            self.reject(expression.span, PolicyName::ImportMeta);
+        }
         let saved = self.operation;
         self.operation = true;
         walk::walk_update_expression(self, expression);
@@ -649,11 +692,19 @@ impl<'a> Visit<'a> for Policy {
     }
 
     fn visit_static_member_expression(&mut self, member: &StaticMemberExpression<'a>) {
+        if !self.commonjs
+            && crate::owned::is_import_meta_env(&member.object, member.property.name.as_str())
+        {
+            return;
+        }
         self.module_receiver(&member.object, member.property.name == "exports");
         walk::walk_static_member_expression(self, member);
     }
 
     fn visit_computed_member_expression(&mut self, member: &ComputedMemberExpression<'a>) {
+        if !self.commonjs && crate::owned::computed_import_meta_env(member) {
+            return;
+        }
         self.module_receiver(&member.object,
             matches!(member.expression.get_inner_expression(), Expression::StringLiteral(s) if s.value == "exports"));
         self.visit_expression(&member.object);

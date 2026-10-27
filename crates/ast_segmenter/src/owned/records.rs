@@ -180,6 +180,8 @@ pub enum DependencyKind {
     ImportType,
     /// Literal relative resource URL; never a module-evaluation dependency.
     Url,
+    /// Parsed import.meta.env value, linked as a read-only imported object binding.
+    ImportMetaEnv,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

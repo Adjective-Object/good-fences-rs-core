@@ -9,6 +9,8 @@ Module nodes preserve empty-file identity; enclosing-function metadata is not
 permission to execute a require eagerly.
 URL occurrences retain checked resolutions but add no parent evaluation/binding
 edges; bundler adds their targets as ordinary independent module entrypoints.
+ImportMetaEnv occurrences use normal synchronous import/binding edges to the
+build's one synthetic object segment; the graph never reads environment config.
 Read `file_facts` Copy views and value iterators; `file_fact_storage` shares the
 owner for Ecco/emission. Building graph ranges is not permission to unpack facts.
 

@@ -601,7 +601,12 @@ fn async_modules(
             }
             for dependency in module.parsed.facts().dependencies().iter().filter(|d| {
                 !d.type_only()
-                    && matches!(d.kind(), DependencyKind::Import | DependencyKind::ReExport)
+                    && matches!(
+                        d.kind(),
+                        DependencyKind::Import
+                            | DependencyKind::ImportMetaEnv
+                            | DependencyKind::ReExport
+                    )
             }) {
                 if matches!(
                     graph.dependency_target(file, dependency.id()),

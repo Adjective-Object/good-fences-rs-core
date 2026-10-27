@@ -18,6 +18,48 @@ fn envelope(record: &FixtureRecord) -> Vec<u8> {
 }
 
 #[test]
+fn import_meta_env_roundtrips_typed_occurrences_and_rejects_damaged_links() {
+    let source = r#"export const env = import.meta.env;
+        export const later = () => [(import.meta)["\x65nv"], ((import.meta)).\u0065nv, import.meta?.env, import.meta?.['env'], import.meta[((('env')))], import.meta.\u{65}nv];"#;
+    let original = record(source, "entry.mjs", ModuleFormat::Esm);
+    let parses = ast_segmenter::module_parse_count();
+    let cached =
+        CacheRecord::decode(&original.encode(source).unwrap(), source, original.config()).unwrap();
+    let parsed = cached.to_parsed(source).unwrap();
+    assert!(matches!(
+        parsed.facts(),
+        ast_segmenter::views::ModuleFacts::Wire(_)
+    ));
+    assert_eq!(parsed.facts().dependencies().len(), 7);
+    assert!(
+        parsed
+            .facts()
+            .dependencies()
+            .iter()
+            .all(|dependency| dependency.kind()
+                == ast_segmenter::owned::DependencyKind::ImportMetaEnv)
+    );
+    assert_eq!(
+        parsed.facts().references(),
+        original.module().facts().references()
+    );
+    assert_eq!(
+        parsed.facts().emission(),
+        original.module().facts().emission()
+    );
+    for edit in [
+        |v: &mut serde_json::Value| v.set("module.facts.dependencies.0.specifier", "other"),
+        |v: &mut serde_json::Value| v.set("module.facts.references.0.write", true),
+        |v: &mut serde_json::Value| v.set("module.facts.imports.0.binding", u32::MAX),
+    ] {
+        let damaged = corrupt(&original, edit);
+        assert!(damaged.encode(source).is_err());
+        assert!(CacheRecord::decode(&damaged.envelope(true), source, original.config()).is_err());
+    }
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+}
+
+#[test]
 fn json_import_attributes_roundtrip_as_borrowed_checked_facts() {
     let source = "import data from './data.json' with {type: 'json'}; export default data;";
     let original = record(source, "entry.mjs", ModuleFormat::Esm);

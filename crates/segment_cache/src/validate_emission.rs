@@ -727,7 +727,7 @@ pub(super) fn trivia(mut text: &str) -> Option<&str> {
 }
 
 // IdentifierName Unicode escapes are decoded without parsing or allocating on hits.
-fn identifier_matches(mut raw: &str, name: &str) -> bool {
+pub(super) fn identifier_matches(mut raw: &str, name: &str) -> bool {
     let mut expected = name.chars();
     while !raw.is_empty() {
         let character = if let Some(escaped) = raw.strip_prefix("\\u") {

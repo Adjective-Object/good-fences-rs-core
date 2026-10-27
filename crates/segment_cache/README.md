@@ -22,7 +22,11 @@ module body and ordered statement ranges, not lossy legacy dependency/name sets.
 `CacheRecord` and `CachedModule` have private storage. Consumers and validators
 use borrowed accessors such as `record.module().facts()` and
 `record.module().segments()`; no mutable view of sealed records is exposed.
-Production loading/publication uses typed FlatBuffers, schema 22/extractor 37.
+Production loading/publication uses typed FlatBuffers, schema 22/extractor 38.
+Extractor 38 adds typed `ImportMetaEnv` virtual-import occurrences with original
+member spans and checked binding/import/reference links. Values and synthetic
+target paths remain build-local. This appends an enum discriminant without
+changing table layout; previous extractor records miss and rebuild.
 Typed named/span-bearing policy occurrences are sealed source evidence, not
 admission decisions. Default loaders reject them even on disk hits. Explicit
 `load_prepared_reporting_policies` reports cold syntax/evidence and returns

@@ -1,5 +1,13 @@
 # ast-segmenter
 
+Parsed `import.meta.env` (including static string-computed members) produces
+typed `ImportMetaEnv` dependency/import/reference evidence. These virtual imports
+retain full original member spans and lexical execution timing, never configured
+values or policy decisions. Direct binding mutation, including optional-chain
+deletion, remains rejected; optional reads and object member mutation are allowed.
+The bundler links one shared synthetic ESM
+object through its normal native binding allocator and chunk planner.
+
 Extracts owned top-level statement segments from OXC-parsed JavaScript and
 TypeScript. Each segment contains module imports/exports, variable declarations
 and references, and its ownership span; the parser arena can then be reset.

@@ -32,6 +32,107 @@ fn sorted<T: Ord>(values: impl IntoIterator<Item = T>) -> bool {
     true
 }
 
+fn env_string(raw: &str) -> bool {
+    let Some(quote @ ('\'' | '"')) = raw.chars().next() else {
+        return false;
+    };
+    let Some(mut raw) = raw
+        .strip_prefix(quote)
+        .and_then(|raw| raw.strip_suffix(quote))
+    else {
+        return false;
+    };
+    let mut expected = "env".chars();
+    while let Some(character) = raw.chars().next() {
+        raw = &raw[character.len_utf8()..];
+        let character = if character == '\\' {
+            let Some(escaped) = raw.chars().next() else {
+                return false;
+            };
+            raw = &raw[escaped.len_utf8()..];
+            match escaped {
+                '\n' | '\u{2028}' | '\u{2029}' => continue,
+                '\r' => {
+                    raw = raw.strip_prefix('\n').unwrap_or(raw);
+                    continue;
+                }
+                'x' | 'u' => {
+                    let (digits, rest) = if escaped == 'u' && raw.starts_with('{') {
+                        let Some(end) = raw.find('}') else {
+                            return false;
+                        };
+                        (&raw[1..end], &raw[end + 1..])
+                    } else {
+                        let count = if escaped == 'x' { 2 } else { 4 };
+                        let Some(digits) = raw.get(..count) else {
+                            return false;
+                        };
+                        (digits, &raw[count..])
+                    };
+                    let Some(character) = u32::from_str_radix(digits, 16)
+                        .ok()
+                        .and_then(char::from_u32)
+                    else {
+                        return false;
+                    };
+                    raw = rest;
+                    character
+                }
+                'n' | 'r' | 't' | 'b' | 'f' | 'v' | '0' => return false,
+                character => character,
+            }
+        } else {
+            character
+        };
+        if expected.next() != Some(character) {
+            return false;
+        }
+    }
+    expected.next().is_none()
+}
+
+fn env_syntax(source: &str) -> bool {
+    fn computed(mut tokens: &[&str]) -> bool {
+        let ["[", rest @ .., "]"] = tokens else {
+            return false;
+        };
+        tokens = rest;
+        while let ["(", rest @ .., ")"] = tokens {
+            tokens = rest;
+        }
+        matches!(tokens, [name] if env_string(name))
+    }
+    let Some(tokens) = crate::validate_emission::syntax_tokens(source) else {
+        return false;
+    };
+    let mut tokens = tokens.as_slice();
+    let mut parentheses = 0;
+    while let ["(", rest @ ..] = tokens {
+        parentheses += 1;
+        tokens = rest;
+    }
+    let ["import", ".", "meta", rest @ ..] = tokens else {
+        return false;
+    };
+    tokens = rest;
+    for _ in 0..parentheses {
+        let [")", rest @ ..] = tokens else {
+            return false;
+        };
+        tokens = rest;
+    }
+    if let ["?", ".", rest @ ..] = tokens {
+        tokens = rest;
+        return computed(tokens)
+            || crate::validate_emission::identifier_matches(&tokens.join(""), "env");
+    }
+    match tokens {
+        [".", name @ ..] => crate::validate_emission::identifier_matches(&name.join(""), "env"),
+        ["[", ..] => computed(tokens),
+        _ => false,
+    }
+}
+
 pub(crate) struct ModuleView<'a> {
     body: ModuleBody,
     segments: &'a [Span],
@@ -385,6 +486,32 @@ pub(crate) fn validate_module(
                 && contains(d.span(), d.specifier_span()),
             "invalid dependency site"
         );
+        if d.kind() == DependencyKind::ImportMetaEnv {
+            ensure!(
+                !facts.commonjs()
+                    && !d.type_only()
+                    && d.pattern().is_none()
+                    && d.json_attribute().is_none()
+                    && d.specifier() == "import.meta.env"
+                    && d.specifier_span() == d.span()
+                    && env_syntax(&source[d.span().start as usize..d.span().end as usize]),
+                "invalid import.meta.env evidence"
+            );
+            let binding = facts
+                .bindings()
+                .iter()
+                .find(|binding| binding.id().0 == d.id().0)
+                .ok_or_else(|| eyre::eyre!("missing import.meta.env binding"))?;
+            ensure!(binding.import() && binding.top_level() && binding.constant()
+                && binding.name() == "import_meta_env" && binding.declarations().len() == 1
+                && binding.declarations().get(0) == Some(d.span())
+                && facts.imports().iter().filter(|import| import.dependency() == d.id()
+                    && import.binding() == binding.id()
+                    && matches!(import.imported(), ImportedName::Name(name) if name == "import_meta_env")).count() == 1
+                && facts.references().iter().filter(|reference| reference.binding() == Some(binding.id())
+                    && reference.span() == d.span() && reference.read() && !reference.write()).count() == 1,
+                "invalid import.meta.env binding evidence");
+        }
         if let Some(attribute) = d.json_attribute() {
             span(source, attribute)?;
             ensure!(
@@ -479,11 +606,12 @@ pub(crate) fn validate_module(
         ensure!(bindings.contains(&i.binding()), "dangling import binding");
         let dependency = dependencies.get(&i.dependency());
         ensure!(
-                dependency.is_some_and(
-                    |d| d.kind() == DependencyKind::Import && contains(d.span(), i.span())
-                ),
-                "invalid import dependency"
-            );
+            dependency.is_some_and(|d| matches!(
+                d.kind(),
+                DependencyKind::Import | DependencyKind::ImportMetaEnv
+            ) && contains(d.span(), i.span())),
+            "invalid import dependency"
+        );
         ensure!(
             contains(i.span(), i.imported_span()),
             "invalid import name range"

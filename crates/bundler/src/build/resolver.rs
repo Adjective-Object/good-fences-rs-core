@@ -524,7 +524,10 @@ impl<'scratch, 'a> BuildResolver<'scratch, 'a> {
 
     pub(super) fn speculate(&self, path: &Path, record: &CacheRecord) {
         for dependency in record.module().facts().dependencies() {
-            if dependency.type_only() || dependency.pattern().is_some() {
+            if dependency.type_only()
+                || dependency.pattern().is_some()
+                || dependency.kind() == DependencyKind::ImportMetaEnv
+            {
                 continue;
             }
             let mode = if dependency.kind() == DependencyKind::Require {

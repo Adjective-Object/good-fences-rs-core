@@ -253,7 +253,13 @@ fn certify(
     let mut edges = Vec::new();
     for (&file, module) in modules {
         for dependency in module.parsed.facts().dependencies().iter().filter(|d| {
-            !d.type_only() && matches!(d.kind(), DependencyKind::Import | DependencyKind::ReExport)
+            !d.type_only()
+                && matches!(
+                    d.kind(),
+                    DependencyKind::Import
+                        | DependencyKind::ImportMetaEnv
+                        | DependencyKind::ReExport
+                )
         }) {
             for target in target_files(graph, file, dependency)? {
                 edges.push((file, target));

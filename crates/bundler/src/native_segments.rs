@@ -1463,7 +1463,9 @@ fn activation_safe(
                 !dependency.type_only()
                     && matches!(
                         dependency.kind(),
-                        DependencyKind::Import | DependencyKind::ReExport
+                        DependencyKind::Import
+                            | DependencyKind::ImportMetaEnv
+                            | DependencyKind::ReExport
                     )
             })
         {
@@ -2270,7 +2272,12 @@ pub(super) fn emit(
                 .iter()
                 .filter(|d| {
                     !d.type_only()
-                        && matches!(d.kind(), DependencyKind::Import | DependencyKind::ReExport)
+                        && matches!(
+                            d.kind(),
+                            DependencyKind::Import
+                                | DependencyKind::ImportMetaEnv
+                                | DependencyKind::ReExport
+                        )
                 })
             {
                 let target = target_file(graph, file, dependency)?;

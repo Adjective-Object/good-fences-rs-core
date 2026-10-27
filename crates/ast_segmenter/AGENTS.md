@@ -78,6 +78,13 @@ declaration byte offsets and dependency IDs are site byte offsets, local to
 the exact source/configuration. Keep all declaration/reference spans and
 type/value metadata; never expose OXC IDs. Sort DTO collections by source
 position before returning.
+ImportMetaEnv dependencies seal parsed static/string-computed env occurrences
+as virtual imported bindings/references at the complete member span. They contain
+no configured values/targets. Native rendering must replace these references even
+when the allocated name equals the virtual binding name; direct binding mutation
+stays rejected while ordinary object property mutation remains supported.
+Direct deletion checks unwrap optional-chain member targets too; optional reads
+and deletion of properties on the env object remain ordinary supported syntax.
 Relative template/concatenation loaders retain one real occurrence, literal
 pieces separated by runtime gaps and the original argument span. Never persist
 resolved candidates or fabricate dependency IDs for closure capture.

@@ -1,5 +1,15 @@
 # bundler
 
+Parsed import.meta.env occurrences are typed virtual imports of one ordinary
+synthetic ESM segment, never source text substitution or host environment reads.
+BuildOptions.env supplies explicit JSON fields (default empty); computed keys
+preserve own __proto__ data. Keep occurrence facts configuration-independent,
+allocate references through normal native binding hygiene and share object identity.
+Owner-local import aliases, including original virtual names, avoid nested bindings
+as well as top-level collisions before external-native seam reconstruction.
+The reserved .bundler-env.mjs identity is graph-only, never filesystem admission;
+configuration changes replace its sealed record and invalidate reverse consumers.
+
 Browser `new Worker(new URL(relative, import.meta.url), ...)` expressions discover
 normal evaluation-only module-worker entries during the shared preparation
 frontier. Use the same source owners,

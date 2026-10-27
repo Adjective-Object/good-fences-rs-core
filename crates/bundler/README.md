@@ -36,9 +36,24 @@ Graph linking, effect policy, Ecco registration, execution constraints and nativ
 recipe rendering consume owned-or-wire AST views. A byte-backed graph retains
 verified owners, including Ecco's nested storage, without unpacking extraction
 trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
-`.seg.fb` records (schema 22/extractor 37); parse fingerprints include both active
+`.seg.fb` records (schema 22/extractor 38); parse fingerprints include both active
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
+
+`BuildOptions::env` is an explicit JSON-field map, defaulting to `{}`. Parsed
+`import.meta.env` and static string-computed equivalents link to the exported
+`import_meta_env` object in one ordinary synthetic ESM segment. All modules share
+its identity; property access/mutation, export use, nested lexical collisions and
+native chunk boundaries use normal binding/linking. The object is not frozen,
+and no process environment values are read. Configured nested objects use computed
+keys, so `__proto__` is an own data field. Reassigning/deleting the env binding
+itself (including optional-chain deletion) remains unsupported, like mutation of
+an imported binding. Native external seams also allocate virtual import aliases
+against nested parameters and bindings before replacing parsed references.
+Source caches retain only typed occurrences, not configuration values/decisions.
+Changing fields rebuilds the synthetic record and output/reverse consumers while
+reusing unchanged source facts; equal configuration retains normal no-op reuse.
+Worker `import.meta.url` provenance and all other metadata policy remain unchanged.
 CommonJS Browserify capability detectors (`typeof require == 'function' && require`,
 including strict/reversed equality) retain native host reads and short-circuit
 timing. Their aliases create no dependencies or injected loader; ordinary native

@@ -2,6 +2,60 @@ use super::*;
 use std::path::Path;
 
 #[test]
+fn import_meta_env_reads_and_property_mutation_are_not_binding_mutation() {
+    for source in [
+        "const env = import.meta.env; env.MODE = 'test';",
+        "import.meta.env.MODE = 'test'; delete import.meta.env.MODE; import.meta.env.count++;",
+        "export const probe = () => import.meta.env ? import.meta.env.MODE : void 0;",
+        "export default (import.meta)['env'];",
+        "export default import.meta?.env;",
+        "export default import.meta?.['env'];",
+        "delete import.meta.env?.MODE; delete import.meta?.env.MODE;",
+        "delete import.meta?.['env']['MODE']; delete (import.meta?.env).MODE;",
+        "delete import.meta?.env?.MODE; delete import.meta?.['env']?.['MODE'];",
+    ] {
+        crate::parse_module(
+            &logger::StdioLogger::new(),
+            source,
+            Path::new("source.mjs"),
+            crate::ModuleFormat::Esm,
+        )
+        .unwrap();
+    }
+    for source in [
+        "import.meta.env = {};",
+        "import.meta['env']++;",
+        "delete import.meta.env;",
+        "delete import.meta['env'];",
+        "delete import.meta?.env;",
+        "delete import.meta?.['env'];",
+        "delete (import.meta?.env);",
+        "delete ((import.meta)?.['env']);",
+        "delete import.meta?.['e\\u006ev'];",
+        "[import.meta.env] = [];",
+        "export default import.meta[unknown];",
+        "export default import.meta.other;",
+    ] {
+        let error = crate::parse_module(
+            &logger::StdioLogger::new(),
+            source,
+            Path::new("source.mjs"),
+            crate::ModuleFormat::Esm,
+        )
+        .unwrap_err();
+        let violations = error.downcast_ref::<PolicyErrors>().unwrap().violations();
+        assert!(
+            violations
+                .iter()
+                .any(|violation| violation.policy() == PolicyName::ImportMeta),
+            "{}: {:#}",
+            source,
+            error
+        );
+    }
+}
+
+#[test]
 fn structured_policy_names_keep_mutation_and_indirect_uses_distinct() {
     let declarations = crate::PreparedDeclarations::new(ecco::LocalFacts::default()).unwrap();
     let source = "eval('call()'); require = loader; const alias = require; module.require('x');";

@@ -403,7 +403,8 @@ enumeration!(
     DynamicImport,
     Require,
     ImportType,
-    Url
+    Url,
+    ImportMetaEnv
 );
 enumeration!(
     effect_reason,

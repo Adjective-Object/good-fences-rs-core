@@ -1079,7 +1079,12 @@ fn direct_request(graph: &SourceGraph, from: GraphNode, target: u32) -> bool {
         .iter()
         .any(|d| {
             !d.type_only()
-                && matches!(d.kind(), DependencyKind::Import | DependencyKind::ReExport)
+                && matches!(
+                    d.kind(),
+                    DependencyKind::Import
+                        | DependencyKind::ImportMetaEnv
+                        | DependencyKind::ReExport
+                )
                 && span.is_none_or(|span| contains(span, d.span()))
                 && target_file(graph, file, d).is_ok_and(|f| f == target)
         })

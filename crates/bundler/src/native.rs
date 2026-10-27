@@ -192,7 +192,12 @@ fn single_parent(
             };
             for dependency in module.parsed.facts().dependencies().iter().filter(|d| {
                 !d.type_only()
-                    && matches!(d.kind(), DependencyKind::Import | DependencyKind::ReExport)
+                    && matches!(
+                        d.kind(),
+                        DependencyKind::Import
+                            | DependencyKind::ImportMetaEnv
+                            | DependencyKind::ReExport
+                    )
             }) {
                 pending.extend(target_files(graph, file, dependency)?);
             }
@@ -429,7 +434,9 @@ impl Activations {
             for dependency in facts.dependencies().iter().filter(|d| !d.type_only()) {
                 if !matches!(
                     dependency.kind(),
-                    DependencyKind::Import | DependencyKind::ReExport
+                    DependencyKind::Import
+                        | DependencyKind::ImportMetaEnv
+                        | DependencyKind::ReExport
                 ) {
                     return Ok(None);
                 }
@@ -465,7 +472,9 @@ impl Activations {
                 let activates = dependency_targets.iter().any(|f| seen.contains(f));
                 let synchronous = matches!(
                     dependency.kind(),
-                    DependencyKind::Import | DependencyKind::ReExport
+                    DependencyKind::Import
+                        | DependencyKind::ImportMetaEnv
+                        | DependencyKind::ReExport
                 );
                 if activates
                     && (module.parsed.facts().commonjs()
@@ -595,7 +604,12 @@ fn single(
             || !facts.top_level_await().is_empty()
             || facts.dependencies().iter().any(|d| {
                 !d.type_only()
-                    && !matches!(d.kind(), DependencyKind::Import | DependencyKind::ReExport)
+                    && !matches!(
+                        d.kind(),
+                        DependencyKind::Import
+                            | DependencyKind::ImportMetaEnv
+                            | DependencyKind::ReExport
+                    )
             })
             || facts
                 .references()
@@ -1014,6 +1028,12 @@ fn reconstruct(
     let facts = module.parsed.facts();
     let mut targets = HashMap::new();
     let mut namespaces = HashMap::new();
+    let env_bindings: HashSet<_> = facts
+        .dependencies()
+        .iter()
+        .filter(|dependency| dependency.kind() == DependencyKind::ImportMetaEnv)
+        .map(|dependency| ast_segmenter::owned::BindingId(dependency.id().0))
+        .collect();
     for binding in facts
         .bindings()
         .iter()
@@ -1032,7 +1052,9 @@ fn reconstruct(
         } else {
             None
         };
-        if let Some(name) = target.filter(|name| *name != binding.name()) {
+        if let Some(name) =
+            target.filter(|name| *name != binding.name() || env_bindings.contains(&binding.id()))
+        {
             targets.insert(binding.id(), name);
         }
     }
@@ -1125,7 +1147,9 @@ fn reconstruct(
                     .ok_or_eyre("missing original dependency")?;
                 if matches!(
                     dependency.kind(),
-                    DependencyKind::Import | DependencyKind::ReExport
+                    DependencyKind::Import
+                        | DependencyKind::ImportMetaEnv
+                        | DependencyKind::ReExport
                 ) {
                     Some(";".into())
                 } else if dependency.kind() == DependencyKind::Require && !dependency.type_only() {

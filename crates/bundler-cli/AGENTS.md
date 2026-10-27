@@ -1,5 +1,8 @@
 # bundler-cli
 
+Strict JSON `env` is an explicit object of JSON fields, defaulting to empty.
+Forward it to BuildOptions.env; never read host environment values or execute JS configs.
+
 Export `Cli` as both the standalone parser and embeddable clap arguments.
 Keep argument syntax in `cli`, path/mode resolution in `invocation`, bounded
 strict JSON and BuildOptions translation in `config`, orchestration in `execute`,

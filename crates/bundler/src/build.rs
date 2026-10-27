@@ -29,6 +29,7 @@ use crate::{
 mod discovery;
 #[path = "entry_outputs.rs"]
 mod entry_outputs;
+mod env;
 mod policy;
 mod prepare;
 pub use policy::{PolicyAllowance, PolicyName, PreparationErrors};
@@ -62,6 +63,9 @@ pub struct BuildOptions {
     pub policy_allowlist: Vec<PolicyAllowance>,
     pub output: OutputOptions,
     pub css: CssOptions,
+    /// Explicit JSON fields shared by all parsed import.meta.env references.
+    /// Never populated from the host process environment.
+    pub env: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -131,6 +135,7 @@ impl Default for BuildOptions {
             policy_allowlist: Vec::new(),
             output: OutputOptions::default(),
             css: CssOptions::default(),
+            env: BTreeMap::new(),
         }
     }
 }
@@ -242,6 +247,7 @@ pub struct BuildSession {
     )>,
     pending_invalidated: BTreeSet<PathBuf>,
     last: Option<Rc<BuildProduct>>,
+    env: Option<env::Module>,
 }
 
 // Publication ownership/cleanup uses this integrity hash, not the internal keys.
@@ -269,6 +275,7 @@ impl BuildSession {
             declarations: None,
             pending_invalidated: BTreeSet::new(),
             last: None,
+            env: None,
         })
     }
 
@@ -284,6 +291,7 @@ impl BuildSession {
     }
 
     fn build_inner(&mut self, options: &BuildOptions) -> eyre::Result<BuildResult> {
+        let env_path = env::path(&self.root);
         let _span = tracing::info_span!(
             "build",
             entries = options.entries.len(),
@@ -641,7 +649,9 @@ impl BuildSession {
                                 for target in resolutions.targets.values() {
                                     match target {
                                         DependencyTarget::File(path) => {
-                                            provisional.insert(path.clone());
+                                            if path != &env_path {
+                                                provisional.insert(path.clone());
+                                            }
                                         }
                                         DependencyTarget::Context(candidates) => {
                                             provisional.extend(candidates.values().cloned())
@@ -839,7 +849,9 @@ impl BuildSession {
                         for target in resolved.values() {
                             match target {
                                 DependencyTarget::File(path) => {
-                                    discovered.insert(path.clone());
+                                    if path != &env_path {
+                                        discovered.insert(path.clone());
+                                    }
                                 }
                                 DependencyTarget::Context(candidates) => {
                                     discovered.extend(candidates.values().cloned());
@@ -1228,6 +1240,29 @@ impl BuildSession {
                 self.pending_invalidated.insert(path.clone());
             }
         }
+        let uses_env = self.sources.iter().any(|(path, source)| {
+            prepared_paths.contains(path)
+                && source
+                    .record
+                    .module()
+                    .facts()
+                    .dependencies()
+                    .iter()
+                    .any(|dependency| dependency.kind() == DependencyKind::ImportMetaEnv)
+        });
+        if uses_env {
+            let source =
+                env::source(&options.env).wrap_err("generating configured environment fields")?;
+            if self.env.as_ref().is_none_or(|env| {
+                *env.text != source || !env.record.matches_prepared_declarations(&declarations)
+            }) {
+                self.env = Some(env::Module::new(&self.root, &source, &declarations)?);
+                counters.source_parses += 1;
+                self.pending_invalidated.insert(env_path.clone());
+            }
+        } else {
+            self.env = None;
+        }
         let invalidated = self.reverse_users(self.pending_invalidated.clone());
         self.sources.retain(|path, _| prepared_paths.contains(path));
         self.resolutions
@@ -1291,6 +1326,7 @@ impl BuildSession {
                 include_str!("assembly.rs"),
                 include_str!("entry_outputs.rs"),
                 include_str!("build/worker_entries.rs"),
+                include_str!("build/env.rs"),
                 include_str!("symbols.rs"),
                 include_str!("native.rs"),
                 include_str!("native_chunks.rs"),
@@ -1324,7 +1360,7 @@ impl BuildSession {
         );
         fingerprints.output = Fingerprint::of(
             format!(
-                "{fingerprints:?}:{emitter:?}:{}:{:?}:{}:{:?}:{:?}:{}:{}:{:?}:{}:{:?}:{:?}",
+                "{fingerprints:?}:{emitter:?}:{}:{:?}:{}:{:?}:{:?}:{}:{}:{:?}:{}:{:?}:{:?}:{:?}",
                 crate::css_syntax::PARSER_REVISION,
                 options.entries,
                 public_base.as_str(),
@@ -1350,6 +1386,7 @@ impl BuildSession {
                         .and_then(|transpiled| transpiled.source_map.as_ref())
                         .map(|map| (path, cache_flatbuffers::hash128(map.bytes()))))
                     .collect::<Vec<_>>()),
+                self.env.as_ref().map(|env| &*env.text),
             )
             .as_bytes(),
         );
@@ -1413,7 +1450,7 @@ impl BuildSession {
         );
         let graph_span =
             tracing::info_span!("build.graph", modules = prepared_paths.len()).entered();
-        let inputs = self
+        let mut inputs = self
             .sources
             .iter()
             .map(|(path, source)| {
@@ -1442,6 +1479,9 @@ impl BuildSession {
                 ))
             })
             .collect::<eyre::Result<Vec<_>>>()?;
+        if let Some(env) = &self.env {
+            inputs.push(env.input()?);
+        }
         let graph = SourceGraph::from_owned(inputs);
         graph
             .validate_links()
@@ -1502,7 +1542,10 @@ impl BuildSession {
             &graph,
             &plan,
             &options.effects,
-            &self.sources,
+            &env::Texts {
+                sources: &self.sources,
+                env: self.env.as_ref(),
+            },
             &relocations,
             options.resolver.target_env == TargetEnv::Browser,
             &require_resources,
@@ -1516,6 +1559,9 @@ impl BuildSession {
         let finalize_span = tracing::info_span!("build.finalize").entered();
         for &file in &plan.retention.modules {
             let path = graph.file_path(file).expect("retained source");
+            if self.env.as_ref().is_some_and(|env| env.path == path) {
+                continue;
+            }
             let kind = crate::resource::kind(path, &options.css);
             if kind == crate::resource::ResourceKind::Asset {
                 let input = self.sources[path].text.read_input(path)?;

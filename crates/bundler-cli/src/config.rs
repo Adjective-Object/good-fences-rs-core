@@ -27,6 +27,7 @@ pub(crate) struct Config {
     cache: Cache,
     #[serde(rename = "policyAllowlist")]
     policy_allowlist: Vec<PolicyAllowance>,
+    env: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 impl Default for Config {
@@ -44,6 +45,7 @@ impl Default for Config {
             resolve_extensions: None,
             cache: Cache::default(),
             policy_allowlist: Vec::new(),
+            env: Default::default(),
         }
     }
 }
@@ -164,6 +166,7 @@ impl Config {
     pub fn into_options(self, root: &Path) -> eyre::Result<BuildOptions> {
         let mut options = BuildOptions::default();
         let config = self;
+        options.env = config.env;
         options.policy_allowlist = config
             .policy_allowlist
             .into_iter()
@@ -251,6 +254,30 @@ impl Config {
 mod tests {
     use super::*;
     use test_tmpdir::TmpDir;
+
+    #[test]
+    fn env_is_an_explicit_json_object() {
+        let dir = TmpDir::new();
+        for json in [
+            r#"{"env":null}"#,
+            r#"{"env":[]}"#,
+            r#"{"env":"secret"}"#,
+            r#"{"env":42}"#,
+        ] {
+            assert!(serde_json::from_str::<Config>(json).is_err(), "{json}");
+        }
+        let defaults: Config = serde_json::from_str("{}").unwrap();
+        assert!(defaults.into_options(dir.root()).unwrap().env.is_empty());
+        let config: Config = serde_json::from_str(
+            r#"{"env":{"MODE":"production","nested":{"ok":true},"count":2,"empty":null}}"#,
+        )
+        .unwrap();
+        let options = config.into_options(dir.root()).unwrap();
+        assert_eq!(options.env["MODE"], "production");
+        assert_eq!(options.env["nested"]["ok"], true);
+        assert_eq!(options.env["count"], 2);
+        assert_eq!(options.env["empty"], serde_json::Value::Null);
+    }
 
     #[test]
     fn policy_allowlist_rejects_unknown_names_fields_and_nonportable_paths() {

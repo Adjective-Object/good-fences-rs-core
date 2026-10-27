@@ -219,7 +219,9 @@ pub(super) fn resolve(
         )
         .entered();
         let result = (|| -> eyre::Result<DependencyTarget> {
-            let target = if dependency.pattern().is_some() {
+            let target = if dependency.kind() == DependencyKind::ImportMetaEnv {
+                DependencyTarget::File(env::path(inventory.root()))
+            } else if dependency.pattern().is_some() {
                 DependencyTarget::Context(
                     crate::context::resolve(
                         inventory.root(),

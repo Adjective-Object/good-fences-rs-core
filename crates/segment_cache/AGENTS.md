@@ -26,9 +26,12 @@
   parser identity, UTF-8 ranges, local IDs, links and order on both boundaries.
 - Preserve sealed extraction provenance on both boundaries and in `to_parsed`;
   never bless unrelated parsed facts by hashing separately supplied source text.
-- Schema 22/extractor 37 retains typed nested module buffers and wire seals,
+- Schema 22/extractor 38 retains typed nested module buffers and wire seals,
   including dynamic namespace observations, deferred recipes, async references
   and lazy construction candidates with original argument slots.
+- ImportMetaEnv is typed source-local virtual-import evidence, with checked
+  syntax, binding/import/reference links and native reference operations;
+  configured fields and synthetic target identities never enter source sidecars.
 - Typed policy occurrences are source evidence, never cached waivers. Strict
   loaders reject them on cold and warm paths; explicit reporting loaders leave
   admission to callers without reparsing or unpacking hits.

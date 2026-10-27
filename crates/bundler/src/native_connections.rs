@@ -76,6 +76,15 @@ pub(super) fn name_plan(
             .collect();
         for &file in &files {
             let facts = &modules[&file].parsed.facts();
+            // Virtual imports introduce references where no lexical identifier
+            // existed, so even an original alias must avoid nested capture.
+            occupied.extend(
+                facts
+                    .bindings()
+                    .iter()
+                    .filter(|binding| !binding.top_level())
+                    .map(|binding| binding.name().to_owned()),
+            );
             occupied.extend(facts.emission().free_references().iter().map(|index| {
                 facts
                     .references()
@@ -253,7 +262,12 @@ impl Connections {
                 .iter()
                 .filter(|d| {
                     !d.type_only()
-                        && matches!(d.kind(), DependencyKind::Import | DependencyKind::ReExport)
+                        && matches!(
+                            d.kind(),
+                            DependencyKind::Import
+                                | DependencyKind::ImportMetaEnv
+                                | DependencyKind::ReExport
+                        )
                 })
             {
                 if let Some(DependencyTarget::External(specifier)) =
@@ -830,7 +844,7 @@ impl Connections {
                 }
                 let kind = match dependency.kind() {
                     DependencyKind::Url => continue,
-                    DependencyKind::Import => RequestKind::Import,
+                    DependencyKind::Import | DependencyKind::ImportMetaEnv => RequestKind::Import,
                     DependencyKind::ReExport => RequestKind::ReExport,
                     DependencyKind::DynamicImport => RequestKind::DynamicImport,
                     DependencyKind::Require => RequestKind::Require,

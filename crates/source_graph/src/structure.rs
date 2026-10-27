@@ -378,7 +378,7 @@ impl SourceGraph {
                     });
                 }
                 let kind = match dependency.kind() {
-                    DependencyKind::Import => EdgeKind::Import,
+                    DependencyKind::Import | DependencyKind::ImportMetaEnv => EdgeKind::Import,
                     DependencyKind::ReExport => EdgeKind::ReExport,
                     DependencyKind::DynamicImport => EdgeKind::DynamicImport,
                     DependencyKind::Require => EdgeKind::Require,

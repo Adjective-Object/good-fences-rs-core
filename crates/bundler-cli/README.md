@@ -32,6 +32,7 @@ missing/invalid files never fall back to discovery.
   "entries": ["src/index.ts"],
   "target": "browser",
   "workers": 4,
+  "env": {},
   "resolveExtensions": [".web.js", ".ts", ".tsx", ".js", ".jsx", ".json", ".node", ".jsonc"],
   "output": {"source_maps": true}
 }
@@ -43,8 +44,9 @@ roots resolve from that directory. Entry paths, `outdir` (default
 `--trace-file FILE` overrides `traceFile` and resolves from cwd.
 Absolute paths stay absolute.
 
-Configuration is strict JSON, bounded to **16 KiB**, rejecting unknown fields at
-every level. This is a deliberately limited CLI schema, not serialized
+Configuration is strict JSON, bounded to **16 KiB**, rejecting unknown schema
+fields (`env` fields are application data). This is a deliberately limited CLI
+schema, not serialized
 `BuildOptions`. Build settings, with defaults:
 
 ```json
@@ -52,6 +54,7 @@ every level. This is a deliberately limited CLI schema, not serialized
   "target": "node",
   "workers": 1,
   "cache": "read-write",
+  "env": {},
   "policyAllowlist": [],
   "resolveConditions": [],
   "output": {
@@ -70,6 +73,13 @@ every level. This is a deliberately limited CLI schema, not serialized
 ```
 
 Targets are `node`/`browser`, workers are 1-64, and cache is `read-write`/`disabled`.
+`env` must be a JSON object; its explicit fields (including nested JSON values)
+initialize one shared `import.meta.env` object. For example,
+`"env": {"MODE": "production"}` supports guarded Zustand-style probes.
+Omission supplies `{}`, not `undefined`. No host environment variables are read.
+Configuration changes rebuild the generated binding/output without re-extracting
+unchanged source files. This CLI uses `bundler.config.json`, not executable
+`bundler.config.js`; no JavaScript configuration file is loaded.
 `resolveConditions` adds nonempty conditions to target defaults; `import` and
 `require` cannot be overridden.
 `resolveExtensions` replaces the default extension-probing list in the supplied

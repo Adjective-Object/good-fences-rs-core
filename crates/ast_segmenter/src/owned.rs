@@ -198,6 +198,25 @@ pub(crate) fn extract_recipes(program: &Program<'_>, facts: &mut ModuleFacts) {
     *facts.emission_mut() = crate::emission::extract(program, facts, &segments);
 }
 
+pub(crate) fn is_import_meta_env(object: &Expression<'_>, name: &str) -> bool {
+    name == "env" && matches!(object.get_inner_expression(), Expression::ImportMeta(_))
+}
+
+pub(crate) fn computed_import_meta_env(member: &ComputedMemberExpression<'_>) -> bool {
+    matches!(member.expression.get_inner_expression(), Expression::StringLiteral(name)
+        if is_import_meta_env(&member.object, name.value.as_str().unwrap_or_default()))
+}
+
+pub(crate) fn import_meta_env(expression: &Expression<'_>) -> bool {
+    match expression.get_inner_expression() {
+        Expression::StaticMemberExpression(member) => {
+            is_import_meta_env(&member.object, member.property.name.as_str())
+        }
+        Expression::ComputedMemberExpression(member) => computed_import_meta_env(member),
+        _ => false,
+    }
+}
+
 fn webpack_ignored(program: &Program<'_>, expression: &ImportExpression<'_>) -> bool {
     let mut ignored = false;
     // Match webpack's parseCommentOptions(expr.range)/getComments(range):
@@ -277,6 +296,51 @@ struct Extractor<'s, 'a> {
 }
 
 impl Extractor<'_, '_> {
+    fn env(&mut self, span: Span) {
+        let binding = BindingId(span.start);
+        let dependency = DependencyId(span.start);
+        self.facts.bindings_mut().push(Binding::new(
+            binding,
+            "import_meta_env".into(),
+            vec![span],
+            true,
+            false,
+            false,
+            true,
+            true,
+            false,
+            false,
+        ));
+        self.facts.dependencies_mut().push(Dependency::new(
+            dependency,
+            DependencyKind::ImportMetaEnv,
+            span,
+            "import.meta.env".into(),
+            None,
+            span,
+            false,
+            self.enclosing_function,
+        ));
+        self.facts.imports_mut().push(ImportBinding::new(
+            dependency,
+            binding,
+            ImportedName::Name("import_meta_env".into()),
+            span,
+            span,
+            false,
+        ));
+        self.facts.references_mut().push(Reference::new(
+            "import_meta_env".into(),
+            span,
+            Some(binding),
+            true,
+            false,
+            false,
+            self.async_deferred,
+            None,
+        ));
+    }
+
     fn context_dependency(&mut self, kind: DependencyKind, span: Span, source: &Expression<'_>) {
         fn pieces(source: &Expression<'_>, parts: &mut Vec<String>) -> Option<()> {
             match source.get_inner_expression() {
@@ -420,6 +484,22 @@ fn literal_worker_url<'b, 'a>(
 }
 
 impl<'a> Visit<'a> for Extractor<'_, 'a> {
+    fn visit_static_member_expression(&mut self, member: &StaticMemberExpression<'a>) {
+        if is_import_meta_env(&member.object, member.property.name.as_str()) {
+            self.env(member.span);
+        } else {
+            walk::walk_static_member_expression(self, member);
+        }
+    }
+
+    fn visit_computed_member_expression(&mut self, member: &ComputedMemberExpression<'a>) {
+        if computed_import_meta_env(member) {
+            self.env(member.span);
+        } else {
+            walk::walk_computed_member_expression(self, member);
+        }
+    }
+
     fn visit_new_expression(&mut self, expression: &NewExpression<'a>) {
         if !self.commonjs {
             if let Some((url, source)) = literal_worker_url(expression) {
