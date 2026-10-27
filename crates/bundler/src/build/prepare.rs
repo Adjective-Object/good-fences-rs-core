@@ -340,8 +340,8 @@ pub(super) fn read(
     previous: Option<&Source>,
     options: &BuildOptions,
     declarations: &PreparedDeclarations,
-    _base: &crate::output_url::PublicBase,
     dependencies: &dyn Fn(&[ast_segmenter::owned::Dependency], policy::Admission, bool),
+    type_only_cache: &parking_lot::Mutex<&mut type_only_facts::TypeOnlyCache>,
 ) -> eyre::Result<Prepared> {
     let _span = tracing::info_span!("prepare.read").entered();
     let selected = options.loaders.select(path)?;
@@ -353,9 +353,25 @@ pub(super) fn read(
     let format = tracing::info_span!("prepare.package_format")
         .in_scope(|| inventory.package_format(path))
         .wrap_err_with(|| format!("determining package format for {}", path.display()))?;
-    let input = tracing::info_span!("prepare.read_bytes")
-        .in_scope(|| fs::read(path))
-        .wrap_err_with(|| format!("source {}", path.display()))?;
+    let typed = matches!(
+        selected.script_syntax(),
+        Some(crate::loaders::ScriptSyntax::Ts | crate::loaders::ScriptSyntax::Tsx)
+    );
+    let (original_input, input) = if typed {
+        let (input, bytes) = inventory
+            .snapshot()
+            .read(path)
+            .wrap_err_with(|| format!("reading original TypeScript {}", path.display()))?;
+        inventory.merge_observations(vec![input.clone()])?;
+        let bytes =
+            bytes.ok_or_else(|| eyre::eyre!("missing TypeScript source {}", path.display()))?;
+        (Some(input), bytes.to_vec())
+    } else {
+        let input = tracing::info_span!("prepare.read_bytes")
+            .in_scope(|| fs::read(path))
+            .wrap_err_with(|| format!("source {}", path.display()))?;
+        (None, input)
+    };
     if crate::resource::kind(path, &options.loaders) != crate::resource::ResourceKind::Script {
         return Ok(Prepared::Resource { input, format });
     }
@@ -367,6 +383,11 @@ pub(super) fn read(
             previous.text.matches_input(&input)
                 && previous.transpiled.as_ref().is_some_and(|transpiled| {
                     transpiled.config == config
+                        && transpiled.package == format
+                        && (!typed
+                            || transpiled.original_facts.as_ref().is_some_and(|facts| {
+                                Some(facts.input()) == original_input.as_ref()
+                            }))
                         && (!options.output.source_maps || transpiled.source_map.is_some())
                 })
         }) {
@@ -402,6 +423,14 @@ pub(super) fn read(
                     format,
                     options.output.source_maps,
                     selected,
+                    original_input
+                        .as_ref()
+                        .map(|input| crate::transpile::Capture {
+                            cache: type_only_cache,
+                            input,
+                            storage: inventory.root(),
+                            mode: options.cache,
+                        }),
                 )
             })?;
         let mut loaded = load(
@@ -416,8 +445,20 @@ pub(super) fn read(
             declarations,
             dependencies,
         )?;
+        if let Some(warning) = compiled.facts_warning {
+            let warning = format!(
+                "{}: original TypeScript cache write: {warning}",
+                path.display()
+            );
+            loaded.warning = Some(match loaded.warning {
+                Some(previous) => format!("{previous}\n{warning}"),
+                None => warning,
+            });
+        }
         loaded.transpiled = Some(Transpiled {
             config,
+            package: format,
+            original_facts: compiled.original_facts,
             source_map: compiled.source_map,
             source_map_hint: compiled.source_map_hint,
         });

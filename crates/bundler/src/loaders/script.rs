@@ -15,6 +15,14 @@ use oxc_transformer::{Module, TransformOptions, Transformer};
 use url::Url;
 
 use super::{Loader, ScriptSyntax};
+use crate::build::type_only_facts::{Observation, Settings, TypeOnlyCache};
+
+pub(crate) struct Capture<'a, 'cache> {
+    pub cache: &'a parking_lot::Mutex<&'cache mut TypeOnlyCache>,
+    pub input: &'a ftree_cache::inputs::PathInput,
+    pub storage: &'a Path,
+    pub mode: segment_cache::CacheMode,
+}
 
 pub(crate) fn parser_path(path: &Path, syntax: ScriptSyntax) -> PathBuf {
     let original = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
@@ -38,6 +46,7 @@ pub(crate) fn compile_selected(
     package: ModuleFormat,
     source_maps: bool,
     loader: Loader,
+    capture: Option<Capture<'_, '_>>,
 ) -> eyre::Result<Compiled> {
     let syntax = loader
         .script_syntax()
@@ -48,6 +57,7 @@ pub(crate) fn compile_selected(
         source,
         package,
         source_maps,
+        capture,
     )
     .wrap_err_with(|| format!("{}: Oxc precompilation ({loader:?})", path.display()))
 }
@@ -58,6 +68,8 @@ pub(crate) struct Compiled {
     pub parser_path: PathBuf,
     pub source_map: Option<WireSourceMap>,
     pub source_map_hint: Option<oxc_span::Span>,
+    pub original_facts: Option<Observation>,
+    pub facts_warning: Option<String>,
 }
 
 #[cfg(test)]
@@ -75,7 +87,7 @@ pub(crate) fn compile(
     package: ModuleFormat,
     source_maps: bool,
 ) -> eyre::Result<Compiled> {
-    compile_inner(path, path, source, package, source_maps)
+    compile_inner(path, path, source, package, source_maps, None)
         .wrap_err_with(|| format!("{}: Oxc precompilation", path.display()))
 }
 
@@ -85,6 +97,7 @@ fn compile_inner(
     source: &str,
     package: ModuleFormat,
     source_maps: bool,
+    capture: Option<Capture<'_, '_>>,
 ) -> eyre::Result<Compiled> {
     let config = ParserConfig::for_path(parser_path, package)?;
     ensure!(
@@ -118,6 +131,30 @@ fn compile_inner(
             .into_iter()
             .map(|error| error.with_source_code(source.to_owned())),
     )?;
+    let (original_facts, facts_warning) = if config.typescript() {
+        if let Some(capture) = capture {
+            let settings = Settings::from_config(config, package)?;
+            let (facts, warning) = capture
+                .cache
+                .lock()
+                .capture_original(
+                    capture.input,
+                    capture.storage,
+                    &program,
+                    &semantic.semantic,
+                    settings,
+                    capture.mode,
+                )
+                .wrap_err_with(|| {
+                    format!("capturing original TypeScript facts for {}", path.display())
+                })?;
+            (Some(facts), warning)
+        } else {
+            (None, None)
+        }
+    } else {
+        (None, None)
+    };
 
     let mut options = TransformOptions::default();
     options.env.module = if config.commonjs() {
@@ -177,6 +214,8 @@ fn compile_inner(
         parser_path,
         source_map,
         source_map_hint,
+        original_facts,
+        facts_warning,
     })
 }
 

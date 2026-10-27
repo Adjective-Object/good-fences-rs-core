@@ -12,6 +12,7 @@ mod enum_recovery;
 mod env;
 mod loader_config;
 mod localization;
+mod original_ts_facts;
 #[path = "policy_tests.rs"]
 mod policy_tests;
 mod resolution_cache;

@@ -240,6 +240,8 @@ impl link::SourceTexts for BTreeMap<PathBuf, Source> {
 #[derive(Clone)]
 struct Transpiled {
     config: ParserConfig,
+    package: ModuleFormat,
+    original_facts: Option<type_only_facts::Observation>,
     source_map: Option<cache_flatbuffers::WireSourceMap>,
     source_map_hint: Option<oxc_span::Span>,
 }
@@ -525,6 +527,7 @@ impl BuildSession {
         let mut loaded_sources = BTreeMap::new();
         let mut loaded_transpiled = BTreeMap::new();
         let previous = &self.sources;
+        let type_only_cache = parking_lot::Mutex::new(&mut self.type_only_cache);
         let mut relocations = BTreeMap::new();
         let mut require_resources = BTreeMap::new();
         let mut changed = BTreeSet::new();
@@ -558,8 +561,8 @@ impl BuildSession {
                 previous.get(&path),
                 options,
                 &declarations,
-                &public_base,
                 dependencies,
+                &type_only_cache,
             )
             .wrap_err_with(|| format!("preparing module {}", path.display()));
             #[cfg(test)]

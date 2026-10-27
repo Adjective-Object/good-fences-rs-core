@@ -404,6 +404,7 @@ impl BuildSession {
                         source.record.provenance().records_hash(),
                         source.transpiled.as_ref().map(|t| (
                             t.config,
+                            t.package,
                             t.source_map
                                 .as_ref()
                                 .map(|m| cache_flatbuffers::hash128(m.bytes())),

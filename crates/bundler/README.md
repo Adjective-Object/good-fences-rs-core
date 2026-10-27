@@ -55,9 +55,23 @@ parser configuration and explicit package format. `extract` accepts its already
 parsed Oxc `Program` and checked `Semantic`, built with `with_enum_eval(true)`.
 `TypeOnlyCache::capture_original` also supports that same tree with a scoped
 content-sealed `PathInput`, reusing memory/disk records without extraction.
-Neither API transforms or reparses the original tree; production script
-compilation does not yet invoke these APIs. JavaScript extraction is rejected.
+Production TS/TSX compilation captures these facts after checked semantic analysis
+and before Oxc erases types, reusing that same original tree. The selected loader,
+not the physical extension, controls capture; JS/JSX and generated enum overlays
+never extract generic TypeScript metadata. Neither API reparses the original tree.
+JavaScript extraction is rejected.
 Supply an existing writable private-backing directory to either cache entrypoint.
+
+Prepared sources retain the checked mapped original record alongside compiler
+metadata, separately from generated-JS facts and coordinates. Memory/no-op builds
+reuse that owner and re-admit its content-sealed proof through each fresh inventory;
+final checks validate current source bytes. Fresh sessions reuse valid GFTY disk
+records without re-extraction, but still perform normal Oxc compilation. Type-only
+source edits refresh original records even if generated JS is unchanged; selected
+syntax and package-format changes invalidate matching metadata. Disabled caching
+does not read/write GFTY sidecars. Const-enum overlay restoration/regeneration
+preserves the original typed owner. This evidence does not yet change linking,
+erase executable clauses or produce type-only compatibility warnings.
 
 Borrow `Observation::record().facts()` for local declarations, original exported
 names/routes, import/reexport occurrences and type/executable-use spans, and

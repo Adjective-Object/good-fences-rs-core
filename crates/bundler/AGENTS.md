@@ -12,8 +12,8 @@ iteration can hide them with generated exports; ambiguity is freshly checked on
 every attempt. Generated enum regions are explicitly unmapped, inserted
 before the recorded last map directive; original executable offsets remain exact.
 Warnings retain each requesting occurrence and live on BuildProduct as well as
-BuildResult, replaying through bundler::diagnostic. No original-TS capture/erasure
-belongs to this compatibility overlay.
+BuildResult, replaying through bundler::diagnostic. Preserve original-TS owners
+through overlay restore/regeneration; never capture metadata from generated JS.
 Mixed CJS recovery consults checked source-local potential names/unknown sites,
 not the graph's permissive opaque export identities. Real/potential names and
 unknown surfaces never read companions. Dot/string-bracket namespace demands use
@@ -39,6 +39,12 @@ uses the pinned stack formatter. Seal evaluation mode/limits in settings. Borrow
 cache validation independently enforces stored string limits. Merged-enum sibling
 lookup shares containing identity between evaluation/cycle diagnosis and preserves
 real lexical shadows.
+Selected TS/TSX preparation captures original facts after semantic checking and
+before transformation using that same tree. Retain the checked owner in compiler
+metadata separately from generated-JS records/maps. Memory/no-op hits re-admit
+original content proofs; type-only edits and selected syntax/package changes
+refresh original facts even with identical JS. Fresh GFTY disk hits avoid metadata
+extraction, not Oxc compilation. JS/JSX never capture generic typed evidence.
 
 The selected locstring loader gets Ori localization (default *.locstring.json): pure named ESM values plus one
 clean default object; all underscore metadata is removed. Require resources

@@ -38,6 +38,51 @@ fn const_enum_review_erased_original_input_edits_refresh_retained_overlays() {
             let result = session.build(&config).unwrap();
             assert_eq!(observe(&result.product.artifacts), b"enum 1\n");
             let source = &session.sources[&path];
+            let original_facts = source
+                .transpiled
+                .as_ref()
+                .unwrap()
+                .original_facts
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                original_facts.input().content_seal(),
+                Some(&cache_flatbuffers::hash128(original.as_bytes()))
+            );
+            let base_facts = session.enum_bases[&path]
+                .transpiled
+                .as_ref()
+                .unwrap()
+                .original_facts
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                original_facts.record().unwrap().backing().as_ptr(),
+                base_facts.record().unwrap().backing().as_ptr()
+            );
+            let local = original_facts
+                .record()
+                .unwrap()
+                .facts()
+                .locals()
+                .iter()
+                .find(|local| local.name().value() == "Erased")
+                .unwrap();
+            assert_eq!(
+                &original[local.span().start() as usize..local.span().end() as usize],
+                interface
+            );
+            assert_eq!(
+                local.presence(),
+                cache_flatbuffers::type_only_wire::Presence::OnlyType
+            );
+            assert!(!original_facts
+                .record()
+                .unwrap()
+                .facts()
+                .exports()
+                .iter()
+                .any(|e| e.name().value() == "E"));
             assert_eq!(source.text.read_input(&path).unwrap(), original.as_bytes());
             assert_eq!(
                 session.enum_bases[&path].text.read_input(&path).unwrap(),
@@ -54,11 +99,29 @@ fn const_enum_review_erased_original_input_edits_refresh_retained_overlays() {
             assert_eq!(noop.counters.source_parses, 0);
             assert_eq!(noop.warnings, result.warnings);
         }
-        let disk = BuildSession::new(dir.root())
-            .unwrap()
-            .build(&config)
-            .unwrap();
+        let mut disk_session = BuildSession::new(dir.root()).unwrap();
+        let disk = disk_session.build(&config).unwrap();
         assert_eq!(observe(&disk.product.artifacts), b"enum 1\n");
+        let typed = disk_session.sources[&path]
+            .transpiled
+            .as_ref()
+            .unwrap()
+            .original_facts
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            typed.input().content_seal(),
+            Some(&cache_flatbuffers::hash128(
+                fs::read(&path).unwrap().as_slice()
+            ))
+        );
+        assert!(!typed
+            .record()
+            .unwrap()
+            .facts()
+            .exports()
+            .iter()
+            .any(|e| e.name().value() == "E"));
     }
 }
 
