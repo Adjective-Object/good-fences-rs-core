@@ -918,6 +918,14 @@ percent-encoded filenames resolve to original files. Remote, data, fragment and
 host-root-relative URLs remain unchanged. Namespace/document URLs remain
 identifiers rather than file dependencies. Local files must be inside the same
 bounded inventory as JavaScript sources.
+CSS URLs and `@import` use the configured resolver, including aliases and explicit
+package export conditions. Existing relative files (including bare `image.svg`
+and `images/icon.svg`) take precedence over package requests; only missing bare
+paths try package resolution. Explicit `./`/`../` requests stay relative.
+CSS URL resolution prefers exact files over `.js` extension probing, independently
+of script resolution policy.
+Resolution/admission failures never fall back to packages, and resolver external
+targets are rejected.
 
 Stylesheet names include the complete reachable resource/composition closure and
 resolved composition identities, so edits to imported/composed CSS or referenced

@@ -266,6 +266,12 @@ layers and cycles. Closure hashes include transitive original CSS/asset bytes;
 recheck every input. Stylesheets maps CSS roots only; caller-loaded styles remain
 application-ordered. Never flatten CSS imports or mount their discovered
 dependencies as unconditional JS effects.
+Resolve CSS URLs/imports through the injected resolver and checked admission.
+Existing bare relative files win over packages; only missing bare paths try
+package exports/conditions. CSS URL resolution has a separate exact-first policy;
+never apply script `.js` preference to existing extensionless assets.
+Never fall back after resolver/admission failures
+or accept external outcomes; preserve URL decoding, suffixes and skipped URLs.
 Validate css_modules and css_modules_exclude before graph loading; central resource selection precedes
 assets for entries/imports/contexts. Custom suffixes identify CSS; Everything
 selects known CSS inputs, never arbitrary JS/JSON/binary graph inputs. CSS imports

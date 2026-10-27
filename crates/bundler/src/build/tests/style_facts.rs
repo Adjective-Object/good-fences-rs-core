@@ -50,10 +50,16 @@ fn stylesheet_preparation_retains_mapped_facts_and_sass_snapshots_not_original_b
                 cache,
             );
             styles
-                .discover(&plain_path, plain.as_bytes(), &resolver, &resolver)
+                .discover(
+                    &plain_path,
+                    plain.as_bytes(),
+                    &resolver,
+                    &resolver,
+                    &resolver,
+                )
                 .unwrap();
             styles
-                .discover(&sass_path, sass.as_bytes(), &resolver, &resolver)
+                .discover(&sass_path, sass.as_bytes(), &resolver, &resolver, &resolver)
                 .unwrap();
             styles.finish_discovery().unwrap();
             let (original, facts) = styles.storage(&plain_path);

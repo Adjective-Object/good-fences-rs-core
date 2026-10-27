@@ -363,14 +363,24 @@ impl CurrentRequest<'_> {
 }
 
 impl Memory {
-    pub(super) fn retain_used(&self, script: &BuildResolver<'_, '_>, sass: &BuildResolver<'_, '_>) {
+    pub(super) fn retain_used(
+        &self,
+        script: &BuildResolver<'_, '_>,
+        sass: &BuildResolver<'_, '_>,
+        css: &BuildResolver<'_, '_>,
+    ) {
         let script = script.requests.read();
         let sass = sass.requests.read();
+        let css = css.requests.read();
         self.0.write().retain(|key, _| {
-            [script.get(&key.query()), sass.get(&key.query())]
-                .into_iter()
-                .flatten()
-                .any(|request| request.demanded.load(Ordering::Relaxed))
+            [
+                script.get(&key.query()),
+                sass.get(&key.query()),
+                css.get(&key.query()),
+            ]
+            .into_iter()
+            .flatten()
+            .any(|request| request.demanded.load(Ordering::Relaxed))
         });
     }
 }

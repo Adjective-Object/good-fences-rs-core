@@ -359,6 +359,23 @@ impl BuildSession {
             &scratch,
         )
         .admitting(&inventory);
+        let mut css_url_options = options.clone();
+        css_url_options.resolver = resolver::BuildResolver::options(options);
+        css_url_options.resolver.prefer_js_extension = false;
+        let css_url_resolver = resolver::BuildResolver::new(
+            &self.root,
+            &css_url_options,
+            lockfile.clone(),
+            self.resolution_memory.clone(),
+            &scratch,
+        )
+        .admitting(&inventory);
+        // Share matching policies so their aggregate cache publications cannot compete.
+        let url_resolver = if options.resolver.prefer_js_extension {
+            &css_url_resolver
+        } else {
+            &resolver
+        };
         let mut sass_options = options.clone();
         sass_options.resolver = resolver::BuildResolver::options(options);
         sass_options.resolver.extensions = vec!["scss".into(), "sass".into(), "css".into()];
@@ -729,6 +746,7 @@ impl BuildSession {
                                                 &input,
                                                 &resolver,
                                                 &sass_resolver,
+                                                url_resolver,
                                             )
                                         })?;
                                         discovered.extend(styles.evaluation_paths(&path).cloned());
@@ -1216,6 +1234,7 @@ impl BuildSession {
             .retain(|path, _| prepared_paths.contains(path));
         resolver.retain_precise();
         sass_resolver.retain_precise();
+        css_url_resolver.retain_precise();
         tracing::info!(target: "bundler::progress", "Checking build fingerprints");
         let fingerprint_span = tracing::info_span!("build.fingerprints").entered();
         let parse = Fingerprint::of(
@@ -1347,6 +1366,9 @@ impl BuildSession {
                 sass_resolver
                     .recheck()
                     .wrap_err("rechecking Sass resolution inputs before build reuse")?;
+                css_url_resolver
+                    .recheck()
+                    .wrap_err("rechecking CSS URL resolution inputs before build reuse")?;
                 styles
                     .recheck()
                     .wrap_err("rechecking stylesheet inputs before build reuse")?;
@@ -1357,14 +1379,18 @@ impl BuildSession {
                 }
                 resolver.finish(&mut counters, &mut warnings);
                 sass_resolver.finish(&mut counters, &mut warnings);
+                css_url_resolver.finish(&mut counters, &mut warnings);
                 resolver
                     .recheck()
                     .wrap_err("rechecking script inputs after resolution-cache publication")?;
                 sass_resolver
                     .recheck()
                     .wrap_err("rechecking Sass inputs after resolution-cache publication")?;
+                css_url_resolver
+                    .recheck()
+                    .wrap_err("rechecking CSS URL inputs after resolution-cache publication")?;
                 self.resolution_memory
-                    .retain_used(&resolver, &sass_resolver);
+                    .retain_used(&resolver, &sass_resolver, &css_url_resolver);
                 warnings.sort();
                 counters.record_parses(before_parses);
                 counters.elapsed = start.elapsed();
@@ -1524,6 +1550,9 @@ impl BuildSession {
         sass_resolver
             .recheck()
             .wrap_err("rechecking Sass resolution inputs before build success")?;
+        css_url_resolver
+            .recheck()
+            .wrap_err("rechecking CSS URL resolution inputs before build success")?;
         for upstream in self.upstreams.values() {
             upstream
                 .recheck()
@@ -1531,14 +1560,18 @@ impl BuildSession {
         }
         resolver.finish(&mut counters, &mut warnings);
         sass_resolver.finish(&mut counters, &mut warnings);
+        css_url_resolver.finish(&mut counters, &mut warnings);
         resolver
             .recheck()
             .wrap_err("rechecking script inputs after resolution-cache publication")?;
         sass_resolver
             .recheck()
             .wrap_err("rechecking Sass inputs after resolution-cache publication")?;
+        css_url_resolver
+            .recheck()
+            .wrap_err("rechecking CSS URL inputs after resolution-cache publication")?;
         self.resolution_memory
-            .retain_used(&resolver, &sass_resolver);
+            .retain_used(&resolver, &sass_resolver, &css_url_resolver);
         warnings.sort();
         counters.emissions = 1;
         counters.record_parses(before_parses);

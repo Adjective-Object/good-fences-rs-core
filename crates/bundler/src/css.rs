@@ -102,6 +102,7 @@ impl<'a> Styles<'a> {
         input: &[u8],
         resolver: &impl DependencyResolver,
         sass_resolver: &impl DependencyResolver,
+        url_resolver: &impl DependencyResolver,
     ) -> eyre::Result<()> {
         if let Some(previous) = self.inputs.get(path) {
             ensure!(
@@ -266,17 +267,33 @@ impl<'a> Styles<'a> {
                 if end == 0 {
                     continue;
                 }
-                let relative = decode_path(&value[..end])?;
+                let context = || format!("{}: CSS URL {:?}", path.display(), url.value);
+                let relative = decode_path(&value[..end]).wrap_err_with(context)?;
                 ensure!(
                     !relative.contains('\\'),
                     "{}: nonportable CSS URL",
-                    path.display()
+                    context()
                 );
-                let route = path.parent().expect("CSS parent").join(relative);
-                let target = self
-                    .inventory
-                    .admit(&route)
-                    .wrap_err_with(|| format!("{}: CSS URL {:?}", path.display(), url.value))?;
+                let route = path.parent().expect("CSS parent").join(&relative);
+                // CSS paths need no "./"; only absent bare paths try packages.
+                let request = if !relative.starts_with("./")
+                    && !relative.starts_with("../")
+                    && !relative.starts_with('/')
+                    && !Path::new(&relative).is_absolute()
+                    && (relative.starts_with('.')
+                        || self.inventory.probe_file(&route).wrap_err_with(context)?)
+                {
+                    format!("./{relative}")
+                } else {
+                    relative
+                };
+                let resolved = url_resolver
+                    .resolve_dependency(&path, &request, ResolutionMode::Import)
+                    .wrap_err_with(context)?;
+                let ResolvedDependency::File(target) = resolved else {
+                    eyre::bail!("{}: CSS URL cannot be external", context());
+                };
+                let target = self.inventory.admit(&target).wrap_err_with(context)?;
                 ensure!(
                     self.inventory.contains(&target),
                     "{}: CSS URL outside bounded source inventory: {:?}",
@@ -284,8 +301,9 @@ impl<'a> Styles<'a> {
                     url.value
                 );
                 if !self.inputs.contains_key(&target) {
-                    let bytes = fs::read(&target)
-                        .wrap_err_with(|| format!("reading CSS URL target {}", target.display()))?;
+                    let bytes = fs::read(&target).wrap_err_with(|| {
+                        format!("{}: reading CSS URL target {}", context(), target.display())
+                    })?;
                     self.inputs
                         .insert(target.clone(), InputIdentity::new(&bytes));
                 }

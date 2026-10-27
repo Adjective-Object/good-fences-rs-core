@@ -4261,6 +4261,225 @@ fn css_feature_query_urls_are_not_dependencies_and_url_whitespace_is_normalized(
 }
 
 #[test]
+fn css_urls_resolve_source_condition_package_exports() {
+    let directory = tempfile::tempdir_in(".").unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    let request = "owa-addins-osfruntime-resources/lib/images/osfruntime/progress.gif";
+    write(
+        &root,
+        "node_modules/owa-addins-osfruntime-resources/package.json",
+        r#"{"exports":{
+            "./lib/images/osfruntime/progress.gif":{
+                "source":"./src/images/osfruntime/progress.gif",
+                "default":"./lib/images/osfruntime/progress.gif"
+            },
+            "./theme.css":{"source":"./src/theme.css","default":"./lib/theme.css"}
+        }}"#,
+    );
+    write(
+        &root,
+        "node_modules/owa-addins-osfruntime-resources/src/images/osfruntime/progress.gif",
+        "source gif bytes",
+    );
+    write(
+        &root,
+        "node_modules/owa-addins-osfruntime-resources/src/theme.css",
+        ".source { color: green }",
+    );
+    for extension in ["css", "scss"] {
+        let stylesheet = format!("style.{extension}");
+        write(&root, "main.mjs", &format!("import './{stylesheet}';"));
+        write(
+            &root,
+            &stylesheet,
+            &format!(
+                "@import 'owa-addins-osfruntime-resources/theme.css' screen;\n\
+                 .progress {{ background: url('{request}?v=1#icon'); }}"
+            ),
+        );
+        let mut config = options();
+        config.resolver.export_conditions.push("source".into());
+        let mut session = BuildSession::new(&root).unwrap();
+        let built = session.build(&config).unwrap();
+        let artifacts = &built.product.artifacts;
+        let asset = artifacts
+            .resources
+            .iter()
+            .find(|(_, bytes)| bytes.as_slice() == b"source gif bytes")
+            .map(|(path, _)| path)
+            .unwrap();
+        let style = &artifacts.stylesheets[&root.join(&stylesheet)];
+        let css = std::str::from_utf8(&artifacts.resources[style]).unwrap();
+        assert!(
+            css.contains(&format!(
+                "{}?v=1#icon",
+                asset.file_name().unwrap().to_str().unwrap()
+            )),
+            "{css}"
+        );
+        assert!(css.contains(" screen;"), "{css}");
+        assert!(artifacts
+            .resources
+            .values()
+            .any(|bytes| bytes.as_slice() == b".source { color: green }"));
+        assert!(Rc::ptr_eq(
+            &built.product,
+            &session.build(&config).unwrap().product
+        ));
+        let warm = BuildSession::new(&root).unwrap().build(&config).unwrap();
+        assert_eq!(warm.product.artifacts, *artifacts);
+        config.resolver.export_conditions.retain(|c| c != "source");
+        let report = format!("{:#}", session.build(&config).err().unwrap());
+        assert!(report.contains(&stylesheet), "{report}");
+        assert!(report.contains("CSS URL"), "{report}");
+    }
+}
+
+#[test]
+fn css_urls_preserve_local_first_relative_paths_and_decoded_filenames() {
+    let directory = tempfile::tempdir_in(".").unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    write(
+        &root,
+        "main.mjs",
+        "import './styles/style.css'; export {default as image} from './styles/image';",
+    );
+    write(
+        &root,
+        "styles/style.css",
+        r#"@import "theme.css" layer(local);
+.a {
+  a: url(image.svg);
+  b: url(images/icon.svg);
+  c: url(image);
+  d: url("./explicit.svg");
+  e: url("../parent.svg");
+  f: url("./space%20%23%C3%A9.svg?size=2#icon");
+  g: url("./space\ %23é.svg");
+  h: url(".icon.svg");
+  i: url("%23icon.svg");
+  j: url("./image");
+}
+"#,
+    );
+    write(&root, "styles/theme.css", ".local { color: green }");
+    let files = [
+        "styles/image.svg",
+        "styles/images/icon.svg",
+        "styles/image",
+        "styles/explicit.svg",
+        "parent.svg",
+        "styles/space #é.svg",
+        "styles/.icon.svg",
+        "styles/#icon.svg",
+    ];
+    for file in files {
+        write(&root, file, file);
+    }
+    write(
+        &root,
+        "styles/image.js",
+        "export default 'script JS preference';",
+    );
+    for package in ["image.svg", "images", "image", "theme.css"] {
+        write(
+            &root,
+            &format!("node_modules/{package}/package.json"),
+            r#"{"exports":{".":"./missing","./icon.svg":"./missing"}}"#,
+        );
+    }
+    let built = BuildSession::new(&root).unwrap().build(&options()).unwrap();
+    let artifacts = &built.product.artifacts;
+    let style = &artifacts.stylesheets[&root.join("styles/style.css")];
+    let css = std::str::from_utf8(&artifacts.resources[style]).unwrap();
+    for file in files {
+        let path = root.join(file);
+        let asset = crate::resource::asset_path(&path, file.as_bytes());
+        assert_eq!(artifacts.resources[&asset], file.as_bytes());
+        assert!(
+            css.contains(asset.file_name().unwrap().to_str().unwrap()),
+            "{css}"
+        );
+    }
+    assert!(css.contains("?size=2#icon"), "{css}");
+    assert!(css.contains("layer(local)"), "{css}");
+    assert!(artifacts
+        .files
+        .values()
+        .any(|text| text.contains("script JS preference")));
+    assert!(artifacts
+        .resources
+        .values()
+        .any(|bytes| bytes.as_slice() == b".local { color: green }"));
+
+    let mut exact_config = options();
+    exact_config.resolver.prefer_js_extension = false;
+    let exact = BuildSession::new(&root)
+        .unwrap()
+        .build(&exact_config)
+        .unwrap();
+    assert_eq!(exact.product.artifacts.stylesheets, artifacts.stylesheets);
+}
+
+#[test]
+fn css_urls_reject_resolver_externals_and_local_failures_without_package_fallback() {
+    let directory = tempfile::tempdir_in(".").unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    write(&root, "main.mjs", "import './style.css';");
+    write(&root, "style.css", ".a { background: url(image.svg) }");
+    write(&root, "image.svg", "local");
+    write(&root, ".bundler-hidden/image.svg", "excluded");
+    write(
+        &root,
+        "node_modules/image.svg/package.json",
+        r#"{"exports":"./package.svg"}"#,
+    );
+    write(&root, "node_modules/image.svg/package.svg", "package");
+    let mut config = options();
+    config.externals.insert("./image.svg".into());
+    let report = format!(
+        "{:#}",
+        BuildSession::new(&root)
+            .unwrap()
+            .build(&config)
+            .err()
+            .unwrap()
+    );
+    for expected in ["style.css", "image.svg", "CSS URL", "external"] {
+        assert!(report.contains(expected), "{report}");
+    }
+    config.externals.clear();
+    config
+        .resolver
+        .alias
+        .insert("./image.svg".into(), "./.bundler-hidden/image.svg".into());
+    let report = format!(
+        "{:#}",
+        BuildSession::new(&root)
+            .unwrap()
+            .build(&config)
+            .err()
+            .unwrap()
+    );
+    for expected in ["style.css", "image.svg", "CSS URL", "reserved/excluded"] {
+        assert!(report.contains(expected), "{report}");
+    }
+    config.resolver.alias.clear();
+    write(&root, "style.css", ".a { background: url(./image.svg) }");
+    fs::remove_file(root.join("image.svg")).unwrap();
+    let report = format!(
+        "{:#}",
+        BuildSession::new(&root)
+            .unwrap()
+            .build(&config)
+            .err()
+            .unwrap()
+    );
+    assert!(report.contains("CSS URL"), "{report}");
+    assert!(report.contains("./image.svg"), "{report}");
+}
+
+#[test]
 fn css_extraction_preserves_import_conditions_cycles_and_rewrites_local_urls() {
     let dir = TmpDir::new();
     write(
