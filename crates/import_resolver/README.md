@@ -23,6 +23,11 @@ the active export-condition set. Only exact declared externals are accepted;
 undeclared Node-target builtins fail. External export names are delegated to the host, not
 validated as local files. Options retain explicit canonical/preserved symlink
 policy. Graph source identities must use the same policy.
+File routes simplify `.`/`..` syntactically before probing through the shared
+ftree native-component normalizer, including Windows verbatim paths. Cancelled
+directories need not exist; roots/volume prefixes and leading relative parents
+are preserved. This does not canonicalize symlinks: surviving links still follow
+the selected identity policy and remain checked proof inputs.
 Node defaults activate `node`, `node-addons` and `module-sync` in addition to the
 request mode; browser defaults activate `browser` and omit those Node conditions.
 Structural resolution applies `NodeModulesResolverOptions::alias` as exact,

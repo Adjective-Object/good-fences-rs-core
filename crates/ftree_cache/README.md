@@ -34,6 +34,12 @@ observations against that epoch without unpacking a proof tree.
 After filesystem changes, invalidate or replace both the snapshot and the
 context cache together.
 
+New observation routes are syntactically simplified before cache lookup or
+filesystem access using `inputs::simplify_path`, shared with import resolution.
+Cancelled directories need not exist. Native roots, volume prefixes and leading
+relative parents are preserved; surviving symlinks retain normal observation
+and revalidation. Persisted observations are still checked exactly, not rewritten.
+
 `PathInput` clones share their immutable original observation record and
 link-prefix slice rather than duplicating native paths and link buffers.
 Content seals remain independent 16-byte big-endian XXH3-128 values on each handle,

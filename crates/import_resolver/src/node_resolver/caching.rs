@@ -10,7 +10,7 @@ use crate::resolve::{PathResolver, Resolution, TargetEnv, NODE_BUILTINS};
 use abspath::join_abspath;
 use anyhow::{bail, Context, Error, Result};
 use ftree_cache::context_data::{FileContextCache, WithCache};
-use ftree_cache::inputs::{InputObserver, InputProof};
+use ftree_cache::inputs::{simplify_path, InputObserver, InputProof};
 use packagejson::exported_path::ExportedPathRef;
 use packagejson::{package_relative_path, Browser, PackageJson};
 use path_clean::PathClean;
@@ -175,7 +175,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                     let canonical = input.canonical().map(Path::to_owned);
                     self.observer.record(input);
                     if self.preserve_symlinks {
-                        Ok(path.clean())
+                        Ok(simplify_path(&path))
                     } else {
                         canonical.ok_or_else(|| {
                             anyhow::anyhow!("resolved file no longer exists: {}", path.display())
@@ -806,7 +806,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
 
         let file_name = {
             if target_path.is_absolute() {
-                let path = PathBuf::from(target_path);
+                let path = simplify_path(target_path);
                 self.resolve_as_file(&path)
                     .or_else(|_| self.resolve_as_directory(&path, true))
                     .and_then(|p| self.wrap(p).with_context(|| {
@@ -819,18 +819,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                 let mut components = target_path.components();
 
                 if let Some(Component::CurDir | Component::ParentDir) = components.next() {
-                    #[cfg(windows)]
-                    let path = {
-                        use normpath::BasePath;
-                        let base_dir = BasePath::new(base_dir).unwrap();
-                        base_dir
-                            .join(target.replace('/', "\\"))
-                            .normalize_virtually()
-                            .unwrap()
-                            .into_path_buf()
-                    };
-                    #[cfg(not(windows))]
-                    let path = base_dir.join(target);
+                    let path = simplify_path(&base_dir.join(target));
                     self.resolve_as_file(&path)
                         .or_else(|_| self.resolve_as_directory(&path, true))
                         .and_then(|p| self.wrap(p).with_context(|| {

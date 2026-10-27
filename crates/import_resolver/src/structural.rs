@@ -232,6 +232,37 @@ mod tests {
     }
 
     #[test]
+    fn redundant_parent_routes_resolve_before_filesystem_probes() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "utils/main.mjs" => "",
+            "mutators/value.ts" => ""
+        };
+        for environment in [TargetEnv::Node, TargetEnv::Browser] {
+            for preserve in [false, true] {
+                let mut options = NodeModulesResolverOptions::default_for_env(environment);
+                options.preserve_symlinks = preserve;
+                let resolver = StructuralResolver::new(dir.root().into(), options, BTreeSet::new());
+                for mode in [ResolutionMode::Import, ResolutionMode::Require] {
+                    for request in [
+                        "../mutators/value",
+                        "../mutators/../mutators/value",
+                        "../absent/../mutators/value",
+                    ] {
+                        for _ in 0..2 {
+                            let result =
+                                tracked(&resolver, &dir.root_join("utils/main.mjs"), request, mode);
+                            assert_eq!(
+                                result.dependency,
+                                ResolvedDependency::File(dir.root_join("mutators/value.ts"))
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn rooted_package_main_rebases_only_metadata_and_retains_proofs() {
         let dir = test_tmpdir::test_tmpdir! {
             "entry.mjs" => "",
@@ -1489,18 +1520,51 @@ mod tests {
             let mut options = NodeModulesResolverOptions::default_for_env(TargetEnv::Node);
             options.preserve_symlinks = preserve;
             let resolver = StructuralResolver::new(dir.root().into(), options, BTreeSet::new());
-            let result = tracked(
-                &resolver,
-                &dir.root().join("entry.mjs"),
+            let results: Vec<_> = [
                 "./linked/deep/value.mjs",
+                "./absent/../linked/deep/value.mjs",
+            ]
+            .into_iter()
+            .map(|request| {
+                let result = tracked(
+                    &resolver,
+                    &dir.root().join("entry.mjs"),
+                    request,
+                    ResolutionMode::Import,
+                );
+                let expected = if preserve {
+                    dir.root_join("linked/deep/value.mjs")
+                } else {
+                    dir.root_join("first/deep/value.mjs")
+                };
+                assert_eq!(result.dependency, ResolvedDependency::File(expected));
+                result
+            })
+            .collect();
+            let cancelled = tracked(
+                &resolver,
+                &dir.root_join("entry.mjs"),
+                "./linked/../entry.mjs",
                 ResolutionMode::Import,
             );
+            assert_eq!(
+                cancelled.dependency,
+                ResolvedDependency::File(dir.root_join("entry.mjs"))
+            );
+            assert!(cancelled
+                .inputs
+                .inputs()
+                .iter()
+                .all(|input| input.links().iter().all(|(path, _)| path != &link)));
             #[cfg(windows)]
             std::fs::remove_dir(&link).unwrap();
             #[cfg(unix)]
             std::fs::remove_file(&link).unwrap();
             link_directory(&dir.root().join("second"), &link);
-            assert!(result.inputs.validate().is_err());
+            for result in results {
+                assert!(result.inputs.validate().is_err());
+            }
+            cancelled.inputs.validate().unwrap();
             #[cfg(windows)]
             std::fs::remove_dir(&link).unwrap();
             #[cfg(unix)]

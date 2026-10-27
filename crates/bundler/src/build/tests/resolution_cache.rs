@@ -76,6 +76,55 @@ fn sidecar(package: &Path, config: &BuildOptions) -> PathBuf {
 }
 
 #[test]
+fn redundant_parent_routes_keep_checked_inventory_and_warm_disk_cache_hits() {
+    for cache in [CacheMode::ReadWrite, CacheMode::Disabled] {
+        for request in [
+            "../mutators/value",
+            "../mutators/../mutators/value",
+            "../absent/../mutators/value",
+        ] {
+            let dir = TmpDir::new();
+            write(dir.root(), "package.json", r#"{"type":"module"}"#);
+            write(
+                dir.root(),
+                "utils/main.mjs",
+                &format!("export {{value}} from '{request}';"),
+            );
+            write(dir.root(), "mutators/value.ts", "export const value = 42;");
+            let mut config = options();
+            config.cache = cache;
+            config.entries.get_mut("main").unwrap().path = "utils/main.mjs".into();
+            let mut session = BuildSession::new(dir.root()).unwrap();
+            let cold = session.build(&config).unwrap();
+            assert!(session
+                .sources
+                .contains_key(&dir.root_join("mutators/value.ts")));
+            assert_eq!(cold.product.artifacts.backend, crate::link::Backend::Native);
+            let warm = session.build(&config).unwrap();
+            assert!(Rc::ptr_eq(&cold.product, &warm.product));
+            let disk = build(dir.root(), &config);
+            assert_eq!(disk.product.artifacts, cold.product.artifacts);
+            if cache == CacheMode::ReadWrite {
+                assert_eq!(disk.counters.resolutions, 0);
+                assert_eq!(disk.counters.resolution_cache_hits, 1);
+                assert_eq!(disk.counters.disk_hits, 2);
+            } else {
+                assert_eq!(disk.counters.resolution_cache_hits, 0);
+                assert_eq!(disk.counters.disk_hits, 0);
+                assert!(!sidecar(dir.root(), &config).exists());
+            }
+            std::fs::remove_file(dir.root_join("mutators/value.ts")).unwrap();
+            assert!(session.build(&config).is_err());
+            assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &cold.product));
+            assert!(BuildSession::new(dir.root())
+                .unwrap()
+                .build(&config)
+                .is_err());
+        }
+    }
+}
+
+#[test]
 fn resolution_cache_new_sessions_and_incomplete_installed_graphs_hit() {
     let dir = TmpDir::new();
     fixture(dir.root());

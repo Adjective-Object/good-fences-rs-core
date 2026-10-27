@@ -41,6 +41,9 @@ Externals require exact
 explicit declarations. `invalidate` replaces both trees, including misses;
 call it after filesystem/config changes, then refresh the graph. Symlink
 identity follows explicit options; source paths must follow that same policy.
+Simplify file routes before probing with ftree's native-component
+`inputs::simplify_path`, not filesystem/virtual canonicalization. Cancelled
+directories need not exist; surviving links retain normal identity/proof policy.
 Export conditions are active sets, not priority lists; preserve package JSON
 declaration order. Node defaults include node/node-addons/module-sync, not browser
 defaults. Select a subpath before evaluating its conditions.

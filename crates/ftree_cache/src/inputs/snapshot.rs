@@ -84,8 +84,7 @@ impl InputSnapshot {
     }
 
     pub fn capture(&self, path: &Path) -> eyre::Result<PathInput> {
-        let path = std::path::absolute(path)
-            .wrap_err_with(|| format!("resolving input observation path {}", path.display()))?;
+        let path = observation_path(path)?;
         initialize(cell(&self.0.paths, &path), || {
             let links = self.links(&path)?;
             #[cfg(test)]
@@ -98,8 +97,7 @@ impl InputSnapshot {
 
     /// Retain the exact bytes and original identity together, including missing files.
     pub fn read(&self, path: &Path) -> eyre::Result<Contents> {
-        let path = std::path::absolute(path)
-            .wrap_err_with(|| format!("resolving content input path {}", path.display()))?;
+        let path = observation_path(path)?;
         initialize(cell(&self.0.contents, &path), || {
             let mut input = self.capture(&path)?;
             if input.kind() == InputKind::Missing {
@@ -133,9 +131,10 @@ impl InputSnapshot {
     }
 
     pub fn mark_dirty_root(&self, path: &Path) {
-        self.0.paths.retain(|key, _| !key.starts_with(path));
-        self.0.prefixes.retain(|key, _| !key.starts_with(path));
-        self.0.contents.retain(|key, _| !key.starts_with(path));
+        let path = simplify_path(path);
+        self.0.paths.retain(|key, _| !key.starts_with(&path));
+        self.0.prefixes.retain(|key, _| !key.starts_with(&path));
+        self.0.contents.retain(|key, _| !key.starts_with(&path));
     }
 }
 
@@ -143,6 +142,49 @@ impl InputSnapshot {
 mod tests {
     use super::*;
     use std::{collections::BTreeSet, sync::atomic::Ordering};
+
+    #[test]
+    fn redundant_parent_routes_share_observations_and_content() {
+        let dir = test_tmpdir::test_tmpdir! { "mutators/value.ts" => "export {};" };
+        let path = dir.root_join("mutators/value.ts");
+        let route = |relative: &Path| {
+            let mut raw = dir.root().as_os_str().to_owned();
+            raw.push(std::path::MAIN_SEPARATOR_STR);
+            raw.push(relative);
+            PathBuf::from(raw)
+        };
+        let redundant = route(
+            &Path::new("mutators")
+                .join("..")
+                .join("mutators")
+                .join("value.ts"),
+        );
+        let missing_parent = route(
+            &Path::new("absent")
+                .join("..")
+                .join("mutators")
+                .join("value.ts"),
+        );
+        let snapshot = InputSnapshot::default();
+        let original = snapshot.capture(&path).unwrap();
+        for route in [&redundant, &missing_parent] {
+            let captured = snapshot.capture(route).unwrap();
+            assert_eq!(captured, original);
+            assert!(Arc::ptr_eq(&captured.observation, &original.observation));
+            assert_eq!(PathInput::capture(route).unwrap(), original);
+            let (input, bytes) = snapshot.read(route).unwrap();
+            assert_eq!(&*bytes.unwrap(), b"export {};");
+            input.validate().unwrap();
+        }
+        assert_eq!(snapshot.0.captures.load(Ordering::Relaxed), 1);
+        assert_eq!(snapshot.0.content_reads.load(Ordering::Relaxed), 1);
+        std::fs::write(&path, "changed").unwrap();
+        assert!(snapshot.read(&path).unwrap().0.validate().is_err());
+        snapshot.mark_dirty_root(redundant.parent().unwrap());
+        let (input, bytes) = snapshot.read(&redundant).unwrap();
+        assert_eq!(&*bytes.unwrap(), b"changed");
+        input.validate().unwrap();
+    }
 
     #[test]
     fn concurrent_sibling_probes_initialize_each_path_and_prefix_once() {

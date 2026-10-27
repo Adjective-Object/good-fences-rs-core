@@ -1799,7 +1799,6 @@ dependencies = [
  "eyre",
  "ftree_cache",
  "hashbrown 0.14.5",
- "normpath",
  "ouroboros",
  "packagejson",
  "packagejson_exports",
@@ -2301,15 +2300,6 @@ name = "nonmax"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "610a5acd306ec67f907abe5567859a3c693fb9886eb1f012ab8f2a47bef3db51"
-
-[[package]]
-name = "normpath"
-version = "1.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9985ef7269fa99f3b12437bb698381da2428743ab90f20393f399fa14cab21a"
-dependencies = [
- "windows-sys 0.61.2",
-]
 
 [[package]]
 name = "nu-ansi-term"

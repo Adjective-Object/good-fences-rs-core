@@ -22,3 +22,7 @@ slices; content seals remain per-handle 16-byte big-endian XXH3-128 scalars
 observation/error arrays, while request collectors remain separately mutable.
 Retained proofs own only their consulted records, never the snapshot/epoch.
 Sharing must not recapture, normalize or discard negative/link/content evidence.
+Simplify new lexical routes with `inputs::simplify_path` before snapshot keys or
+prefix IO. Cancel parents syntactically, without requiring cancelled components
+to exist; retain native roots/prefixes/leading parents. Observe surviving links
+normally and never rewrite already-sealed or borrowed persisted observations.

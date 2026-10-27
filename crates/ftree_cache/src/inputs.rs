@@ -3,13 +3,42 @@ use eyre::WrapErr;
 use parking_lot::Mutex;
 use std::{
     fs, io,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     sync::Arc,
 };
 
 mod snapshot;
 pub use snapshot::InputSnapshot;
 pub(crate) use snapshot::SharedError;
+
+/// Simplify a lexical route without consulting the filesystem or following links.
+/// Only normal components cancel parents; roots/prefixes and leading parents survive.
+pub fn simplify_path(path: &Path) -> PathBuf {
+    let mut result = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => match result.components().next_back() {
+                Some(Component::Normal(_)) => {
+                    result.pop();
+                }
+                Some(Component::RootDir) => {}
+                _ => result.push(component.as_os_str()),
+            },
+            _ => result.push(component.as_os_str()),
+        }
+    }
+    if result.as_os_str().is_empty() {
+        result.push(".");
+    }
+    result
+}
+
+fn observation_path(path: &Path) -> eyre::Result<PathBuf> {
+    std::path::absolute(path)
+        .map(|path| simplify_path(&path))
+        .wrap_err_with(|| format!("resolving input observation path {}", path.display()))
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputKind {
@@ -115,8 +144,7 @@ impl PathInput {
     }
 
     pub fn capture(path: &Path) -> eyre::Result<Self> {
-        let path = std::path::absolute(path)
-            .wrap_err_with(|| format!("resolving input observation path {}", path.display()))?;
+        let path = observation_path(path)?;
         let mut links = Vec::new();
         // Inspect only this path's prefixes, never their siblings or children.
         for prefix in path.ancestors().collect::<Vec<_>>().into_iter().rev() {
@@ -390,6 +418,39 @@ impl InputObserver {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lexical_simplification_preserves_roots_prefixes_and_leading_parents() {
+        for (input, expected) in [
+            ("", "."),
+            ("a/../../b", "../b"),
+            ("../../a/../b", "../../b"),
+            ("/a/../../b", "/b"),
+            ("./a/../b", "b"),
+        ] {
+            assert_eq!(simplify_path(Path::new(input)), Path::new(expected));
+        }
+        #[cfg(windows)]
+        for (input, expected) in [
+            (r"C:\a\..\..\b", r"C:\b"),
+            (r"C:a\..\..\b", r"C:..\b"),
+            (r"C:..\..\a\..\b", r"C:..\..\b"),
+            (r"\a\..\..\b", r"\b"),
+            (r"\\server\share\a\..\..\b", r"\\server\share\b"),
+            (r"\\?\C:\a\..\..\b", r"\\?\C:\b"),
+            (r"\\?\UNC\server\share\a\..\..\b", r"\\?\UNC\server\share\b"),
+        ] {
+            assert_eq!(simplify_path(Path::new(input)), Path::new(expected));
+        }
+        #[cfg(unix)]
+        {
+            use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+            assert_eq!(
+                simplify_path(Path::new(OsStr::from_bytes(b"bad-\xff/../value-\xff"))),
+                Path::new(OsStr::from_bytes(b"value-\xff"))
+            );
+        }
+    }
 
     #[test]
     fn persisted_parts_require_fresh_positive_negative_and_content_validation() {
