@@ -40,6 +40,22 @@ pub use style_generated::style_cache as style_wire;
 mod style;
 pub use style::WireStyle;
 
+#[rustfmt::skip]
+#[expect(
+    unused_imports,
+    mismatched_lifetime_syntaxes,
+    clippy::extra_unused_lifetimes,
+    clippy::derivable_impls,
+    clippy::missing_safety_doc,
+    reason = "unmodified flatc 25.2.10 output"
+)]
+mod type_only_facts_generated;
+pub use type_only_facts_generated::type_only_cache as type_only_wire;
+mod type_only;
+pub use type_only::{
+    WireTypeOnlyFacts, TYPE_ONLY_STRING_TOTAL_BYTES, TYPE_ONLY_STRING_VALUE_BYTES,
+};
+
 mod bytes;
 mod source_map;
 mod verify;

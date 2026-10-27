@@ -31,6 +31,8 @@ oxc_ast = { git = "https://github.com/oxc-project/oxc", rev = "73e6b564737a29ece
 oxc_ast_visit = { git = "https://github.com/oxc-project/oxc", rev = "73e6b564737a29ecebf428d276421dcc492836df" }
 oxc_parser = { git = "https://github.com/oxc-project/oxc", rev = "73e6b564737a29ecebf428d276421dcc492836df" }
 oxc_semantic = { git = "https://github.com/oxc-project/oxc", rev = "73e6b564737a29ecebf428d276421dcc492836df" }
+oxc_syntax = { git = "https://github.com/oxc-project/oxc", rev = "73e6b564737a29ecebf428d276421dcc492836df" }
+oxc_ecmascript = { git = "https://github.com/oxc-project/oxc", rev = "73e6b564737a29ecebf428d276421dcc492836df" }
 oxc_span = { git = "https://github.com/oxc-project/oxc", rev = "73e6b564737a29ecebf428d276421dcc492836df" }
 oxc_diagnostics = { git = "https://github.com/oxc-project/oxc", rev = "73e6b564737a29ecebf428d276421dcc492836df" }
 oxc_codegen = { git = "https://github.com/oxc-project/oxc", rev = "73e6b564737a29ecebf428d276421dcc492836df" }

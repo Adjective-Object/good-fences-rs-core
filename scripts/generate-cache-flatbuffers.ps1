@@ -1,4 +1,4 @@
-param([ValidateSet('All', 'Source', 'Resolution', 'Style')][string]$Schema = 'All')
+param([ValidateSet('All', 'Source', 'Resolution', 'Style', 'TypeOnly')][string]$Schema = 'All')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $flatc = if ($env:FLATC) { $env:FLATC } else { 'flatc' }
@@ -17,4 +17,8 @@ if ($Schema -in @('All', 'Resolution')) {
 if ($Schema -in @('All', 'Style')) {
     & $flatc --rust --gen-all --gen-object-api -o "$root\crates\cache_flatbuffers\src" "$root\flatbuffers\style.fbs"
     if ($LASTEXITCODE -ne 0) { throw 'flatc style generation failed' }
+}
+if ($Schema -in @('All', 'TypeOnly')) {
+    & $flatc --rust --gen-all --gen-object-api -o "$root\crates\cache_flatbuffers\src" "$root\flatbuffers\type_only_facts.fbs"
+    if ($LASTEXITCODE -ne 0) { throw 'flatc type-only generation failed' }
 }

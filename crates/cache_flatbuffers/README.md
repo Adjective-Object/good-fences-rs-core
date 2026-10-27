@@ -22,6 +22,7 @@ persisted record shape, rather than embedding CBOR bytes:
 | `module.fbs` | `CachedModule`, ESM/CommonJS body alternatives, ordered statement spans |
 | `cache.fbs` | `SourceProvenance`, `CacheRecord` |
 | `style.fbs` | Independent stylesheet original/prepared/config identities, URL occurrences and CSS Modules names/scopes/compositions/animations |
+| `type_only_facts.fbs` | Independent original-TypeScript declarations, exported type/value/const-enum presence and routes, original import/reexport uses, ordered enum constants and typed diagnostics |
 
 This covers persisted source records, plus explicit union alternatives for
 imports, exports, callees, namespace accesses, operations, export forms, chain
@@ -55,6 +56,21 @@ prepared source hashes, extraction configuration and nested typed facts integrit
 Structural verification and UTF-8 span/containment/discriminant checks precede
 borrowed access. Stylesheet facts have no fixed byte cap and production loads use
 the same private mapped backing; resolved targets and linked names are not cached.
+
+`WireTypeOnlyFacts` uses independent schema/extractor 1 (`GFTY`), sealing original
+TypeScript bytes, selected syntax/package/extractor settings and nested typed facts
+with big-endian XXH3-128. Both roots receive bounded structural verification;
+borrowed semantic validation checks discriminants, UTF-8/owner spans, ordering,
+local/export presence consistency, enum links and constant payload/diagnostic
+requirements before construction. Optional numeric scalars preserve negative zero.
+Expanded enum strings are capped at 64 KiB each and 4 MiB total, with checked
+arithmetic both before packing owned facts and during borrowed cache validation.
+These limits do not cap original source bytes or the entire fact tree.
+Its `facts()` tables borrow immutable private backing; object APIs are cold
+construction only. `encode_in` requires an explicit writable snapshot directory.
+The bundler separately owns scoped source observations and freshness validation.
+These records contain no graph resolution, solved exports or repair decisions and
+do not change source schema 22/extractor 40.
 
 The owner retains `SharedBytes`, a payload endpoint and the verified module
 range. `WireRecord`, `WireEcco` and `WireSourceMap` accept the same backing.
@@ -172,8 +188,8 @@ $env:FLATC = 'C:\path\to\flatbuffers-tools\flatc.exe'
 .\scripts\generate-cache-flatbuffers.ps1
 ```
 
-The script checks the exact compiler version and generates both independent
-bindings. Use `-Schema Source` or `-Schema Resolution` to generate only one.
+The script checks the exact compiler version and generates all bindings.
+Use `-Schema Source`, `Resolution`, `Style`, or `TypeOnly` to generate only one.
 The source invocation remains:
 
 ```text

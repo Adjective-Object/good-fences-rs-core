@@ -36,6 +36,7 @@ mod policy;
 mod prepare;
 pub use policy::{PolicyAllowance, PolicyName, PreparationErrors};
 mod scratch;
+pub mod type_only_facts;
 mod worker_entries;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

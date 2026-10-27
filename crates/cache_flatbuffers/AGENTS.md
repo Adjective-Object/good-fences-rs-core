@@ -1,5 +1,15 @@
 # cache_flatbuffers
 
+- Independent `type_only_facts.fbs` schema/extractor 1 owns checked borrowed
+  `GFTY` original-TypeScript evidence. Validate both roots, UTF-8/owner/order
+  relationships, merged local/export presence, enum declaration links and typed
+  constant/diagnostic payloads before construction. Optional numeric values retain
+  negative zero. Before construction/packing and through borrowed cache validation,
+  bound expanded enum strings to 64 KiB/value and 4 MiB total (checked arithmetic);
+  these are expanded-value limits, not a whole-source/facts byte cap.
+  Explicit private mapped backing on cold/hit/read-only/disabled
+  paths; never unpack or persist graph resolution/repair/admission decisions.
+
 - Independent `resolution.fbs` schema 2 owns verified borrowed `GFRS` records.
   Package/dependency/policy identities and typed scoped proofs do not change
   source schema/extractor versions. Consumers freshly validate filesystem proofs

@@ -1,0 +1,79 @@
+namespace type_only_cache;
+
+struct Hash128 { bytes:[ubyte:16]; }
+struct Span { start:uint; end:uint; }
+enum Presence:ubyte { OnlyType, RuntimeValue, ConstEnum, Unresolved }
+enum OccurrenceKind:ubyte { Import, Reexport, LocalExport, ImportEquals, ExportAssignment, TypeImport }
+enum ConstantKind:ubyte { Unresolved, Number, String }
+enum DiagnosticKind:ubyte { UnsupportedConstant, UnresolvedConstant, UnsupportedDeclaration, CyclicConstant }
+table Name { value:string (required); span:Span (required); }
+table Local {
+  name:Name (required);
+  span:Span (required);
+  presence:Presence;
+  has_type:bool;
+  ambient:bool;
+}
+table Export {
+  name:Name (required);
+  local:Name;
+  request:Name;
+  imported:Name;
+  span:Span (required);
+  presence:Presence;
+  has_type:bool;
+  explicit_type:bool;
+  star:bool;
+}
+table Use {
+  span:Span (required);
+  type_use:bool;
+  value_use:bool;
+  value_as_type:bool;
+}
+table Occurrence {
+  kind:OccurrenceKind;
+  span:Span (required);
+  request:Name;
+  imported:Name;
+  local:Name;
+  exported:Name;
+  explicit_type:bool;
+  uses:[Use] (required);
+}
+table Member {
+  name:Name (required);
+  span:Span (required);
+  initializer:Span;
+  kind:ConstantKind;
+  number:double = null;
+  string:string;
+}
+table ConstEnum {
+  name:Name (required);
+  span:Span (required);
+  declared:bool;
+  members:[Member] (required);
+}
+table Diagnostic {
+  kind:DiagnosticKind;
+  span:Span (required);
+  message:string (required);
+}
+table Facts {
+  locals:[Local] (required);
+  exports:[Export] (required);
+  occurrences:[Occurrence] (required);
+  const_enums:[ConstEnum] (required);
+  diagnostics:[Diagnostic] (required);
+}
+table TypeOnlyFacts {
+  schema:uint;
+  extractor:uint;
+  source_hash:Hash128 (required);
+  config_hash:Hash128 (required);
+  records_hash:Hash128 (required);
+  facts:[ubyte] (required, nested_flatbuffer: "Facts");
+}
+root_type TypeOnlyFacts;
+file_identifier "GFTY";

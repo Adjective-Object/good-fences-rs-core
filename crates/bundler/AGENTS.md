@@ -1,5 +1,26 @@
 # bundler
 
+Original-TypeScript/declaration evidence shares TypeOnlyFacts (`GFTY`, independent
+schema/extractor 1). Extract from the original parsed TS tree and checked enum-
+enabled semantics, never generic JS or a second parse before transformation.
+Lazy exact declaration companions use scoped inventory/snapshot proofs, including
+misses; retain and freshly validate those proofs at final/no-op boundaries.
+Share checked mapped records across importers/attempts, not source buffers;
+hot epoch hits must not rehash/re-read source per importer. Preserve type/value
+merges, original occurrence/use spans and ordered const-enum values/diagnostics.
+No graph resolution, recovery/erasure/admission choices or generated enum code
+belongs in this metadata. Unsupported/unresolved constants never get fake values.
+Standalone declaration semantics disable upstream enum evaluation (its string
+expansion is unbounded); evaluate the restricted constants with bounded retries.
+Original-AST callers may supply pinned enum-enabled semantics; copying those values
+is bounded, not their earlier caller-owned construction. Charge every expanded
+string allocation/copy, including DTO storage, before fallible reservation:
+64 KiB/value and 4 MiB cumulative work. References share storage; numeric formatting
+uses the pinned stack formatter. Seal evaluation mode/limits in settings. Borrowed
+cache validation independently enforces stored string limits. Merged-enum sibling
+lookup shares containing identity between evaluation/cycle diagnosis and preserves
+real lexical shadows.
+
 The selected locstring loader gets Ori localization (default *.locstring.json): pure named ESM values plus one
 clean default object; all underscore metadata is removed. Require resources
 unwrap that default on Node as well as Browser, from ESM callers too.

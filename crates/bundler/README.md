@@ -39,6 +39,55 @@ without leading dots, preserving compounds and excluding null and wildcard rules
 `Loader::script_syntax()` and `Loader::stylesheet()` expose syntax/scoping without
 filename inference; module format remains a separate original-input concern.
 
+### Original TypeScript metadata
+
+`build::type_only_facts` exposes one shared metadata format for declarations and
+original selected-TypeScript programs. `TypeOnlyCache::load_companion` lazily
+requests only `.js` → `.d.ts`, `.mjs` → `.d.mts`, or `.cjs` → `.d.cts` through
+`MetadataInputs` (implemented by the build inventory). No companion scanning or
+executable-loader remapping is performed. Retain the returned `Observation`,
+including misses, and call `validate()` at final/no-op boundaries; each attempt
+needs a new inventory/snapshot epoch. Hot importer requests share the original
+epoch's content/proof and checked record, without rescanning source bytes.
+
+`Settings::from_config` takes the **resolved original** selected-TypeScript
+parser configuration and explicit package format. `extract` accepts its already
+parsed Oxc `Program` and checked `Semantic`, built with `with_enum_eval(true)`.
+`TypeOnlyCache::capture_original` also supports that same tree with a scoped
+content-sealed `PathInput`, reusing memory/disk records without extraction.
+Neither API transforms or reparses the original tree; production script
+compilation does not yet invoke these APIs. JavaScript extraction is rejected.
+Supply an existing writable private-backing directory to either cache entrypoint.
+
+Borrow `Observation::record().facts()` for local declarations, original exported
+names/routes, import/reexport occurrences and type/executable-use spans, and
+ordered const-enum members. Type/value merges preserve real-value precedence;
+ambient non-const enums, classes and functions are runtime declarations, not
+erasable types. Const enums remain distinct candidates, never invented values.
+Original-AST extraction reuses pinned Oxc enum constants. Standalone declaration
+parsing **disables upstream enum evaluation** to prevent its unbounded string
+expansion, using the restricted same-file evaluator instead (64 passes, 4096
+expression nodes and depth 64 per retry). String literals, constant templates,
+numeric/string arithmetic and merged-enum dependencies retain normal supported
+values. Expanded strings are limited to **64 KiB/value and 4 MiB cumulative work**,
+including intermediate/seed copies and final fact storage, checked before fallible
+string allocation. References share storage and numeric formatting uses the pinned
+allocation-free formatter. Evaluation mode/limits are sealed settings; wire
+validation independently bounds stored strings. Caller-owned semantic construction
+before original-AST extraction is outside these service bounds.
+Unsupported/oversized/non-finite constants,
+real cycles and unresolved dependencies retain typed original-span diagnostics;
+unresolved members have **no** numeric/string payload. Negative zero and empty/
+NUL-containing string values are preserved. Namespace/external-module metadata
+outside the top-level model is diagnosed rather than flattened or guessed.
+
+Independent `.types.seg.fb` records use `GFTY` schema/extractor 1, original-source/
+selected-syntax/package/implementation seals and private mapped borrowed storage.
+Read-only/disabled misses still map private snapshots; disabled mode never reads
+or writes sidecars. Corrupt sidecars regenerate; writes are best-effort atomic
+sibling publications. Facts contain no resolved graph exports, repair/admission
+decisions, executable enum code or warning policy.
+
 The [fixture semantic contract](../../fixtures/bundler/README.md#permitted-execution-differences)
 lists permitted execution differences and the observations adversarial tests
 must preserve. TDZ-error preservation is waived; generated suspension and new
