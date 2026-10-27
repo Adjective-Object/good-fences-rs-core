@@ -18,6 +18,8 @@ use crate::{
     resource,
 };
 
+const TRANSFORM_REVISION: &str = "css-original-exports-v7";
+
 pub(crate) struct Url {
     pub(crate) span: Range<usize>,
     pub(crate) value: String,
@@ -85,7 +87,7 @@ impl<'a> Styles<'a> {
             transform_identity: {
                 let mut digest = Sha256::new();
                 digest.update(crate::css_names::REVISION);
-                digest.update(crate::css_names::TRANSFORM_REVISION);
+                digest.update(TRANSFORM_REVISION);
                 digest.update(crate::css_syntax::PARSER_REVISION);
                 digest.update(include_str!("../css_names.rs"));
                 digest.update(include_str!("../css_syntax.rs"));

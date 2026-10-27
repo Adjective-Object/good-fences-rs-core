@@ -1108,22 +1108,22 @@ discovery order. An equal class/ID name in one file shares a value; distinct fil
 paths have distinct identities. Detected scoped-name collisions fail explicitly.
 
 Mappings are separate pure native ESM named bindings, with a default object
-whose own properties contain the same mapping values using the same normalized
+whose own properties contain the same mapping values using the same original decoded
 names. The default object is shared across static/dynamic imports and supported
 require namespaces; requiring a module still returns its namespace, not just
 the mapping object.
 It is empty when there are no exported locals; explicit globals and animation
-names do not become mapping properties. A local whose normalized name is
+names do not become mapping properties. A local whose decoded name is
 `default` is available as `styles.default` on the default-imported object, not
 as a separate named export conflicting with that object.
-JS export names always use lower camelCase, recognizing hyphen/underscore
-separators, lower-to-upper transitions and acronym word boundaries
-(`my-class-name` → `myClassName`, `XMLHttp` → `xmlHttp`).
-Other punctuation is preserved rather than silently dropped. Keywords and
-nonidentifier names use safe private bindings and string export aliases. Colliding
-export names report both decoded originals and original byte spans; empty export
-names are errors. For example `.my-class-name, #my-class-name` exports
-`myClassName` with the same scoped string for both selectors.
+JS export names preserve decoded CSS spelling, including case, underscores and
+hyphens; no camelCase or other normalized aliases are added.
+`createScreen__leftPanel` and `createScreenLeftPanel` remain distinct exports.
+Keywords and nonidentifier names use safe private bindings and string export
+aliases. For example `.my-class-name, #my-class-name` exports `"my-class-name"`
+with the same scoped string for both selectors; import it with
+`import styles, { "my-class-name" as myClassName } from "./style.module.css"`,
+or read `styles["my-class-name"]`.
 Named/namespace imports, dynamic imports and CJS require-of-ESM expose those
 bindings; a deferred import/require still defers auto-mount activation.
 When the default object is unused, it and unused named bindings can be pruned
@@ -1179,8 +1179,8 @@ selectors, IDs or nested rules. Unknown local names, illegal placement and cycle
 fail with source paths/byte spans, even for unused exports. Cross-file
 `composes: base-name from "./other.module.css"` uses the same bounded import
 resolver/inventory as JavaScript, including package exports and CSS string
-escapes. Names refer to decoded original local selectors, not their camelCase JS
-aliases. Targets must use a stylesheet-module loader exporting that local name.
+escapes. Names refer to decoded original local selectors, identical to their JS
+export keys. Targets must use a stylesheet-module loader exporting that local name.
 Unlike CSS `@import`, `composes` cannot treat arbitrary filenames as stylesheets;
 missing/global-only names, non-module targets, externals, private package paths,
 unlinked out-of-root files and excluded files are errors.

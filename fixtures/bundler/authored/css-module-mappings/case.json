@@ -5,5 +5,5 @@
   "fixtureConfig": {"loaders": {".css": "css-modules", ".global.css": "css"}},
   "cssObservation": "observe.mjs",
   "expectations": {"stdout": ["mappings and stylesheet retained"], "backend": "native"},
-  "goals": ["Observe fixed camelCase named exports, shared class/ID identities, local/global scopes, global filename exclusions and stylesheet-wide extraction without a DOM."]
+  "goals": ["Observe original decoded named exports without normalized aliases, shared class/ID identities, local/global scopes, global filename exclusions and stylesheet-wide extraction without a DOM."]
 }

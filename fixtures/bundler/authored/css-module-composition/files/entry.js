@@ -1,2 +1,2 @@
-export { default, button, localBase } from './button.css';
-export { baseName } from './base.css';
+export { default, button, 'local-base' } from './button.css';
+export { 'base-name' } from './base.css';

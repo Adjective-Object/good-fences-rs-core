@@ -354,7 +354,9 @@ recheck all originals and invalidate consumer/reverse users on closure edits,
 including unchanged caller-loaded stub bytes. Persist no resolved CSS graph state.
 Scope identities hash css-local-v1 plus normalized
 project-relative path and decoded symbol into _ plus ten base64url characters;
-class/ID identities coincide. Reject detected hash and camelCase export collisions.
+class/ID identities coincide. Reject detected scoped-name hash collisions.
+Export and composition keys preserve decoded original case/underscores/punctuation;
+distinct original names coexist, with no camelCase or other normalized aliases.
 Animation identifier definitions/references use Oxc keyframe/declaration/value
 facts and a separate css-animation-v1 identity domain, never JS exports.
 Resolve shorthand slots per comma group before interpreting a name; preserve
@@ -367,7 +369,7 @@ same-length Oxc parse views and retain original-byte checked edits.
 ICSS :import/:export and @value remain unsupported.
 Keep each mapping a pure native ESM binding with safe private names/string aliases.
 Generate a shared default object from the same mapping values with computed
-normalized property keys. Mark its literal-only construction pure and use literal
+original decoded property keys. Mark its literal-only construction pure and use literal
 values, not eager/deferred binding-read barriers.
 Reserve the default export for that object, retaining a local
 named default only as its property. Unused objects/names remain independently

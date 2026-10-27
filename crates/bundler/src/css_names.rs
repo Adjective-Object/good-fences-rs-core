@@ -13,7 +13,6 @@ use crate::{
 };
 
 pub(crate) const REVISION: &str = "css-local-v1";
-pub(crate) const TRANSFORM_REVISION: &str = "css-animations-v6";
 const ANIMATION_DOMAIN: &str = "css-animation-v1";
 
 #[derive(Default)]
@@ -94,13 +93,12 @@ impl Registry {
             .collect::<eyre::Result<Vec<_>>>()?
             .join("/");
         let mut prepared = PreparedNames::default();
-        let mut exports: BTreeMap<String, Name<'_>> = BTreeMap::new();
         for selector in &syntax.names {
             if !selector.local {
                 continue;
             }
             let name = selector.name;
-            let export = camel_case(&name.decoded);
+            let export = name.decoded.to_owned();
             ensure!(
                 !export.is_empty(),
                 "{}: unrepresentable CSS Modules export for {:?} at {:?}",
@@ -108,18 +106,6 @@ impl Registry {
                 name.decoded,
                 name.span
             );
-            if let Some(previous) = exports.insert(export.clone(), name.clone()) {
-                ensure!(
-                    previous.decoded == name.decoded,
-                    "{}: CSS Modules export collision {:?}: {:?} at {:?} and {:?} at {:?}",
-                    path.display(),
-                    export,
-                    previous.decoded,
-                    previous.span,
-                    name.decoded,
-                    name.span
-                );
-            }
             let scoped = hash(&relative, &name.decoded);
             let identity = (
                 REVISION.to_owned(),
@@ -152,10 +138,7 @@ impl Registry {
             .filter(|name| name.local)
             .map(|name| {
                 let decoded = name.name.decoded;
-                (
-                    decoded.to_owned(),
-                    prepared.mappings[&camel_case(decoded)].clone(),
-                )
+                (decoded.to_owned(), prepared.mappings[decoded].clone())
             })
             .collect();
         let local_animations: BTreeSet<_> = syntax
@@ -243,7 +226,7 @@ impl Registry {
             .filter(|name| name.local)
             .map(|name| {
                 let name = name.name.decoded;
-                (name, prepared.mappings[&camel_case(name)].clone())
+                (name, prepared.mappings[name].clone())
             })
             .collect();
         type Values<'a> = (Name<'a>, Option<Vec<String>>);
@@ -357,7 +340,7 @@ impl Registry {
             }
         }
         for (name, tokens) in resolved {
-            prepared.mappings.insert(camel_case(name), tokens.join(" "));
+            prepared.mappings.insert(name.to_owned(), tokens.join(" "));
         }
         Ok(())
     }
@@ -531,31 +514,6 @@ impl Registry {
     }
 }
 
-fn camel_case(name: &str) -> String {
-    let mut output = String::new();
-    let mut upper = false;
-    let chars: Vec<_> = name.chars().collect();
-    for (index, &ch) in chars.iter().enumerate() {
-        if matches!(ch, '-' | '_') {
-            upper = true;
-        } else {
-            let boundary = ch.is_uppercase()
-                && index > 0
-                && (chars[index - 1].is_lowercase()
-                    || chars[index - 1].is_numeric()
-                    || chars[index - 1].is_uppercase()
-                        && chars.get(index + 1).is_some_and(|ch| ch.is_lowercase()));
-            if !output.is_empty() && (upper || boundary) {
-                output.extend(ch.to_uppercase());
-            } else {
-                output.extend(ch.to_lowercase());
-            }
-            upper = false;
-        }
-    }
-    output
-}
-
 fn scoped_name(path: &str, symbol: &str) -> String {
     scoped_name_in(REVISION, path, symbol)
 }
@@ -582,23 +540,6 @@ fn scoped_name_in(domain: &str, path: &str, symbol: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn fixed_camel_case_handles_word_boundaries_without_dropping_nonidentifiers() {
-        for (input, expected) in [
-            ("my-class-name", "myClassName"),
-            ("my_class_name", "myClassName"),
-            ("myClassName", "myClassName"),
-            ("--XMLHttp-request", "xmlHttpRequest"),
-            ("_Upper_NAME", "upperName"),
-            ("class", "class"),
-            ("123", "123"),
-            ("a+b", "a+b"),
-            ("你好", "你好"),
-        ] {
-            assert_eq!(camel_case(input), expected);
-        }
-    }
 
     #[test]
     fn names_depend_only_on_relative_path_and_decoded_symbol() {
@@ -857,7 +798,7 @@ mod tests {
             prepared.mappings["unused"],
             "_unused _button _mid _base shared base"
         );
-        assert_eq!(prepared.mappings["globalOnly"], "_global-only 你好 other");
+        assert_eq!(prepared.mappings["global-only"], "_global-only 你好 other");
         let css = css_syntax::apply_edits(source, prepared.edits).unwrap();
         assert!(!css.contains("composes"));
         assert!(css.contains("color: red") && css.contains("color: blue"));
@@ -1183,33 +1124,57 @@ mod tests {
     }
 
     #[test]
-    fn rejects_export_and_detected_hash_collisions_and_future_syntax() {
+    fn original_decoded_exports_preserve_case_underscores_and_distinct_names() {
         let root = Path::new("/project");
         let path = root.join("a.module.css");
-        let error = Registry::default()
-            .prepare(root, &path, ".foo-bar, #fooBar {}")
-            .err()
-            .unwrap()
-            .to_string();
-        assert!(
-            error.contains("export collision")
-                && error.contains("foo-bar")
-                && error.contains("fooBar")
-                && error.contains("1..8")
-                && error.contains("11..17"),
-            "{error}"
+        let source = r".foo-bar, #fooBar, .createScreen__leftPanel, .createScreenLeftPanel, ._Upper_NAME, .---, .caf\e9, #café, .createScreen\5f_leftPanel {}";
+        let prepared = Registry::default().prepare(root, &path, source).unwrap();
+        assert_eq!(
+            prepared
+                .mappings
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            [
+                "---",
+                "_Upper_NAME",
+                "café",
+                "createScreenLeftPanel",
+                "createScreen__leftPanel",
+                "foo-bar",
+                "fooBar"
+            ]
         );
-        let error = Registry::default()
-            .prepare_with(
-                root,
-                &path,
-                ".a, .b {}",
-                |_, _| "_collision".into(),
-                &|_, _| unreachable!(),
-            )
-            .err()
-            .unwrap()
-            .to_string();
+        for (name, value) in &prepared.mappings {
+            assert_eq!(value, &scoped_name("a.module.css", name));
+            assert_eq!(&prepared.locals[name], value);
+        }
+        assert_eq!(prepared.ids["café"], prepared.mappings["café"]);
+        assert_eq!(prepared.ids["fooBar"], prepared.mappings["fooBar"]);
+        assert_ne!(prepared.mappings["foo-bar"], prepared.mappings["fooBar"]);
+        assert_ne!(
+            prepared.mappings["createScreen__leftPanel"],
+            prepared.mappings["createScreenLeftPanel"]
+        );
+    }
+
+    #[test]
+    fn rejects_detected_hash_collisions_and_future_syntax() {
+        let root = Path::new("/project");
+        let path = root.join("a.module.css");
+        let error = format!(
+            "{:#}",
+            Registry::default()
+                .prepare_with(
+                    root,
+                    &path,
+                    ".a, .b {}",
+                    |_, _| "_collision".into(),
+                    &|_, _| unreachable!(),
+                )
+                .err()
+                .unwrap()
+        );
         assert!(error.contains("scoped-name collision"), "{error}");
         let mut registry = Registry::default();
         registry
@@ -1230,11 +1195,8 @@ mod tests {
                 &|_, _| unreachable!()
             )
             .is_err());
-        for source in [".a {composes: b}", ".--- {}"] {
-            assert!(
-                Registry::default().prepare(root, &path, source).is_err(),
-                "{source}"
-            );
-        }
+        assert!(Registry::default()
+            .prepare(root, &path, ".a {composes: b}")
+            .is_err());
     }
 }

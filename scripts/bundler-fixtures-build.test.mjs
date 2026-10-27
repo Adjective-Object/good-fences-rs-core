@@ -506,7 +506,7 @@ test('explicit conditions select package exports while JSONC tsconfigs stay iner
 
 for (const suffix of ['.module.css', '.module.cjs']) {
   test(`explicit fixture configuration selects ${suffix} CSS transforms and preserves byte resources`, () => {
-    withCorpus(`export {buttonLabel} from './style${suffix}';`, ({ run, configure, caseDir }) => {
+    withCorpus(`export {'button-label'} from './style${suffix}';`, ({ run, configure, caseDir }) => {
       configure({
         fixtureConfig: { output: { base_url: '/static/' }, loaders: { [suffix]: 'css-modules' } },
         cssObservation: 'observe.mjs',
@@ -519,7 +519,7 @@ for (const suffix of ['.module.css', '.module.cjs']) {
       import path from 'node:path';
       import {pathToFileURL} from 'node:url';
       export async function observe({entries, entry, directory, stylesheets}) {
-        const {buttonLabel} = await import(pathToFileURL(entries[entry]));
+        const {'button-label': buttonLabel} = await import(pathToFileURL(entries[entry]));
         assert.match(buttonLabel, /^_[A-Za-z0-9_-]{10}$/u);
         assert(readFileSync(path.join(directory, Object.values(stylesheets)[0]), 'utf8').includes('.' + buttonLabel));
         console.log('CSS mapping');

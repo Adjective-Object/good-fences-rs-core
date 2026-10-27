@@ -154,6 +154,49 @@ mod tests {
     use super::*;
 
     #[test]
+    fn both_loaders_share_original_named_and_default_keys_without_normalized_aliases() {
+        let mappings = BTreeMap::from([
+            ("createScreen__leftPanel".into(), "_one".into()),
+            ("createScreenLeftPanel".into(), "_two".into()),
+            ("button-label".into(), "_button".into()),
+            ("_Upper_NAME".into(), "_upper".into()),
+            ("__proto__".into(), "_proto".into()),
+            ("class".into(), "_keyword".into()),
+            ("default".into(), "_default".into()),
+            ("café".into(), "_unicode".into()),
+        ]);
+        let input = CssModuleInput {
+            stylesheet: Path::new("style.module.css"),
+            public_url: "./style.css",
+            name_mappings: &mappings,
+            is_module: true,
+            evaluation_dependencies: &[],
+            wrapper_format: ModuleFormat::Esm,
+        };
+        let caller = CallerLoaded.generate_module(&input).unwrap();
+        let mounted = AutoMount.generate_module(&input).unwrap();
+        assert!(mounted.source.ends_with(&caller.source));
+        for (index, (name, value)) in mappings.iter().enumerate() {
+            let key = serde_json::to_string(name).unwrap();
+            let value = serde_json::to_string(value).unwrap();
+            assert!(caller.source.contains(&format!("[{key}]: {value},")));
+            if name != "default" {
+                assert!(caller
+                    .source
+                    .contains(&format!("const __css_{index} = {value};")));
+                assert!(caller
+                    .source
+                    .contains(&format!("export {{__css_{index} as {key}}};")));
+            }
+        }
+        assert_eq!(caller.source.matches(" as default}").count(), 1);
+        assert!(!caller.source.contains(" as \"default\""));
+        for alias in ["buttonLabel", "upperName", "proto"] {
+            assert!(!caller.source.contains(&format!("\"{alias}\"")));
+        }
+    }
+
+    #[test]
     fn caller_loaded_preserves_global_url_bytes_and_emits_separate_module_bindings() {
         let mappings = BTreeMap::new();
         let mut input = CssModuleInput {

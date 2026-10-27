@@ -1876,7 +1876,7 @@ fn css_modules_highlight_and_property_preserve_nonselector_names_in_css_and_sass
             let observation = observe_named(
                 &cold.product.artifacts,
                 &format!(
-                    "{CSS_DOM_RECORDER}\nconst ns = await import('./main.mjs'); assert.deepEqual(Object.keys(ns), ['copilotGradientAngle', 'highlightDisabled', 'persistSelection']); assert.equal(links.length, {}); console.log(JSON.stringify(ns));",
+                    "{CSS_DOM_RECORDER}\nconst ns = await import('./main.mjs'); assert.deepEqual(Object.keys(ns), ['__persistSelection', 'copilot-gradient-angle', 'highlightDisabled']); assert.equal(links.length, {}); console.log(JSON.stringify(ns));",
                     usize::from(load == CssLoad::AutoMount),
                 ),
             );
@@ -1895,7 +1895,7 @@ fn css_modules_highlight_and_property_preserve_nonselector_names_in_css_and_sass
                 normalized = normalized.replace(scoped, &format!("_{export}"));
             }
             insta::allow_duplicates! {
-                insta::assert_snapshot!(normalized.split_whitespace().collect::<Vec<_>>().join(" "), @r#"@property --copilot-gradient-angle { syntax: "<angle>"; inherits: false; initial-value: -36deg; } ._highlightDisabled::highlight(__persistSelection) { background-color: transparent; --copilot-gradient-angle: var(--copilot-gradient-angle); } ._persistSelection, ._copilotGradientAngle { color: red; }"#);
+                insta::assert_snapshot!(normalized.split_whitespace().collect::<Vec<_>>().join(" "), @r#"@property --copilot-gradient-angle { syntax: "<angle>"; inherits: false; initial-value: -36deg; } ._highlightDisabled::highlight(__persistSelection) { background-color: transparent; --copilot-gradient-angle: var(--copilot-gradient-angle); } .___persistSelection, ._copilot-gradient-angle { color: red; }"#);
             }
             assert!(Rc::ptr_eq(
                 &cold.product,
@@ -1968,11 +1968,11 @@ fn css_modules_scopes_fragments_and_urls_share_original_utf8_edits_under_both_lo
         let mut session = BuildSession::new(dir.root()).unwrap();
         let cold = session.build(&config).unwrap();
         let observation = observe_named(&cold.product.artifacts, &format!(
-            "{CSS_DOM_RECORDER}\nconst ns = await import('./main.mjs'); assert.deepEqual(Object.keys(ns), ['buttonLabel', '你好']); assert.equal(links.length, {}); console.log(JSON.stringify(ns));",
+            "{CSS_DOM_RECORDER}\nconst ns = await import('./main.mjs'); assert.deepEqual(Object.keys(ns), ['button-label', '你好']); assert.equal(links.length, {}); console.log(JSON.stringify(ns));",
             usize::from(load == CssLoad::AutoMount)
         ));
         let mappings: serde_json::Value = serde_json::from_slice(&observation).unwrap();
-        let button = mappings["buttonLabel"].as_str().unwrap();
+        let button = mappings["button-label"].as_str().unwrap();
         let id = mappings["你好"].as_str().unwrap();
         let resource = &cold.product.artifacts.stylesheets[&dir.root().join("style.module.css")];
         let bytes = &cold.product.artifacts.resources[resource];
@@ -2266,7 +2266,7 @@ fn css_modules_native_named_namespace_dynamic_and_require_surfaces_under_both_lo
         dir.root(),
         "main.mjs",
         r#"
-import classMap, { myClassName, class as keyword, "123" as numeric, "a+b" as punctuation, 你好 as unicode } from './style.module.css';
+import classMap, { "my-class-name" as myClassName, class as keyword, "123" as numeric, "a+b" as punctuation, 你好 as unicode } from './style.module.css';
 import * as styles from './style.module.css';
 import load from './load.cjs';
 export {default as empty} from './empty.module.css';
@@ -2306,11 +2306,12 @@ export const dynamic = () => import('./style.module.css');
             r#"{CSS_DOM_RECORDER}
 const main = await import('./main.mjs');
 const ns = main.styles;
-assert.deepEqual(Object.keys(ns).sort(), ['123', 'a+b', 'class', 'default', 'myClassName', '你好'].sort());
+assert.deepEqual(Object.keys(ns).sort(), ['123', 'a+b', 'class', 'default', 'my-class-name', '你好'].sort());
 assert.strictEqual(ns.default, main.classMap);
 assert.deepEqual(Object.keys(ns.default).sort(), Object.keys(ns).sort());
 assert.deepEqual(main.empty, {{}});
-assert.equal(ns.myClassName, main.myClassName);
+assert.equal(ns['my-class-name'], main.myClassName);
+assert.equal(ns.myClassName, undefined);
 assert.equal(ns.class, main.keyword);
 assert.equal(ns['123'], main.numeric);
 assert.equal(ns['a+b'], main.punctuation);
@@ -2329,7 +2330,7 @@ for (const key of Object.keys(ns)) {{
   assert.ok({css:?}.includes(ns.default[key]));
   if (key !== 'default') assert.equal(ns.default[key], ns[key]);
 }}
-assert.ok({css:?}.startsWith('.' + ns.myClassName + ', #' + ns.myClassName));
+assert.ok({css:?}.startsWith('.' + ns['my-class-name'] + ', #' + ns['my-class-name']));
 assert.equal(links.length, {mounts});
 console.log('module surfaces');
 "#,
@@ -3205,30 +3206,130 @@ fn css_modules_stability_content_order_root_and_transitive_selection_invalidate_
 }
 
 #[test]
-fn css_modules_export_collision_has_both_spans_and_preserves_last_product() {
-    let dir = TmpDir::new();
-    write(
-        dir.root(),
-        "main.mjs",
-        "export {fooBar} from './style.module.css';",
-    );
-    write(dir.root(), "style.module.css", ".foo-bar {}");
-    let mut config = options();
-    config.loaders = crate::loaders::LoaderPolicy::default();
-    let mut session = BuildSession::new(dir.root()).unwrap();
-    let built = session.build(&config).unwrap();
-    write(dir.root(), "style.module.css", ".foo-bar, #fooBar {}");
-    let error = format!("{:#}", session.build(&config).err().unwrap());
-    assert!(
-        error.contains("style.module.css")
-            && error.contains("export collision")
-            && error.contains("foo-bar")
-            && error.contains("fooBar")
-            && error.contains("1..8")
-            && error.contains("11..17"),
-        "{error}"
-    );
-    assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &built.product));
+fn css_modules_original_names_and_composition_survive_cache_transitions_without_aliases() {
+    let style = r#"
+.createScreen__leftPanel { composes: createScreenLeftPanel; composes: b\61 se-name from './base.module.css'; }
+.createScreenLeftPanel { composes: baseName from './base.module.css'; }
+.button-label { composes: createScreen\5f_leftPanel; }
+._Upper_NAME, .__proto__, .caf\e9, #café, .default { color: green }
+"#;
+    for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
+        let dir = TmpDir::new();
+        write(
+            dir.root(),
+            "main.mjs",
+            "export {default, createScreen__leftPanel, createScreenLeftPanel, \
+             'button-label', '_Upper_NAME', '__proto__', 'café'} from './style.module.css';",
+        );
+        write(
+            dir.root(),
+            "base.module.css",
+            ".base-name { color: red } .baseName { color: blue }",
+        );
+        let mut config = options();
+        config.loaders = crate::loaders::LoaderPolicy::default();
+        config.css.load = load;
+        write(dir.root(), "style.module.css", style);
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let cold = session.build(&config).unwrap();
+        assert!(cold.counters.source_parses > 0);
+        let noop = session.build(&config).unwrap();
+        assert!(Rc::ptr_eq(&cold.product, &noop.product));
+        assert_eq!(noop.counters.source_parses, 0);
+
+        write(
+            dir.root(),
+            "style.module.css",
+            &style.replace("green", "purple"),
+        );
+        let memory = session.build(&config).unwrap();
+        assert!(!Rc::ptr_eq(&cold.product, &memory.product));
+        assert_eq!(
+            memory.counters.source_parses,
+            usize::from(load == CssLoad::AutoMount)
+        );
+        assert_eq!(memory.counters.memory_hits, 2);
+        assert_ne!(
+            cold.product.artifacts.resources,
+            memory.product.artifacts.resources
+        );
+        let mut fresh = BuildSession::new(dir.root()).unwrap();
+        let disk = fresh.build(&config).unwrap();
+        assert_eq!(disk.counters.source_parses, 0);
+        assert_eq!(disk.product.artifacts, memory.product.artifacts);
+        assert!(Rc::ptr_eq(
+            &disk.product,
+            &fresh.build(&config).unwrap().product
+        ));
+
+        let check = |changed: bool| {
+            format!(
+                r#"{CSS_DOM_RECORDER}
+const ns = await import('./main.mjs');
+assert.deepEqual(Object.keys(ns).sort(), ['default', 'createScreen__leftPanel', 'createScreenLeftPanel', 'button-label', '_Upper_NAME', '__proto__', 'café'].sort());
+assert.deepEqual(Object.keys(ns.default).sort(), Object.keys(ns).sort());
+for (const key of Object.keys(ns)) {{
+  if (key !== 'default') assert.equal(ns[key], ns.default[key]);
+}}
+assert.equal(Object.getPrototypeOf(ns.default), Object.prototype);
+assert.match(ns.default.default, /^_[A-Za-z0-9_-]{{10}}$/);
+const original = ns.createScreen__leftPanel.split(' ');
+const distinct = ns.createScreenLeftPanel.split(' ');
+assert.equal(original.length, {length});
+assert.equal(distinct.length, 2);
+assert.notEqual(original[0], distinct[0]);
+assert.deepEqual(original.slice(1, 3), distinct);
+assert.notEqual(original[3], distinct[1]);
+if ({changed}) assert.equal(original[4], 'changed');
+assert.deepEqual(ns['button-label'].split(' ').slice(1), original);
+for (const alias of ['createScreenLeftpanel', 'buttonLabel', 'upperName', 'proto']) {{
+  assert.equal(Object.hasOwn(ns, alias), false);
+  assert.equal(Object.hasOwn(ns.default, alias), false);
+}}
+assert.equal(links.length, {mounts});
+console.log('original CSS exports');
+"#,
+                length = if changed { 5 } else { 4 },
+                mounts = if load == CssLoad::AutoMount { 2 } else { 0 }
+            )
+        };
+        for built in [&cold, &noop, &memory, &disk] {
+            assert_eq!(
+                observe_named(&built.product.artifacts, &check(false)),
+                b"original CSS exports\n"
+            );
+        }
+
+        write(
+            dir.root(),
+            "base.module.css",
+            ".base-name { composes: changed from global; color: red } .baseName { color: blue }",
+        );
+        let composed = session.build(&config).unwrap();
+        assert_eq!(
+            observe_named(&composed.product.artifacts, &check(true)),
+            b"original CSS exports\n"
+        );
+        assert_eq!(
+            composed.product.artifacts,
+            fresh.build(&config).unwrap().product.artifacts
+        );
+
+        write(
+            dir.root(),
+            "main.mjs",
+            "export {buttonLabel} from './style.module.css';",
+        );
+        let error = format!("{:#}", session.build(&config).err().unwrap());
+        assert!(
+            error.contains("missing Value export") && error.contains("buttonLabel"),
+            "{error}"
+        );
+        assert!(Rc::ptr_eq(
+            session.last.as_ref().unwrap(),
+            &composed.product
+        ));
+    }
 }
 
 #[test]
@@ -3703,12 +3804,12 @@ fn css_modules_custom_suffix_aliases_keep_owned_paths_and_mount_once_for_each_ba
                         r#"{CSS_DOM_RECORDER}
 const alias = await import('./deep/alias/styles.mjs');
 const canonical = await import('./source/style.module.mjs');
-assert.deepEqual(Object.keys(alias), ['buttonLabel', 'default']);
-assert.deepEqual(Object.keys(canonical), ['buttonLabel', 'default']);
+assert.deepEqual(Object.keys(alias), ['button-label', 'default']);
+assert.deepEqual(Object.keys(canonical), ['button-label', 'default']);
 assert.strictEqual(alias.default, canonical.default);
-assert.equal(canonical.default.buttonLabel, canonical.buttonLabel);
-assert.equal(alias.buttonLabel, canonical.buttonLabel);
-assert.match(canonical.buttonLabel, /^_[A-Za-z0-9_-]{{10}}$/);
+assert.equal(canonical.default['button-label'], canonical['button-label']);
+assert.equal(alias['button-label'], canonical['button-label']);
+assert.match(canonical['button-label'], /^_[A-Za-z0-9_-]{{10}}$/);
 assert.strictEqual(await import('./deep/alias/styles.mjs'), alias);
 assert.equal(links.length, {mounts});
 if ({mounts}) assert.equal(links[0].href, new URL({public:?}, import.meta.url).href);
@@ -3801,26 +3902,26 @@ fn css_modules_published_shared_static_dynamic_and_cjs_activation_keep_generatio
     write(
         dir.root(),
         "main.mjs",
-        "export {sharedName} from './shared.style'; \
+        "export {'shared-name'} from './shared.style'; \
          export const load = () => import('./nested/lazy.mjs'); \
          export {default as requireStyle} from './loader.cjs';",
     );
     write(
         dir.root(),
         "other.mjs",
-        "export {sharedName} from './shared.style';",
+        "export {'shared-name'} from './shared.style';",
     );
     write(
         dir.root(),
         "nested/lazy.mjs",
-        "export {sharedName} from '../shared.style'; \
-         export {buttonLabel} from '../button.style'; \
+        "export {'shared-name'} from '../shared.style'; \
+         export {'button-label'} from '../button.style'; \
          export const deeper = () => import('./deeper.mjs');",
     );
     write(
         dir.root(),
         "nested/deeper.mjs",
-        "export {deepName} from '../deep.style';",
+        "export {'deep-name'} from '../deep.style';",
     );
     write(
         dir.root(),
@@ -3935,27 +4036,27 @@ for (const [entries, expected] of generations) {{
     const main = await import(entries.main);
     const other = await import(entries.other);
     assert.equal(links.length, start + 1);
-    assert.equal(main.sharedName, alias.sharedName);
-    assert.equal(main.sharedName, other.sharedName);
-    assert.match(main.sharedName, /^_[A-Za-z0-9_-]{{10}}$/);
+    assert.equal(main['shared-name'], alias['shared-name']);
+    assert.equal(main['shared-name'], other['shared-name']);
+    assert.match(main['shared-name'], /^_[A-Za-z0-9_-]{{10}}$/);
     assert.strictEqual(main.load, alias.load);
     assert.strictEqual(main.requireStyle, alias.requireStyle);
     const required = main.requireStyle();
-    assert.deepEqual(Object.keys(required), ['__esModule', 'default', 'requiredName']);
-    assert.equal(required.default.requiredName, required.requiredName);
+    assert.deepEqual(Object.keys(required), ['__esModule', 'default', 'required-name']);
+    assert.equal(required.default['required-name'], required['required-name']);
     assert.strictEqual(main.requireStyle(), required);
     assert.equal(links.length, start + 2);
     const lazy = await alias.load();
     assert.strictEqual(await main.load(), lazy);
-    assert.equal(lazy.sharedName, main.sharedName);
-    assert.equal(lazy.buttonLabel.split(' ')[1], main.sharedName);
+    assert.equal(lazy['shared-name'], main['shared-name']);
+    assert.equal(lazy['button-label'].split(' ')[1], main['shared-name']);
     assert.equal(links.length, start + 3);
     const deep = await lazy.deeper();
-    assert.deepEqual(Object.keys(deep), ['deepName']);
+    assert.deepEqual(Object.keys(deep), ['deep-name']);
     assert.strictEqual(await lazy.deeper(), deep);
     assert.equal(links.length, start + 4);
     assert.deepEqual(links.slice(start).map(link => link.href), expected);
-    for (const [index, mapping] of [main.sharedName, required.requiredName, lazy.buttonLabel, deep.deepName].entries()) {{
+    for (const [index, mapping] of [main['shared-name'], required['required-name'], lazy['button-label'], deep['deep-name']].entries()) {{
         assert.ok(existsSync(new URL(expected[index])));
         assert.ok(readFileSync(new URL(expected[index]), 'utf8').includes('.' + mapping.split(' ')[0]));
     }}
@@ -3972,8 +4073,8 @@ for (const [entries, expected] of generations) {{
     assert.equal(readFileSync(new URL(references[1], expected[0]), 'utf8'), retained.length ? 'second pixel' : 'first pixel');
     retained.push({{main, lazy, deep, required}});
 }}
-assert.equal(retained[0].main.sharedName, retained[1].main.sharedName);
-assert.equal(retained[0].lazy.buttonLabel, retained[1].lazy.buttonLabel);
+assert.equal(retained[0].main['shared-name'], retained[1].main['shared-name']);
+assert.equal(retained[0].lazy['button-label'], retained[1].lazy['button-label']);
 assert.notEqual(generations[0][1][0], generations[1][1][0]);
 assert.notEqual(generations[0][1][2], generations[1][1][2]);
 assert.strictEqual(await retained[0].main.load(), retained[0].lazy);

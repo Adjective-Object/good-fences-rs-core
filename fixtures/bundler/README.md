@@ -369,8 +369,9 @@ typed suffix rules by longest match; null rejects without fallback.
 files; omission derives enabled loader suffixes by length/alphabetical order.
 The obsolete CSS selection fields and `resolveExtensions` spelling are rejected.
 `"auto-mount"` is independent of syntax/scoping selection.
-Mappings use camelCase named exports and one shared default mapping object.
-Invalid bases/suffixes, scoped/export collisions,
+Mappings preserve original decoded CSS names (case, underscores and punctuation),
+with no normalized aliases, and one shared default mapping object using the same keys.
+Invalid bases/suffixes, scoped-name hash collisions,
 invalid composition and unsupported/recovered module syntax are build errors,
 not accepted runtime outcomes. SCSS and indented Sass use their selected loaders;
 ICSS `:import`/`:export` and `@value` remain unsupported.
