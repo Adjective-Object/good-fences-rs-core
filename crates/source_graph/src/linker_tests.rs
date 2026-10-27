@@ -3,6 +3,39 @@ use crate::*;
 use ast_segmenter::ExportedSymbol;
 
 #[test]
+fn missing_names_are_structured_and_routes_preserve_renames_stars_and_cycles() {
+    let graph = SourceGraph::from_owned([
+        input(
+            "main.mjs",
+            "import {Public} from 'a.mjs'; console.log(Public);",
+        ),
+        input("a.mjs", "export * from 'b.mjs';"),
+        input(
+            "b.mjs",
+            "export * from 'a.mjs'; export {Private as Public} from 'leaf.mjs';",
+        ),
+        input("leaf.mjs", "export const actual = 1;"),
+    ]);
+    let missing = graph.diagnostics()[0].missing_export.as_ref().unwrap();
+    assert_eq!(missing.namespace, Namespace::Value);
+    assert_eq!(missing.name, "Public");
+    assert_eq!(
+        graph.missing_export_leaves(missing.target, &missing.name),
+        vec![(1, "Public".into()), (3, "Private".into())]
+    );
+    let ambiguous = SourceGraph::from_owned([
+        input("main.mjs", "import {E} from 'a.mjs';"),
+        input("a.mjs", "export * from 'one.mjs'; export * from 'two.mjs';"),
+        input("one.mjs", "export const E = 1;"),
+        input("two.mjs", "export const E = 2;"),
+    ]);
+    assert!(ambiguous
+        .diagnostics()
+        .iter()
+        .all(|d| d.missing_export.is_none()));
+}
+
+#[test]
 fn unknown_external_star_collisions_keep_native_boundaries_and_all_routes() {
     let mut barrel = input("barrel.mjs", "export * from 'one'; export * from 'two';");
     for dependency in barrel.facts.dependencies() {

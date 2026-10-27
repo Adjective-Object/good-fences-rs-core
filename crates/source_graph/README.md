@@ -71,6 +71,15 @@ with source sites. `resolve_optional_export` distinguishes absent namespace
 properties from ambiguity, which remains an error. Opaque CommonJS value requests resolve to
 `ExportIdentity::CommonJs(file, requested_name)` and a module/body demand, not
 guessed source exports. Type requests do not gain this dynamic fallback.
+`LinkDiagnostic::missing_export: Option<MissingExport>` identifies only absent
+names (`target` graph-local file ID, requested `name`, and `namespace`).
+Ambiguities, unresolved dependencies and other failures leave it `None`.
+`missing_export_leaves(file, name)` follows explicit/renamed import-export
+bindings before star routes, excludes star defaults and terminates cycles. It
+returns deduplicated `(file ID, leaf name)` candidates, including star barrels
+which could have an erased local declaration, not a chosen repair.
+Callers must preserve multiple possible leaves. Neither API reads files or
+loads declarations; evidence/admission/recovery belongs to the build coordinator.
 Legacy symbol adapters remain permissive type-inclusive
 lookups; executable callers must use the checked linker, not their empty-on-error
 compatibility results.

@@ -32,6 +32,7 @@ mod entry_outputs;
 mod env;
 use crate::loaders::locstring as localization;
 pub use localization::{LocaleOptions, PseudoLocaleOptions};
+mod enum_recovery;
 mod policy;
 mod prepare;
 pub use policy::{PolicyAllowance, PolicyName, PreparationErrors};
@@ -206,6 +207,8 @@ pub struct BuildProduct {
     pub plan: ChunkPlan,
     pub artifacts: Artifacts,
     pub fingerprints: Fingerprints,
+    /// Compatibility diagnostics, retained independently of cache write warnings.
+    pub compatibility_warnings: Vec<String>,
 }
 
 pub struct BuildResult {
@@ -218,6 +221,7 @@ pub struct BuildResult {
     pub warnings: Vec<String>,
 }
 
+#[derive(Clone)]
 struct Source {
     css_identity: Option<PathBuf>,
     text: crate::prepared_text::PreparedText,
@@ -256,6 +260,9 @@ pub struct BuildSession {
     pending_invalidated: BTreeSet<PathBuf>,
     last: Option<Rc<BuildProduct>>,
     env: Option<env::Module>,
+    enum_bases: BTreeMap<PathBuf, Source>,
+    type_only_cache: type_only_facts::TypeOnlyCache,
+    enum_recovery: Option<enum_recovery::Retained>,
 }
 
 // Publication ownership/cleanup uses this integrity hash, not the internal keys.
@@ -323,6 +330,9 @@ impl BuildSession {
             pending_invalidated: BTreeSet::new(),
             last: None,
             env: None,
+            enum_bases: BTreeMap::new(),
+            type_only_cache: type_only_facts::TypeOnlyCache::default(),
+            enum_recovery: None,
         })
     }
 
@@ -340,6 +350,14 @@ impl BuildSession {
     }
 
     fn build_inner(&mut self, options: &BuildOptions) -> eyre::Result<BuildResult> {
+        // Never allow an old derived export to conceal a declaration-only change,
+        // including after a failed attempt.
+        let mut previous_enums = BTreeMap::new();
+        for (path, original) in std::mem::take(&mut self.enum_bases) {
+            if let Some(overlay) = self.sources.insert(path.clone(), original) {
+                previous_enums.insert(path, overlay);
+            }
+        }
         let env_path = env::path(&self.root);
         let _span = tracing::info_span!(
             "build",
@@ -393,8 +411,9 @@ impl BuildSession {
         let inventory = Inventory::new(&self.root);
         let mut localization = localization::Localization::deferred(&options.locale)
             .wrap_err("validating localization options")?;
+        let style_root = self.root.clone();
         let mut styles = crate::css::Styles::new(
-            &self.root,
+            &style_root,
             &inventory,
             &public_base,
             &options.loaders,
@@ -1349,7 +1368,6 @@ impl BuildSession {
         } else {
             self.env = None;
         }
-        let invalidated = self.reverse_users(self.pending_invalidated.clone());
         self.sources.retain(|path, _| prepared_paths.contains(path));
         self.resolutions
             .retain(|path, _| prepared_paths.contains(path));
@@ -1357,17 +1375,36 @@ impl BuildSession {
         sass_resolver.retain_precise();
         css_url_resolver.retain_precise();
         tracing::info!(target: "bundler::progress", "Checking build fingerprints");
+        let mut recovery = self.recover_enums(
+            &inventory,
+            options,
+            &declarations,
+            &previous_enums,
+            &mut counters,
+            &mut warnings,
+        )?;
+        let compatibility_warnings = std::mem::take(&mut recovery.warnings);
+        for path in previous_enums.keys().chain(self.enum_bases.keys()) {
+            if previous_enums.get(path).map(|s| s.record.source_hash())
+                != self.sources.get(path).map(|s| s.record.source_hash())
+            {
+                self.pending_invalidated.insert(path.clone());
+            }
+        }
+        let invalidated = self.reverse_users(self.pending_invalidated.clone());
         let fingerprint_span = tracing::info_span!("build.fingerprints").entered();
         let parse = Fingerprint::of(
             format!(
-                "{}:{}:{}:{declarations_key:?}:{:?}",
+                "{}:{}:{}:{declarations_key:?}:{:?}:{:?}:{:?}",
                 segment_cache::SCHEMA_VERSION,
                 segment_cache::EXTRACTOR_VERSION,
                 segment_cache::OXC_REVISION,
                 self.sources
                     .iter()
                     .map(|(p, s)| (p, s.record.source_hash(), s.record.config()))
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>(),
+                recovery.identity,
+                Fingerprint::of(include_bytes!("build/enum_recovery.rs")),
             )
             .as_bytes(),
         );
@@ -1524,6 +1561,7 @@ impl BuildSession {
                 localization
                     .recheck()
                     .wrap_err("rechecking localization after cache publication")?;
+                recovery.recheck()?;
                 warnings.sort();
                 counters.record_parses(before_parses);
                 counters.elapsed = start.elapsed();
@@ -1546,44 +1584,10 @@ impl BuildSession {
         );
         let graph_span =
             tracing::info_span!("build.graph", modules = prepared_paths.len()).entered();
-        let mut inputs = self
-            .sources
-            .iter()
-            .map(|(path, source)| {
-                let text = source.text.text(path)?;
-                let parsed = source
-                    .record
-                    .to_parsed_reporting_policies(&text)
-                    .wrap_err_with(|| {
-                        format!("borrowing prepared graph facts for {}", path.display())
-                    })?;
-                let graph_input = if crate::resource::kind(path, &options.loaders)
-                    == crate::resource::ResourceKind::Script
-                    && source.transpiled.is_none()
-                    && options
-                        .loaders
-                        .select(path)?
-                        .script_syntax()
-                        .is_some_and(|syntax| crate::transpile::parser_path(path, syntax) == *path)
-                {
-                    OwnedSourceFileInput::from_parsed
-                } else {
-                    OwnedSourceFileInput::from_prepared_resource
-                };
-                Ok(graph_input(
-                    path.clone(),
-                    parsed,
-                    self.resolutions[path]
-                        .iter()
-                        .map(|(id, target)| (*id, target.clone()))
-                        .collect(),
-                ))
-            })
-            .collect::<eyre::Result<Vec<_>>>()?;
-        if let Some(env) = &self.env {
-            inputs.push(env.input()?);
-        }
-        let graph = SourceGraph::from_owned(inputs);
+        let graph = match recovery.graph.take() {
+            Some(graph) => graph,
+            None => self.prepared_graph(options)?,
+        };
         graph
             .validate_links()
             .wrap_err("validating prepared source graph")?;
@@ -1635,7 +1639,19 @@ impl BuildSession {
                         )
                         .collect(),
                 )
-                .map(|source| (path.clone(), source))
+                .and_then(|source| {
+                    Ok((
+                        path.clone(),
+                        crate::sourcemap::Source::with_unmapped(
+                            source,
+                            recovery.generated.get(path).copied(),
+                            self.enum_bases
+                                .get(path)
+                                .map(|s| s.text.text(path))
+                                .transpose()?,
+                        ),
+                    ))
+                })
             })
             .collect::<eyre::Result<BTreeMap<_, _>>>()?;
         tracing::info!(target: "bundler::progress", "Linking and emitting native chunks");
@@ -1725,6 +1741,7 @@ impl BuildSession {
         localization
             .recheck()
             .wrap_err("rechecking localization after cache publication")?;
+        recovery.recheck()?;
         warnings.sort();
         counters.emissions = 1;
         counters.record_parses(before_parses);
@@ -1741,6 +1758,7 @@ impl BuildSession {
             plan,
             artifacts,
             fingerprints,
+            compatibility_warnings,
         });
         self.last = Some(product.clone());
         self.pending_invalidated.clear();

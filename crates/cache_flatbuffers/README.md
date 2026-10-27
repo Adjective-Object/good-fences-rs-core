@@ -1,6 +1,6 @@
 # Typed source-cache FlatBuffers
 
-**Production source-cache backend: schema 22/extractor 40, `.seg.fb`.**
+**Production source-cache backend: schema 23/extractor 42, `.seg.fb`.**
 `segment_cache` reads these immutable buffers through AST/Ecco views and runs
 full semantic validation before exposing checked records. Byte-backed parsed
 modules feed graph linking, effect solving and native emission without unpacking
@@ -18,7 +18,7 @@ persisted record shape, rather than embedding CBOR bytes:
 | --- | --- |
 | `common.fbs` | `ParserConfig`; fixed-width spans, XXH3-128, declaration fingerprints; optional IDs without sentinel collisions |
 | `ecco.fbs` | `HazardFields`, `Update`, `Definition`, `LocalFacts`, `GlobalSymbol`, `FunctionSignature`, `CallResult`, `OwnedFunction`, `ParsedSymbol`, `ExternalReference`, `ParsedRoot`, `ParsedValue`, `DefinitionMatch`, `ParsedFile` |
-| `syntax.fbs` | `Binding`, `Reference`, `Dependency`, `ImportBinding`, `Export`, `Directive`, `EffectSite`, `IdentifierCallee`, `InvocationArgument`, `Invocation`, `ExecutionContext`, `ExecutionFacts`, `PlacementFacts`, `NameRestrictions`, `NamespaceUse`, `SourceSlot`, `CalleePlan`, `PureLowering`, `Operation`, `SegmentRecipe`, `DynamicNamespace`, `LazyModuleCandidate`, `LazyOptionProperty`, `LazySelectorCandidate`, `EmissionFacts`, `PolicyViolation`, `ModuleFacts` |
+| `syntax.fbs` | `Binding`, `Reference`, `Dependency`, `ImportBinding`, `Export`, `Directive`, `EffectSite`, `IdentifierCallee`, `InvocationArgument`, `Invocation`, `ExecutionContext`, `ExecutionFacts`, `PlacementFacts`, `NameRestrictions`, `NamespaceUse`, `SourceSlot`, `CalleePlan`, `PureLowering`, `Operation`, `SegmentRecipe`, `DynamicNamespace`, `LazyModuleCandidate`, `LazyOptionProperty`, `LazySelectorCandidate`, `EmissionFacts`, `PolicyViolation`, `CommonJsSurface`, `CommonJsExportAccess`, `CommonJsExportName`, `ModuleFacts` |
 | `module.fbs` | `CachedModule`, ESM/CommonJS body alternatives, ordered statement spans |
 | `cache.fbs` | `SourceProvenance`, `CacheRecord` |
 | `style.fbs` | Independent stylesheet original/prepared/config identities, URL occurrences and CSS Modules names/scopes/compositions/animations |
@@ -70,7 +70,7 @@ Its `facts()` tables borrow immutable private backing; object APIs are cold
 construction only. `encode_in` requires an explicit writable snapshot directory.
 The bundler separately owns scoped source observations and freshness validation.
 These records contain no graph resolution, solved exports or repair decisions and
-do not change source schema 22/extractor 40.
+do not change source schema 23/extractor 42.
 
 The owner retains `SharedBytes`, a payload endpoint and the verified module
 range. `WireRecord`, `WireEcco` and `WireSourceMap` accept the same backing.
@@ -103,10 +103,15 @@ while graph ranges and derived analysis/emission plans are explicitly owned.
 AST and bundler differential tests cover complete record equality, byte borrowing,
 owner lifetime, execution/recipe validation, ESM/CJS outputs and parallel emission.
 
-Schema 22/extractor 40 are active production identities, included in bundler
+Schema 23/extractor 42 are active production identities, included in bundler
 source-parse fingerprints. Atomic sibling publication uses `.seg.fb.stage-*`;
 inventory ignores current and legacy `.seg.cbor` artifacts, without deleting them.
 Old formats miss/rebuild. This crate's handwritten wire path does not use Serde.
+Schema 23 requires typed CJS potential-name/access/unknown-site tables; extractor
+41 also retains literal string-bracket namespace reads. Extractor 42 invalidates
+old consumed-object-replacement evidence: only discarded standalone assignments
+prove a nonescaping replacement; no wire layout change is needed. These do not alter
+independent GFTY versions or bounded constant extraction.
 Owned AST provenance now hashes typed module bytes too; CBOR remains only in the
 independent declaration-configuration fingerprint and debug/test fixtures.
 
@@ -158,7 +163,7 @@ not construction; its schema name now matches the existing interpreter meaning.
 ## Independent resolution records
 
 `resolution.fbs` defines schema **2** (`GFRS`), independent of source schema
-22/extractor 40. `resolution::WireResolution` retains private `Arc<[u8]>` bytes.
+23/extractor 42. `resolution::WireResolution` retains private `Arc<[u8]>` bytes.
 Source/map hashes, extraction module seals, filesystem proof content seals and
 all three framing checksums use 16-byte big-endian XXH3-128, matching existing
 fingerprint byte order. These are corruption checks, not authentication.

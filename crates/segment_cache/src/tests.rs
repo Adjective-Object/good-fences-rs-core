@@ -18,6 +18,158 @@ fn envelope(record: &FixtureRecord) -> Vec<u8> {
 }
 
 #[test]
+fn commonjs_surface_is_checked_borrowed_and_never_reparsed() {
+    let source = r#"exports.keep = 1; module.exports.other = 2;
+        module["exports"] = { "\uD83D\uDE00": 3, 'A': 4, ['\x42']: 5 };
+        exports['\101'] = 6; function shadow(exports) { exports.dynamic[key] = 9; }"#;
+    let original = record(source, "api.cjs", ModuleFormat::CommonJs);
+    let parses = ast_segmenter::module_parse_count();
+    let cached =
+        CacheRecord::decode(&original.encode(source).unwrap(), source, original.config()).unwrap();
+    let parsed = cached.to_parsed(source).unwrap();
+    assert!(matches!(
+        parsed.facts(),
+        ast_segmenter::views::ModuleFacts::Wire(_)
+    ));
+    let surface = parsed.facts().commonjs_surface();
+    assert_eq!(surface, original.module().facts().commonjs_surface());
+    assert!(surface.unknown().is_empty());
+    assert_eq!(
+        surface
+            .accesses()
+            .iter()
+            .flat_map(|a| a.names().iter())
+            .map(|n| n.name())
+            .collect::<Vec<_>>(),
+        ["keep", "other", "😀", "A", "B", "A"]
+    );
+    for edit in [
+        |v: &mut serde_json::Value| v.clear("module.facts.commonjs_surface.accesses"),
+        |v: &mut serde_json::Value| {
+            v.set(
+                "module.facts.commonjs_surface.accesses.0.reference",
+                u32::MAX,
+            )
+        },
+        |v: &mut serde_json::Value| {
+            v.set(
+                "module.facts.commonjs_surface.accesses.0.names.0.name",
+                "invented",
+            )
+        },
+        |v: &mut serde_json::Value| {
+            v.set(
+                "module.facts.commonjs_surface.accesses.0.names.0.span.end",
+                u32::MAX,
+            )
+        },
+        |v: &mut serde_json::Value| {
+            v.set(
+                "module.facts.commonjs_surface.accesses.0.object_assignment",
+                true,
+            )
+        },
+        |v: &mut serde_json::Value| v.set("schema", SCHEMA_VERSION - 1),
+        |v: &mut serde_json::Value| v.set("extractor", EXTRACTOR_VERSION - 1),
+    ] {
+        let damaged = corrupt(&original, edit);
+        assert!(damaged.encode(source).is_err());
+        assert!(CacheRecord::decode(&damaged.envelope(true), source, original.config()).is_err());
+    }
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+}
+
+#[test]
+fn commonjs_surface_review_replacement_result_escapes_are_unknown_on_hits() {
+    for source in [
+        "const alias = module.exports = {}; alias.E = 1;",
+        "consume(module.exports = {});",
+        "function replace(){ return module.exports = {}; }",
+        "const replace = () => module.exports = {};",
+        "const target={}; target.alias = module.exports = {};",
+    ] {
+        let original = record(source, "api.cjs", ModuleFormat::CommonJs);
+        let parses = ast_segmenter::module_parse_count();
+        let cached =
+            CacheRecord::decode(&original.encode(source).unwrap(), source, original.config())
+                .unwrap();
+        let surface = cached.module().facts().commonjs_surface();
+        assert!(!surface.unknown().is_empty(), "{source}");
+        assert!(
+            surface.accesses().iter().all(|a| !a.object_assignment()),
+            "{source}"
+        );
+        let damaged = corrupt(&original, |v| {
+            v.clear("module.facts.commonjs_surface.unknown")
+        });
+        assert!(
+            CacheRecord::decode(&damaged.envelope(true), source, original.config()).is_err(),
+            "{source}"
+        );
+        assert_eq!(ast_segmenter::module_parse_count(), parses);
+    }
+    for source in ["module.exports = {};", "((module.exports = {keep:1}));"] {
+        let original = record(source, "api.cjs", ModuleFormat::CommonJs);
+        let cached =
+            CacheRecord::decode(&original.encode(source).unwrap(), source, original.config())
+                .unwrap();
+        assert!(cached
+            .module()
+            .facts()
+            .commonjs_surface()
+            .unknown()
+            .is_empty());
+        assert!(cached
+            .module()
+            .facts()
+            .commonjs_surface()
+            .accesses()
+            .get(0)
+            .unwrap()
+            .object_assignment());
+    }
+}
+
+#[test]
+fn commonjs_surface_unknown_boundaries_are_retained_and_checked() {
+    for source in [
+        "exports[key] = 1;",
+        "consume(exports);",
+        "module.exports = dynamic;",
+        "module.exports = {...value};",
+        "module.exports = {get E() { return 1 }};",
+        "exports.factory();",
+        "exports.tag`text`;",
+        "this.E = 1;",
+        "module.exports = {__proto__: value};",
+        "exports.__proto__ = value;",
+        "require('./cycle'); exports.keep = 1;",
+    ] {
+        let original = record(source, "api.cjs", ModuleFormat::CommonJs);
+        let cached =
+            CacheRecord::decode(&original.encode(source).unwrap(), source, original.config())
+                .unwrap();
+        assert!(
+            !cached
+                .module()
+                .facts()
+                .commonjs_surface()
+                .unknown()
+                .is_empty(),
+            "{source}"
+        );
+        if source != "this.E = 1;" {
+            let damaged = corrupt(&original, |v| {
+                v.clear("module.facts.commonjs_surface.unknown")
+            });
+            // Some supported receiver/property cases retain an access too; their
+            // extraction seal still rejects alteration without an explicit reseal.
+            assert!(damaged.encode(source).is_err(), "{source}");
+        }
+    }
+}
+
+#[test]
 fn import_meta_env_roundtrips_typed_occurrences_and_rejects_damaged_links() {
     let source = r#"export const env = import.meta.env;
         export const later = () => [(import.meta)["\x65nv"], ((import.meta)).\u0065nv, import.meta?.env, import.meta?.['env'], import.meta[((('env')))], import.meta.\u{65}nv];"#;

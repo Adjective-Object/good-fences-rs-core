@@ -25301,6 +25301,537 @@ impl PolicyViolationT {
     })
   }
 }
+pub enum CommonJsExportNameOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct CommonJsExportName<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for CommonJsExportName<'a> {
+  type Inner = CommonJsExportName<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> CommonJsExportName<'a> {
+  pub const VT_NAME: flatbuffers::VOffsetT = 4;
+  pub const VT_SPAN: flatbuffers::VOffsetT = 6;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    CommonJsExportName { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    args: &'args CommonJsExportNameArgs<'args>
+  ) -> flatbuffers::WIPOffset<CommonJsExportName<'bldr>> {
+    let mut builder = CommonJsExportNameBuilder::new(_fbb);
+    if let Some(x) = args.span { builder.add_span(x); }
+    if let Some(x) = args.name { builder.add_name(x); }
+    builder.finish()
+  }
+
+  pub fn unpack(&self) -> CommonJsExportNameT {
+    let name = {
+      let x = self.name();
+      x.to_string()
+    };
+    let span = {
+      let x = self.span();
+      x.unpack()
+    };
+    CommonJsExportNameT {
+      name,
+      span,
+    }
+  }
+
+  #[inline]
+  pub fn name(&self) -> &'a str {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(CommonJsExportName::VT_NAME, None).unwrap()}
+  }
+  #[inline]
+  pub fn span(&self) -> &'a Span {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<Span>(CommonJsExportName::VT_SPAN, None).unwrap()}
+  }
+}
+
+impl flatbuffers::Verifiable for CommonJsExportName<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, true)?
+     .visit_field::<Span>("span", Self::VT_SPAN, true)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct CommonJsExportNameArgs<'a> {
+    pub name: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub span: Option<&'a Span>,
+}
+impl<'a> Default for CommonJsExportNameArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    CommonJsExportNameArgs {
+      name: None, // required field
+      span: None, // required field
+    }
+  }
+}
+
+pub struct CommonJsExportNameBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> CommonJsExportNameBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_name(&mut self, name: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(CommonJsExportName::VT_NAME, name);
+  }
+  #[inline]
+  pub fn add_span(&mut self, span: &Span) {
+    self.fbb_.push_slot_always::<&Span>(CommonJsExportName::VT_SPAN, span);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> CommonJsExportNameBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    CommonJsExportNameBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<CommonJsExportName<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    self.fbb_.required(o, CommonJsExportName::VT_NAME,"name");
+    self.fbb_.required(o, CommonJsExportName::VT_SPAN,"span");
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for CommonJsExportName<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("CommonJsExportName");
+      ds.field("name", &self.name());
+      ds.field("span", &self.span());
+      ds.finish()
+  }
+}
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommonJsExportNameT {
+  pub name: String,
+  pub span: SpanT,
+}
+impl Default for CommonJsExportNameT {
+  fn default() -> Self {
+    Self {
+      name: "".to_string(),
+      span: Default::default(),
+    }
+  }
+}
+impl CommonJsExportNameT {
+  pub fn pack<'b, A: flatbuffers::Allocator + 'b>(
+    &self,
+    _fbb: &mut flatbuffers::FlatBufferBuilder<'b, A>
+  ) -> flatbuffers::WIPOffset<CommonJsExportName<'b>> {
+    let name = Some({
+      let x = &self.name;
+      _fbb.create_string(x)
+    });
+    let span_tmp = Some(self.span.pack());
+    let span = span_tmp.as_ref();
+    CommonJsExportName::create(_fbb, &CommonJsExportNameArgs{
+      name,
+      span,
+    })
+  }
+}
+pub enum CommonJsExportAccessOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct CommonJsExportAccess<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for CommonJsExportAccess<'a> {
+  type Inner = CommonJsExportAccess<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> CommonJsExportAccess<'a> {
+  pub const VT_REFERENCE: flatbuffers::VOffsetT = 4;
+  pub const VT_SPAN: flatbuffers::VOffsetT = 6;
+  pub const VT_OBJECT_ASSIGNMENT: flatbuffers::VOffsetT = 8;
+  pub const VT_NAMES: flatbuffers::VOffsetT = 10;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    CommonJsExportAccess { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    args: &'args CommonJsExportAccessArgs<'args>
+  ) -> flatbuffers::WIPOffset<CommonJsExportAccess<'bldr>> {
+    let mut builder = CommonJsExportAccessBuilder::new(_fbb);
+    if let Some(x) = args.names { builder.add_names(x); }
+    if let Some(x) = args.span { builder.add_span(x); }
+    builder.add_reference(args.reference);
+    builder.add_object_assignment(args.object_assignment);
+    builder.finish()
+  }
+
+  pub fn unpack(&self) -> CommonJsExportAccessT {
+    let reference = self.reference();
+    let span = {
+      let x = self.span();
+      x.unpack()
+    };
+    let object_assignment = self.object_assignment();
+    let names = {
+      let x = self.names();
+      x.iter().map(|t| t.unpack()).collect()
+    };
+    CommonJsExportAccessT {
+      reference,
+      span,
+      object_assignment,
+      names,
+    }
+  }
+
+  #[inline]
+  pub fn reference(&self) -> u32 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u32>(CommonJsExportAccess::VT_REFERENCE, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn span(&self) -> &'a Span {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<Span>(CommonJsExportAccess::VT_SPAN, None).unwrap()}
+  }
+  #[inline]
+  pub fn object_assignment(&self) -> bool {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<bool>(CommonJsExportAccess::VT_OBJECT_ASSIGNMENT, Some(false)).unwrap()}
+  }
+  #[inline]
+  pub fn names(&self) -> flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<CommonJsExportName<'a>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<CommonJsExportName>>>>(CommonJsExportAccess::VT_NAMES, None).unwrap()}
+  }
+}
+
+impl flatbuffers::Verifiable for CommonJsExportAccess<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<u32>("reference", Self::VT_REFERENCE, false)?
+     .visit_field::<Span>("span", Self::VT_SPAN, true)?
+     .visit_field::<bool>("object_assignment", Self::VT_OBJECT_ASSIGNMENT, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<CommonJsExportName>>>>("names", Self::VT_NAMES, true)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct CommonJsExportAccessArgs<'a> {
+    pub reference: u32,
+    pub span: Option<&'a Span>,
+    pub object_assignment: bool,
+    pub names: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<CommonJsExportName<'a>>>>>,
+}
+impl<'a> Default for CommonJsExportAccessArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    CommonJsExportAccessArgs {
+      reference: 0,
+      span: None, // required field
+      object_assignment: false,
+      names: None, // required field
+    }
+  }
+}
+
+pub struct CommonJsExportAccessBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> CommonJsExportAccessBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_reference(&mut self, reference: u32) {
+    self.fbb_.push_slot::<u32>(CommonJsExportAccess::VT_REFERENCE, reference, 0);
+  }
+  #[inline]
+  pub fn add_span(&mut self, span: &Span) {
+    self.fbb_.push_slot_always::<&Span>(CommonJsExportAccess::VT_SPAN, span);
+  }
+  #[inline]
+  pub fn add_object_assignment(&mut self, object_assignment: bool) {
+    self.fbb_.push_slot::<bool>(CommonJsExportAccess::VT_OBJECT_ASSIGNMENT, object_assignment, false);
+  }
+  #[inline]
+  pub fn add_names(&mut self, names: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<CommonJsExportName<'b >>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(CommonJsExportAccess::VT_NAMES, names);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> CommonJsExportAccessBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    CommonJsExportAccessBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<CommonJsExportAccess<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    self.fbb_.required(o, CommonJsExportAccess::VT_SPAN,"span");
+    self.fbb_.required(o, CommonJsExportAccess::VT_NAMES,"names");
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for CommonJsExportAccess<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("CommonJsExportAccess");
+      ds.field("reference", &self.reference());
+      ds.field("span", &self.span());
+      ds.field("object_assignment", &self.object_assignment());
+      ds.field("names", &self.names());
+      ds.finish()
+  }
+}
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommonJsExportAccessT {
+  pub reference: u32,
+  pub span: SpanT,
+  pub object_assignment: bool,
+  pub names: Vec<CommonJsExportNameT>,
+}
+impl Default for CommonJsExportAccessT {
+  fn default() -> Self {
+    Self {
+      reference: 0,
+      span: Default::default(),
+      object_assignment: false,
+      names: Default::default(),
+    }
+  }
+}
+impl CommonJsExportAccessT {
+  pub fn pack<'b, A: flatbuffers::Allocator + 'b>(
+    &self,
+    _fbb: &mut flatbuffers::FlatBufferBuilder<'b, A>
+  ) -> flatbuffers::WIPOffset<CommonJsExportAccess<'b>> {
+    let reference = self.reference;
+    let span_tmp = Some(self.span.pack());
+    let span = span_tmp.as_ref();
+    let object_assignment = self.object_assignment;
+    let names = Some({
+      let x = &self.names;
+      let w: Vec<_> = x.iter().map(|t| t.pack(_fbb)).collect();_fbb.create_vector(&w)
+    });
+    CommonJsExportAccess::create(_fbb, &CommonJsExportAccessArgs{
+      reference,
+      span,
+      object_assignment,
+      names,
+    })
+  }
+}
+pub enum CommonJsSurfaceOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct CommonJsSurface<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for CommonJsSurface<'a> {
+  type Inner = CommonJsSurface<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> CommonJsSurface<'a> {
+  pub const VT_ACCESSES: flatbuffers::VOffsetT = 4;
+  pub const VT_UNKNOWN: flatbuffers::VOffsetT = 6;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    CommonJsSurface { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    args: &'args CommonJsSurfaceArgs<'args>
+  ) -> flatbuffers::WIPOffset<CommonJsSurface<'bldr>> {
+    let mut builder = CommonJsSurfaceBuilder::new(_fbb);
+    if let Some(x) = args.unknown { builder.add_unknown(x); }
+    if let Some(x) = args.accesses { builder.add_accesses(x); }
+    builder.finish()
+  }
+
+  pub fn unpack(&self) -> CommonJsSurfaceT {
+    let accesses = {
+      let x = self.accesses();
+      x.iter().map(|t| t.unpack()).collect()
+    };
+    let unknown = {
+      let x = self.unknown();
+      x.iter().map(|t| t.unpack()).collect()
+    };
+    CommonJsSurfaceT {
+      accesses,
+      unknown,
+    }
+  }
+
+  #[inline]
+  pub fn accesses(&self) -> flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<CommonJsExportAccess<'a>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<CommonJsExportAccess>>>>(CommonJsSurface::VT_ACCESSES, None).unwrap()}
+  }
+  #[inline]
+  pub fn unknown(&self) -> flatbuffers::Vector<'a, Span> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, Span>>>(CommonJsSurface::VT_UNKNOWN, None).unwrap()}
+  }
+}
+
+impl flatbuffers::Verifiable for CommonJsSurface<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<CommonJsExportAccess>>>>("accesses", Self::VT_ACCESSES, true)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, Span>>>("unknown", Self::VT_UNKNOWN, true)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct CommonJsSurfaceArgs<'a> {
+    pub accesses: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<CommonJsExportAccess<'a>>>>>,
+    pub unknown: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, Span>>>,
+}
+impl<'a> Default for CommonJsSurfaceArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    CommonJsSurfaceArgs {
+      accesses: None, // required field
+      unknown: None, // required field
+    }
+  }
+}
+
+pub struct CommonJsSurfaceBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> CommonJsSurfaceBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_accesses(&mut self, accesses: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<CommonJsExportAccess<'b >>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(CommonJsSurface::VT_ACCESSES, accesses);
+  }
+  #[inline]
+  pub fn add_unknown(&mut self, unknown: flatbuffers::WIPOffset<flatbuffers::Vector<'b , Span>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(CommonJsSurface::VT_UNKNOWN, unknown);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> CommonJsSurfaceBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    CommonJsSurfaceBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<CommonJsSurface<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    self.fbb_.required(o, CommonJsSurface::VT_ACCESSES,"accesses");
+    self.fbb_.required(o, CommonJsSurface::VT_UNKNOWN,"unknown");
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for CommonJsSurface<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("CommonJsSurface");
+      ds.field("accesses", &self.accesses());
+      ds.field("unknown", &self.unknown());
+      ds.finish()
+  }
+}
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommonJsSurfaceT {
+  pub accesses: Vec<CommonJsExportAccessT>,
+  pub unknown: Vec<SpanT>,
+}
+impl Default for CommonJsSurfaceT {
+  fn default() -> Self {
+    Self {
+      accesses: Default::default(),
+      unknown: Default::default(),
+    }
+  }
+}
+impl CommonJsSurfaceT {
+  pub fn pack<'b, A: flatbuffers::Allocator + 'b>(
+    &self,
+    _fbb: &mut flatbuffers::FlatBufferBuilder<'b, A>
+  ) -> flatbuffers::WIPOffset<CommonJsSurface<'b>> {
+    let accesses = Some({
+      let x = &self.accesses;
+      let w: Vec<_> = x.iter().map(|t| t.pack(_fbb)).collect();_fbb.create_vector(&w)
+    });
+    let unknown = Some({
+      let x = &self.unknown;
+      let w: Vec<_> = x.iter().map(|t| t.pack()).collect();_fbb.create_vector(&w)
+    });
+    CommonJsSurface::create(_fbb, &CommonJsSurfaceArgs{
+      accesses,
+      unknown,
+    })
+  }
+}
 pub enum ModuleFactsOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
@@ -25321,17 +25852,18 @@ impl<'a> ModuleFacts<'a> {
   pub const VT_ECCO: flatbuffers::VOffsetT = 6;
   pub const VT_ECCO_DECLARATIONS_HASH: flatbuffers::VOffsetT = 8;
   pub const VT_COMMONJS: flatbuffers::VOffsetT = 10;
-  pub const VT_TOP_LEVEL_AWAIT: flatbuffers::VOffsetT = 12;
-  pub const VT_EFFECTS: flatbuffers::VOffsetT = 14;
-  pub const VT_INVOCATIONS: flatbuffers::VOffsetT = 16;
-  pub const VT_EMISSION: flatbuffers::VOffsetT = 18;
-  pub const VT_BINDINGS: flatbuffers::VOffsetT = 20;
-  pub const VT_REFERENCES: flatbuffers::VOffsetT = 22;
-  pub const VT_DEPENDENCIES: flatbuffers::VOffsetT = 24;
-  pub const VT_IMPORTS: flatbuffers::VOffsetT = 26;
-  pub const VT_EXPORTS: flatbuffers::VOffsetT = 28;
-  pub const VT_DIRECTIVES: flatbuffers::VOffsetT = 30;
-  pub const VT_HASHBANG: flatbuffers::VOffsetT = 32;
+  pub const VT_COMMONJS_SURFACE: flatbuffers::VOffsetT = 12;
+  pub const VT_TOP_LEVEL_AWAIT: flatbuffers::VOffsetT = 14;
+  pub const VT_EFFECTS: flatbuffers::VOffsetT = 16;
+  pub const VT_INVOCATIONS: flatbuffers::VOffsetT = 18;
+  pub const VT_EMISSION: flatbuffers::VOffsetT = 20;
+  pub const VT_BINDINGS: flatbuffers::VOffsetT = 22;
+  pub const VT_REFERENCES: flatbuffers::VOffsetT = 24;
+  pub const VT_DEPENDENCIES: flatbuffers::VOffsetT = 26;
+  pub const VT_IMPORTS: flatbuffers::VOffsetT = 28;
+  pub const VT_EXPORTS: flatbuffers::VOffsetT = 30;
+  pub const VT_DIRECTIVES: flatbuffers::VOffsetT = 32;
+  pub const VT_HASHBANG: flatbuffers::VOffsetT = 34;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -25354,6 +25886,7 @@ impl<'a> ModuleFacts<'a> {
     if let Some(x) = args.invocations { builder.add_invocations(x); }
     if let Some(x) = args.effects { builder.add_effects(x); }
     if let Some(x) = args.top_level_await { builder.add_top_level_await(x); }
+    if let Some(x) = args.commonjs_surface { builder.add_commonjs_surface(x); }
     if let Some(x) = args.ecco_declarations_hash { builder.add_ecco_declarations_hash(x); }
     if let Some(x) = args.ecco { builder.add_ecco(x); }
     if let Some(x) = args.policy_violations { builder.add_policy_violations(x); }
@@ -25374,6 +25907,10 @@ impl<'a> ModuleFacts<'a> {
       x.unpack()
     };
     let commonjs = self.commonjs();
+    let commonjs_surface = {
+      let x = self.commonjs_surface();
+      Box::new(x.unpack())
+    };
     let top_level_await = {
       let x = self.top_level_await();
       x.iter().map(|t| t.unpack()).collect()
@@ -25422,6 +25959,7 @@ impl<'a> ModuleFacts<'a> {
       ecco,
       ecco_declarations_hash,
       commonjs,
+      commonjs_surface,
       top_level_await,
       effects,
       invocations,
@@ -25463,6 +26001,13 @@ impl<'a> ModuleFacts<'a> {
     // Created from valid Table for this object
     // which contains a valid value in this slot
     unsafe { self._tab.get::<bool>(ModuleFacts::VT_COMMONJS, Some(false)).unwrap()}
+  }
+  #[inline]
+  pub fn commonjs_surface(&self) -> CommonJsSurface<'a> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<CommonJsSurface>>(ModuleFacts::VT_COMMONJS_SURFACE, None).unwrap()}
   }
   #[inline]
   pub fn top_level_await(&self) -> flatbuffers::Vector<'a, Span> {
@@ -25554,6 +26099,7 @@ impl flatbuffers::Verifiable for ModuleFacts<'_> {
      .visit_field::<flatbuffers::ForwardsUOffset<ParsedFile>>("ecco", Self::VT_ECCO, false)?
      .visit_field::<Fingerprint>("ecco_declarations_hash", Self::VT_ECCO_DECLARATIONS_HASH, true)?
      .visit_field::<bool>("commonjs", Self::VT_COMMONJS, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<CommonJsSurface>>("commonjs_surface", Self::VT_COMMONJS_SURFACE, true)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, Span>>>("top_level_await", Self::VT_TOP_LEVEL_AWAIT, true)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<EffectSite>>>>("effects", Self::VT_EFFECTS, true)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Invocation>>>>("invocations", Self::VT_INVOCATIONS, true)?
@@ -25574,6 +26120,7 @@ pub struct ModuleFactsArgs<'a> {
     pub ecco: Option<flatbuffers::WIPOffset<ParsedFile<'a>>>,
     pub ecco_declarations_hash: Option<&'a Fingerprint>,
     pub commonjs: bool,
+    pub commonjs_surface: Option<flatbuffers::WIPOffset<CommonJsSurface<'a>>>,
     pub top_level_await: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, Span>>>,
     pub effects: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<EffectSite<'a>>>>>,
     pub invocations: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Invocation<'a>>>>>,
@@ -25594,6 +26141,7 @@ impl<'a> Default for ModuleFactsArgs<'a> {
       ecco: None,
       ecco_declarations_hash: None, // required field
       commonjs: false,
+      commonjs_surface: None, // required field
       top_level_await: None, // required field
       effects: None, // required field
       invocations: None, // required field
@@ -25629,6 +26177,10 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> ModuleFactsBuilder<'a, 'b, A> {
   #[inline]
   pub fn add_commonjs(&mut self, commonjs: bool) {
     self.fbb_.push_slot::<bool>(ModuleFacts::VT_COMMONJS, commonjs, false);
+  }
+  #[inline]
+  pub fn add_commonjs_surface(&mut self, commonjs_surface: flatbuffers::WIPOffset<CommonJsSurface<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<CommonJsSurface>>(ModuleFacts::VT_COMMONJS_SURFACE, commonjs_surface);
   }
   #[inline]
   pub fn add_top_level_await(&mut self, top_level_await: flatbuffers::WIPOffset<flatbuffers::Vector<'b , Span>>) {
@@ -25687,6 +26239,7 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> ModuleFactsBuilder<'a, 'b, A> {
     let o = self.fbb_.end_table(self.start_);
     self.fbb_.required(o, ModuleFacts::VT_POLICY_VIOLATIONS,"policy_violations");
     self.fbb_.required(o, ModuleFacts::VT_ECCO_DECLARATIONS_HASH,"ecco_declarations_hash");
+    self.fbb_.required(o, ModuleFacts::VT_COMMONJS_SURFACE,"commonjs_surface");
     self.fbb_.required(o, ModuleFacts::VT_TOP_LEVEL_AWAIT,"top_level_await");
     self.fbb_.required(o, ModuleFacts::VT_EFFECTS,"effects");
     self.fbb_.required(o, ModuleFacts::VT_INVOCATIONS,"invocations");
@@ -25708,6 +26261,7 @@ impl core::fmt::Debug for ModuleFacts<'_> {
       ds.field("ecco", &self.ecco());
       ds.field("ecco_declarations_hash", &self.ecco_declarations_hash());
       ds.field("commonjs", &self.commonjs());
+      ds.field("commonjs_surface", &self.commonjs_surface());
       ds.field("top_level_await", &self.top_level_await());
       ds.field("effects", &self.effects());
       ds.field("invocations", &self.invocations());
@@ -25729,6 +26283,7 @@ pub struct ModuleFactsT {
   pub ecco: Option<Box<ParsedFileT>>,
   pub ecco_declarations_hash: FingerprintT,
   pub commonjs: bool,
+  pub commonjs_surface: Box<CommonJsSurfaceT>,
   pub top_level_await: Vec<SpanT>,
   pub effects: Vec<EffectSiteT>,
   pub invocations: Vec<InvocationT>,
@@ -25748,6 +26303,7 @@ impl Default for ModuleFactsT {
       ecco: None,
       ecco_declarations_hash: Default::default(),
       commonjs: false,
+      commonjs_surface: Default::default(),
       top_level_await: Default::default(),
       effects: Default::default(),
       invocations: Default::default(),
@@ -25777,6 +26333,10 @@ impl ModuleFactsT {
     let ecco_declarations_hash_tmp = Some(self.ecco_declarations_hash.pack());
     let ecco_declarations_hash = ecco_declarations_hash_tmp.as_ref();
     let commonjs = self.commonjs;
+    let commonjs_surface = Some({
+      let x = &self.commonjs_surface;
+      x.pack(_fbb)
+    });
     let top_level_await = Some({
       let x = &self.top_level_await;
       let w: Vec<_> = x.iter().map(|t| t.pack()).collect();_fbb.create_vector(&w)
@@ -25825,6 +26385,7 @@ impl ModuleFactsT {
       ecco,
       ecco_declarations_hash,
       commonjs,
+      commonjs_surface,
       top_level_await,
       effects,
       invocations,

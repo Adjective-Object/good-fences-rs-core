@@ -1,5 +1,24 @@
 # bundler
 
+Const-enum compatibility is an attempt-local prepared-source overlay, never
+consumer inlining or a persisted linking decision. Rebuild from original checked
+JS plus bounded borrowed declaration constants; alias exports share one object.
+Restore originals before changed declaration evidence can hide missing diagnostics,
+including failed attempts. Retain positive/negative observations and freshly check
+final/no-op boundaries; no-op derived reuse also checks original source/resolution
+and map identities, including original input identity, extraction seal and complete
+compiler preparation metadata. Reject competing declaration origins before any
+iteration can hide them with generated exports; ambiguity is freshly checked on
+every attempt. Generated enum regions are explicitly unmapped, inserted
+before the recorded last map directive; original executable offsets remain exact.
+Warnings retain each requesting occurrence and live on BuildProduct as well as
+BuildResult, replaying through bundler::diagnostic. No original-TS capture/erasure
+belongs to this compatibility overlay.
+Mixed CJS recovery consults checked source-local potential names/unknown sites,
+not the graph's permissive opaque export identities. Real/potential names and
+unknown surfaces never read companions. Dot/string-bracket namespace demands use
+cached recipes; require-only reflection/escape remains conservative.
+
 Original-TypeScript/declaration evidence shares TypeOnlyFacts (`GFTY`, independent
 schema/extractor 1). Extract from the original parsed TS tree and checked enum-
 enabled semantics, never generic JS or a second parse before transformation.

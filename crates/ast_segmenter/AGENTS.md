@@ -108,6 +108,13 @@ never claims an existing await has executed.
 hashbang, never independently tree-shakable internal statements. Classify
 unresolved wrapper references separately from lexical shadows; dependency
 function containment is syntax metadata, not eager evaluation permission.
+`commonjs_surface` retains wrapper-reference-linked potential property names and
+unknown-site spans from that same AST, never solved exports. Static property
+accesses and standalone discarded plain object assignments cover names; consumed
+replacement results remain unknown (extractor 42). Escapes, dynamic keys/objects,
+receivers, `this`, dependencies/cycles and wrapper-policy/shadow sites stay unknown.
+Literal string-computed import namespace reads share DirectRead recipes with dot
+reads; calls/tags/writes/deletes still retain native namespace semantics.
 `policy` is the checked source-local support gate; target format, assets and
 externals remain resolver/linker checks. Low-level parsing and legacy adapters
 intentionally accept a broader syntax set.

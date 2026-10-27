@@ -668,5 +668,6 @@ pub(crate) fn validate_module(
         span(source, d.span())?;
     }
     crate::validate_emission::validate(module, source)?;
+    crate::validate_commonjs::validate(facts, source)?;
     Ok(())
 }

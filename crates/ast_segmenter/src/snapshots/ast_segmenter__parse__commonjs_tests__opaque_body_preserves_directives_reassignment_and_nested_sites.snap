@@ -28,6 +28,69 @@ ModuleFacts {
         ),
     ),
     commonjs: true,
+    commonjs_surface: CommonJsSurface {
+        accesses: [
+            CommonJsExportAccess {
+                reference: 5,
+                span: Span {
+                    start: 206,
+                    end: 228,
+                },
+                object_assignment: false,
+                names: [
+                    CommonJsExportName {
+                        name: "load",
+                        span: Span {
+                            start: 224,
+                            end: 228,
+                        },
+                    },
+                ],
+            },
+        ],
+        unknown: [
+            Span {
+                start: 48,
+                end: 55,
+            },
+            Span {
+                start: 48,
+                end: 65,
+            },
+            Span {
+                start: 67,
+                end: 73,
+            },
+            Span {
+                start: 67,
+                end: 89,
+            },
+            Span {
+                start: 91,
+                end: 98,
+            },
+            Span {
+                start: 147,
+                end: 154,
+            },
+            Span {
+                start: 147,
+                end: 164,
+            },
+            Span {
+                start: 187,
+                end: 204,
+            },
+            Span {
+                start: 256,
+                end: 263,
+            },
+            Span {
+                start: 256,
+                end: 281,
+            },
+        ],
+    },
     top_level_await: [],
     effects: [
         EffectSite {

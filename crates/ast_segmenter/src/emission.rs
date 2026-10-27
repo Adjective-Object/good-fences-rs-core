@@ -770,6 +770,27 @@ impl<'a> Visit<'a> for Extractor<'_> {
         }
         walk::walk_static_member_expression(self, member);
     }
+    fn visit_computed_member_expression(&mut self, member: &ComputedMemberExpression<'a>) {
+        if self.blocked == NamespaceReason::Other {
+            if let (Expression::Identifier(object), Expression::StringLiteral(property)) =
+                (&member.object, member.expression.get_inner_expression())
+            {
+                if let (Some(i), Some(property)) = (
+                    self.namespace(object.span),
+                    property.value.as_str().filter(|p| !p.is_empty()),
+                ) {
+                    self.namespace_uses.insert(
+                        i,
+                        NamespaceAccess::DirectRead {
+                            member: member.span,
+                            property: property.to_owned(),
+                        },
+                    );
+                }
+            }
+        }
+        walk::walk_computed_member_expression(self, member);
+    }
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
         self.invocation(call.span, &call.callee);
         let saved = self.blocked;

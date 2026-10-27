@@ -1,6 +1,7 @@
 use oxc_ast::ast::ModuleExportName;
 use raw_module_deps::Name;
 
+mod commonjs_surface;
 pub mod effects;
 pub mod emission;
 pub mod execution;

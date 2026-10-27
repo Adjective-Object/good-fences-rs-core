@@ -61,7 +61,7 @@ impl Deref for Text {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct PreparedText {
     identity: InputIdentity,
     generated: Option<Text>,
@@ -92,6 +92,10 @@ impl PreparedText {
 
     pub(crate) fn matches_input(&self, input: &[u8]) -> bool {
         self.identity.matches(input)
+    }
+
+    pub(crate) fn input_identity(&self) -> InputIdentity {
+        self.identity
     }
 
     pub(crate) fn read_input(&self, path: &Path) -> eyre::Result<Vec<u8>> {

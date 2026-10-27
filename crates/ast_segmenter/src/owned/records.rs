@@ -466,6 +466,7 @@ pub struct ModuleFacts {
     ecco_declarations_hash: crate::DeclarationFingerprint,
     /// Effective parser format, including package policy for extensionless/.js input.
     commonjs: bool,
+    commonjs_surface: CommonJsSurface,
     /// Syntax-local await/for-await sites outside functions, not a schedule.
     #[serde(with = "span_serde::list")]
     top_level_await: Vec<Span>,
@@ -503,6 +504,7 @@ impl ModuleFacts {
             ecco,
             ecco_declarations_hash,
             commonjs,
+            commonjs_surface: CommonJsSurface::default(),
             top_level_await,
             effects,
             invocations,
@@ -519,6 +521,10 @@ impl ModuleFacts {
 
     pub(crate) fn ecco_mut(&mut self) -> &mut Option<ecco::ParsedFile> {
         &mut self.ecco
+    }
+
+    pub(crate) fn set_commonjs_surface(&mut self, surface: CommonJsSurface) {
+        self.commonjs_surface = surface;
     }
 
     pub(crate) fn set_policy_violations(
@@ -550,10 +556,91 @@ impl ModuleFacts {
         self.commonjs
     }
 
+    pub fn commonjs_surface(&self) -> &CommonJsSurface {
+        &self.commonjs_surface
+    }
+
     pub fn top_level_await(&self) -> &[Span] {
         &self.top_level_await
     }
+}
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommonJsSurface {
+    accesses: Vec<CommonJsExportAccess>,
+    #[serde(with = "span_serde::list")]
+    unknown: Vec<Span>,
+}
+
+impl CommonJsSurface {
+    pub(crate) fn new(accesses: Vec<CommonJsExportAccess>, unknown: Vec<Span>) -> Self {
+        Self { accesses, unknown }
+    }
+    pub fn accesses(&self) -> &[CommonJsExportAccess] {
+        &self.accesses
+    }
+    pub fn unknown(&self) -> &[Span] {
+        &self.unknown
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommonJsExportAccess {
+    reference: u32,
+    #[serde(with = "span_serde")]
+    span: Span,
+    object_assignment: bool,
+    names: Vec<CommonJsExportName>,
+}
+
+impl CommonJsExportAccess {
+    pub(crate) fn new(
+        reference: u32,
+        span: Span,
+        object_assignment: bool,
+        names: Vec<CommonJsExportName>,
+    ) -> Self {
+        Self {
+            reference,
+            span,
+            object_assignment,
+            names,
+        }
+    }
+    pub fn reference(&self) -> u32 {
+        self.reference
+    }
+    pub fn span(&self) -> Span {
+        self.span
+    }
+    pub fn object_assignment(&self) -> bool {
+        self.object_assignment
+    }
+    pub fn names(&self) -> &[CommonJsExportName] {
+        &self.names
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommonJsExportName {
+    name: String,
+    #[serde(with = "span_serde")]
+    span: Span,
+}
+
+impl CommonJsExportName {
+    pub(crate) fn new(name: String, span: Span) -> Self {
+        Self { name, span }
+    }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn span(&self) -> Span {
+        self.span
+    }
+}
+
+impl ModuleFacts {
     pub fn effects(&self) -> &[crate::effects::EffectSite] {
         &self.effects
     }

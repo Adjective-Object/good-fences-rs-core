@@ -535,6 +535,28 @@ fn facts<'b>(v: &o::ModuleFacts, b: &mut FlatBufferBuilder<'b>) -> WIPOffset<w::
     let exports = vector!(exports, export);
     let directives = vector!(directives, directive);
     let hashbang = v.hashbang().map(|v| directive(v).pack(b));
+    let surface = v.commonjs_surface();
+    let surface = table!(CommonJsSurfaceT {
+        accesses: surface
+            .accesses()
+            .iter()
+            .map(|access| table!(CommonJsExportAccessT {
+                reference: access.reference(),
+                span: span(access.span()),
+                object_assignment: access.object_assignment(),
+                names: access
+                    .names()
+                    .iter()
+                    .map(|name| table!(CommonJsExportNameT {
+                        name: name.name().to_owned(),
+                        span: span(name.span())
+                    }))
+                    .collect()
+            }))
+            .collect(),
+        unknown: spans(surface.unknown())
+    })
+    .pack(b);
     w::ModuleFacts::create(
         b,
         &w::ModuleFactsArgs {
@@ -542,6 +564,7 @@ fn facts<'b>(v: &o::ModuleFacts, b: &mut FlatBufferBuilder<'b>) -> WIPOffset<w::
             ecco,
             ecco_declarations_hash: Some(&hash),
             commonjs: v.commonjs(),
+            commonjs_surface: Some(surface),
             top_level_await: Some(top_level_await),
             effects,
             invocations,

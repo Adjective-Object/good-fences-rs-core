@@ -1,6 +1,7 @@
 //! Versioned source-local facts; no resolver or graph state.
 mod sidecar;
 mod validate;
+mod validate_commonjs;
 mod validate_emission;
 
 pub use sidecar::{

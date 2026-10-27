@@ -22,7 +22,12 @@ module body and ordered statement ranges, not lossy legacy dependency/name sets.
 `CacheRecord` and `CachedModule` have private storage. Consumers and validators
 use borrowed accessors such as `record.module().facts()` and
 `record.module().segments()`; no mutable view of sealed records is exposed.
-Production loading/publication uses typed FlatBuffers, schema 22/extractor 40.
+Production loading/publication uses typed FlatBuffers, schema 23/extractor 42.
+The required CommonJS surface tables retain static potential-name/access spans
+and unknown sites, with borrowed wrapper-reference/name/coverage validation.
+Literal string-bracket namespace reads share checked DirectRead recipes.
+Earlier source schemas/extractors miss and rebuild; independent GFTY evidence
+and its bounded evaluator are unchanged. No source hit reparses or unpacks trees.
 Bounded ESM require contexts reuse typed dependency patterns and original argument
 recipes. Borrowed validation requires exact typed policy evidence for unsupported
 shapes; resolved candidates and per-build policy admission are never persisted.

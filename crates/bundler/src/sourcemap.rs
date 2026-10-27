@@ -12,6 +12,8 @@ pub(crate) struct Source {
     text: crate::prepared_text::Text,
     checkpoints: Vec<(usize, Position)>,
     upstream: Vec<WireSourceMap>,
+    unmapped: Option<(Position, Position)>,
+    original: Option<crate::prepared_text::Text>,
 }
 
 impl Source {
@@ -72,7 +74,26 @@ impl Source {
             text,
             checkpoints,
             upstream,
+            unmapped: None,
+            original: None,
         }))
+    }
+
+    pub(crate) fn with_unmapped(
+        mut source: Arc<Self>,
+        span: Option<Span>,
+        original: Option<crate::prepared_text::Text>,
+    ) -> Arc<Self> {
+        let range = span.map(|span| {
+            (
+                source.position(span.start as usize),
+                source.position(span.end as usize),
+            )
+        });
+        let value = Arc::get_mut(&mut source).expect("new source map owner");
+        value.unmapped = range;
+        value.original = original;
+        source
     }
 
     pub(crate) fn slice(&self, span: Span) -> &str {
@@ -156,9 +177,15 @@ impl<'a> Writer<'a> {
                 let newline = matches!(ch, '\r' | '\n' | '\u{2028}' | '\u{2029}');
                 if !newline && (exact || needs_mapping) {
                     let mapped = origin.and_then(|(source, _, _, name)| {
+                        if source.unmapped.is_some_and(|(start, end)| {
+                            (original.line, original.column) >= (start.line, start.column)
+                                && (original.line, original.column) < (end.line, end.column)
+                        }) {
+                            return None;
+                        }
                         let mut mapped = (
                             source.url.as_str(),
-                            Some(&*source.text),
+                            Some(source.original.as_deref().unwrap_or(&source.text)),
                             original.line,
                             original.column,
                             name,

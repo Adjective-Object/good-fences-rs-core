@@ -35,6 +35,7 @@ storage_accessors! {
     ecco => Option<ecco::views::ParsedFileView<'_>>,
     ecco_declarations_hash => crate::DeclarationFingerprint,
     commonjs => bool,
+    commonjs_surface => CommonJsSurface<'_>,
     top_level_await => Sequence<'_, Span>,
     effects => Sequence<'_, EffectSite<'_>>,
     invocations => Sequence<'_, Invocation<'_>>,
@@ -468,6 +469,9 @@ view!(Dependency, o::Dependency);
 view!(ImportBinding, o::ImportBinding);
 view!(Export, o::Export);
 view!(Directive, o::Directive);
+view!(CommonJsSurface, o::CommonJsSurface);
+view!(CommonJsExportAccess, o::CommonJsExportAccess);
+view!(CommonJsExportName, o::CommonJsExportName);
 view!(EffectSite, ef::EffectSite);
 view!(IdentifierCallee, inv::IdentifierCallee);
 view!(InvocationArgument, inv::InvocationArgument);
@@ -504,6 +508,7 @@ impl<'a> ModuleFacts<'a> {
             .get(i)))
     );
     scalar!(commonjs, bool);
+    nested!(commonjs_surface, CommonJsSurface);
     sequence!(top_level_await, Span);
     sequence!(effects, EffectSite<'a>);
     sequence!(invocations, Invocation<'a>);
@@ -520,6 +525,20 @@ impl<'a> ModuleFacts<'a> {
             Self::Wire(v) => v.hashbang().map(Into::into),
         }
     }
+}
+impl<'a> CommonJsSurface<'a> {
+    sequence!(accesses, CommonJsExportAccess<'a>);
+    sequence!(unknown, Span);
+}
+impl<'a> CommonJsExportAccess<'a> {
+    scalar!(reference, u32);
+    scalar!(span, Span, span);
+    scalar!(object_assignment, bool);
+    sequence!(names, CommonJsExportName<'a>);
+}
+impl<'a> CommonJsExportName<'a> {
+    scalar!(name, &'a str);
+    scalar!(span, Span, span);
 }
 impl<'a> Binding<'a> {
     scalar!(id, o::BindingId, o::BindingId);
@@ -1450,6 +1469,15 @@ equal_view!(
 );
 equal_view!(Export, name, value, span, name_span, type_only);
 equal_view!(Directive, value, span);
+equal_view!(CommonJsSurface, accesses, unknown);
+equal_view!(
+    CommonJsExportAccess,
+    reference,
+    span,
+    object_assignment,
+    names
+);
+equal_view!(CommonJsExportName, name, span);
 equal_view!(IdentifierCallee, name, binding);
 equal_view!(InvocationArgument, span, spread);
 equal_view!(

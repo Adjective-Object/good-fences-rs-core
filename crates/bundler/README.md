@@ -88,6 +88,63 @@ or writes sidecars. Corrupt sidecars regenerate; writes are best-effort atomic
 sibling publications. Facts contain no resolved graph exports, repair/admission
 decisions, executable enum code or warning policy.
 
+### Runtime const-enum compatibility
+
+The build coordinator follows structured missing-value requests through checked
+JS renamed/star barrels, then lazily consults the selected script's exact
+declaration companion. Only completely resolved, diagnostic-free const-enum
+tables qualify; ordinary enums, interfaces, unresolved/unsupported constants and
+ambiguous candidate leaves do not suppress missing-export errors. Existing ESM
+exports take precedence without reading companions. JSON, file, stylesheet and
+locstring loaders never participate, even with JS-looking physical names.
+Competing declaration-backed origins fail before applying any recovery in that
+iteration, so a separate direct request cannot make a star ambiguity disappear.
+Each attempt recomputes ambiguity; declaration/source fixes take effect normally.
+
+Recovery prepares original JS plus ordinary enum initialization through normal
+checked extraction and updates both session emission text and graph inputs.
+Numeric members get reverse keys; strings do not. Merged members retain source
+order and recovered aliases share one mutable object. Private generated names
+avoid all bindings and free references. CJS additions remain inside the original
+opaque factory and guard existing properties; they do not introduce ESM exports
+or a loader, and require/facade activation remains native.
+
+Original-input identities remain separate from mapped generated text. Insertion
+precedes the parser-recorded last map directive; generated regions are unmapped,
+while original executable coordinates/maps remain unchanged. Declaration
+observations/settings and generated source identities participate in build keys.
+Every attempt restores original sources before stale overlays can hide missing
+diagnostics; retained derived no-op state requires unchanged source/resolution/map
+identities and freshly checked declaration proofs (including misses). Eligibility
+includes original input length/hash even for erased-only TypeScript edits, the
+checked extraction seal, resource identity and complete compiler config/map/hint
+metadata, not just emitted JavaScript bytes.
+
+Compatibility warnings identify requesting source/location, requested name, JS
+module and companion. Existing compiler/upstream maps supply original locations;
+unmapped compiled positions are explicitly labelled prepared-JS coordinates.
+`BuildProduct::compatibility_warnings` exposes immutable diagnostics; BuildResult
+and `bundler::diagnostic` replay them on cold/memory/disk/no-op builds.
+
+Static dot and literal string-bracket namespace property reads use cached
+namespace observations, including named imports of namespace reexports.
+Unknown/escaped namespaces are not scanned for every declaration export.
+Declaration-only cross-file reexport routes without an executable JS graph route
+and require-only namespace property demand are not solved.
+Checked source-local CJS surface facts permit mixed real exports plus recovered
+enums: static `exports.x`/`module.exports.x`, string-bracket forms and plain
+identifier/string-key object replacements retain potential names. Replacement
+assignments must be standalone discarded expression statements (parentheses
+allowed); initializer, argument, return and outer-assignment consumers may escape
+the replacement object and remain unknown.
+Existing/potential names win without companion IO, even when assigned only
+conditionally or assigned `undefined`.
+Unknown computed keys, escaped exports, dynamic replacements, spreads/accessors,
+receiver calls, `this`, dependencies (which may expose partial exports through a
+cycle), wrapper-policy sites and top-level module shadows remain conservatively
+unknown and unchanged. These syntax facts do not evaluate CJS or cache recovery
+decisions; normal native facades preserve values, snapshots and factory timing.
+
 The [fixture semantic contract](../../fixtures/bundler/README.md#permitted-execution-differences)
 lists permitted execution differences and the observations adversarial tests
 must preserve. TDZ-error preservation is waived; generated suspension and new
@@ -97,7 +154,7 @@ Graph linking, effect policy, Ecco registration, execution constraints and nativ
 recipe rendering consume owned-or-wire AST views. A byte-backed graph retains
 verified owners, including Ecco's nested storage, without unpacking extraction
 trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
-`.seg.fb` records (schema 22/extractor 40); parse fingerprints include both active
+`.seg.fb` records (schema 23/extractor 42); parse fingerprints include both active
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
 

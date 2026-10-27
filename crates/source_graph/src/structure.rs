@@ -318,6 +318,7 @@ impl SourceGraph {
                             file_id,
                             site: dependency.span(),
                             message: "unresolved resource URL".into(),
+                            missing_export: None,
                         });
                     }
                     continue;
@@ -340,6 +341,7 @@ impl SourceGraph {
                         file_id,
                         site: dependency.span(),
                         message: "dependency context does not match its source pattern".into(),
+                        missing_export: None,
                     });
                     continue;
                 }
@@ -375,6 +377,7 @@ impl SourceGraph {
                         file_id,
                         site: dependency.span(),
                         message,
+                        missing_export: None,
                     });
                 }
                 let kind = match dependency.kind() {
@@ -497,6 +500,15 @@ impl SourceGraph {
                             file_id,
                             site: edge.site,
                             message: error.to_string(),
+                            missing_export: self
+                                .resolve_optional_export(target, name, namespace)
+                                .ok()
+                                .filter(Option::is_none)
+                                .map(|_| crate::MissingExport {
+                                    target,
+                                    name: name.clone(),
+                                    namespace,
+                                }),
                         });
                         let mut edge = edge;
                         edge.to = GraphNode::Unlinked {

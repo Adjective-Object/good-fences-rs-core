@@ -28,6 +28,10 @@ ModuleFacts {
         ),
     ),
     commonjs: false,
+    commonjs_surface: CommonJsSurface {
+        accesses: [],
+        unknown: [],
+    },
     top_level_await: [],
     effects: [
         EffectSite {

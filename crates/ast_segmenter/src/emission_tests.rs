@@ -576,7 +576,9 @@ fn namespaces_distinguish_values_from_receiver_tag_and_mutation() {
     assert_eq!(uses[4], &NamespaceAccess::Native(NamespaceReason::Write));
     assert_eq!(uses[5], &NamespaceAccess::Native(NamespaceReason::Delete));
     assert_eq!(uses[6], &NamespaceAccess::Native(NamespaceReason::Other));
-    assert_eq!(uses[7], &NamespaceAccess::Native(NamespaceReason::Other));
+    assert!(
+        matches!(uses[7], NamespaceAccess::DirectRead { property, .. } if property == "computed")
+    );
     assert!(matches!(uses[8], NamespaceAccess::DirectRead { .. }));
     let recipe = &facts.emission().segments()[1];
     assert!(matches!(

@@ -1,5 +1,22 @@
 # ast-segmenter
 
+Source schema 23/extractor 42 retains borrowed `commonjs_surface()` evidence:
+source-ordered wrapper-reference-linked potential names for static `exports.x`,
+`module.exports.x`, string-bracket equivalents and plain identifier/string-key
+object replacements whose assignment result is discarded by a standalone
+expression statement (parentheses allowed). Extractor 42 marks consumed replacement
+results unknown, including initializer, argument, return and outer-assignment
+escapes; old extraction records miss safely.
+Unknown sites retain escapes, dynamic keys/replacements, spreads/accessors,
+receivers, `this`, dependencies/cycles and wrapper-policy/shadow boundaries.
+Lexical shadows do not become wrapper evidence. CJS execution stays one opaque
+segment; these are syntax facts, not solved exports or admission decisions.
+Static import namespace recipes now retain literal string-bracket reads as well
+as dot reads, without changing receiver/tag/mutation/escape handling.
+`SourceProvenance::records_hash()` exposes the sealed extraction's scalar identity
+for derived preparation reuse; it does not expose mutable facts or authenticate
+publishers.
+
 Parsed `import.meta.env` (including static string-computed members) produces
 typed `ImportMetaEnv` dependency/import/reference evidence. These virtual imports
 retain full original member spans and lexical execution timing, never configured

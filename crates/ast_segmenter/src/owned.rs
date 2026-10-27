@@ -164,6 +164,7 @@ pub(crate) fn extract_syntax(
 }
 
 pub(crate) fn extract_recipes(program: &Program<'_>, facts: &mut ModuleFacts) {
+    facts.set_commonjs_surface(crate::commonjs_surface::extract(program, facts));
     let (effects, invocations) = crate::effects::extract(program, facts);
     *facts.effects_mut() = effects;
     *facts.invocations_mut() = invocations;

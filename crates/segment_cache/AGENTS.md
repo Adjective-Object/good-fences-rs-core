@@ -26,9 +26,14 @@
   parser identity, UTF-8 ranges, local IDs, links and order on both boundaries.
 - Preserve sealed extraction provenance on both boundaries and in `to_parsed`;
   never bless unrelated parsed facts by hashing separately supplied source text.
-- Schema 22/extractor 40 retains typed nested module buffers and wire seals,
+- Schema 23/extractor 42 retains typed nested module buffers and wire seals,
   including dynamic namespace observations, deferred recipes, async references
   and lazy construction candidates with original argument slots.
+- CommonJS surfaces validate UTF-8/owner/name spans, ordered unique wrapper
+  references and unknown-site coverage before checked borrowed access. They are
+  potential syntax names, never recovered exports; no hit reparsing/unpacking.
+  Consumed CJS replacement results remain unknown; extractor 42 invalidates old
+  nonescape evidence without changing the source schema layout.
 - ImportMetaEnv is typed source-local virtual-import evidence, with checked
   syntax, binding/import/reference links and native reference operations;
   configured fields and synthetic target identities never enter source sidecars.

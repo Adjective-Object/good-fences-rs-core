@@ -16,6 +16,15 @@ pub struct LinkDiagnostic {
     pub file_id: u32,
     pub site: oxc_span::Span,
     pub message: String,
+    /// Present only for an absent name, never for ambiguity or resolution errors.
+    pub missing_export: Option<MissingExport>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingExport {
+    pub target: u32,
+    pub name: String,
+    pub namespace: Namespace,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -49,6 +58,75 @@ enum Candidate {
 }
 
 impl SourceGraph {
+    /// Candidate declaration origins for an absent export; no filesystem access.
+    /// Explicit renamed routes take precedence over stars, including in cycles.
+    /// A star barrel may itself have an erased local declaration.
+    pub fn missing_export_leaves(&self, file: u32, name: &str) -> Vec<(u32, String)> {
+        fn walk(
+            graph: &SourceGraph,
+            file: u32,
+            name: &str,
+            seen: &mut AHashSet<(u32, String)>,
+            leaves: &mut Vec<(u32, String)>,
+        ) {
+            if !seen.insert((file, name.to_owned())) {
+                return;
+            }
+            let Some(facts) = graph.file_facts(file) else {
+                return;
+            };
+            let explicit = facts
+                .exports()
+                .iter()
+                .any(|e| !e.type_only() && e.name() == Some(name));
+            for export in facts.exports().iter().filter(|e| !e.type_only()) {
+                if if explicit {
+                    export.name() != Some(name)
+                } else {
+                    export.name().is_some() || name == "default"
+                } {
+                    continue;
+                }
+                let route = match export.value() {
+                    ExportValue::ReExport {
+                        dependency,
+                        imported,
+                    } => Some((
+                        dependency,
+                        if export.name().is_none() {
+                            ImportedName::Name(name)
+                        } else {
+                            imported
+                        },
+                    )),
+                    ExportValue::Binding(binding) => facts
+                        .imports()
+                        .iter()
+                        .find(|i| i.binding() == binding)
+                        .map(|i| (i.dependency(), i.imported())),
+                    _ => None,
+                };
+                if let Some((dependency, ImportedName::Name(imported))) = route {
+                    if let Some(DependencyTarget::File(path)) =
+                        graph.dependency_target(file, dependency)
+                    {
+                        if let Some(target) = graph.file_id(path) {
+                            walk(graph, target, imported, seen, leaves);
+                        }
+                    }
+                }
+            }
+            if !explicit {
+                leaves.push((file, name.to_owned()));
+            }
+        }
+        let mut leaves = Vec::new();
+        walk(self, file, name, &mut AHashSet::default(), &mut leaves);
+        leaves.sort();
+        leaves.dedup();
+        leaves
+    }
+
     pub fn diagnostics(&self) -> &[LinkDiagnostic] {
         &self.diagnostics
     }

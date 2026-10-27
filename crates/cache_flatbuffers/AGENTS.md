@@ -17,8 +17,14 @@
   Aggregate updates copy verified borrowed request tables directly into a new
   builder, preserving untouched requests without unpacking input/proof trees.
 
-- This is the production `.seg.fb` backend (schema 22/extractor 40).
+- This is the production `.seg.fb` backend (schema 23/extractor 42).
   `segment_cache` adds source-local semantic validation before exposing records.
+- Schema 23/extractor 41 adds required typed CommonJS surface/access/name tables
+  and literal-bracket namespace-read extraction. Keep wrapper-reference/name/
+  unknown-site coverage borrowed and source-local; old source records miss.
+  Independent GFTY schema/extractor 1 and its evaluator budgets stay unchanged.
+- Extractor 42 marks value-consuming object replacements unknown; only complete
+  discarded expression-statement assignments prove a nonescaping CJS object.
 - ImportMetaEnv appends a DependencyKind discriminant without changing table
   layout; extractor 38 invalidates older extraction/policy evidence.
 - Extractor 40 admits Ori-style component/terminal ESM require gaps using existing

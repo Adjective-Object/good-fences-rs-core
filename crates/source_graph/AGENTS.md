@@ -1,5 +1,10 @@
 # source_graph
 
+Absent-name diagnostics carry typed target/name/namespace evidence; ambiguity
+never becomes a recoverable miss. Missing-export leaf traversal follows explicit
+renames before stars and terminates cycles without choosing a declaration leaf.
+Graph validation/traversal never reads declaration files or repairs source facts.
+
 Edges point consumer → dependency. Forward/reverse indexes refer to the same
 occurrence collection. Retain ast_segmenter owned-or-wire storage; do not reconstruct a
 second binding IR or put usage tags/effects/runtime scheduling in structure.

@@ -216,11 +216,23 @@ table PolicyViolation {
   policy:PolicyName;
   span:Span (required);
 }
+table CommonJsExportName { name:string (required); span:Span (required); }
+table CommonJsExportAccess {
+  reference:uint;
+  span:Span (required);
+  object_assignment:bool;
+  names:[CommonJsExportName] (required);
+}
+table CommonJsSurface {
+  accesses:[CommonJsExportAccess] (required);
+  unknown:[Span] (required);
+}
 table ModuleFacts {
   policy_violations:[PolicyViolation] (required);
   ecco:ParsedFile;
   ecco_declarations_hash:Fingerprint (required);
   commonjs:bool;
+  commonjs_surface:CommonJsSurface (required);
   top_level_await:[Span] (required);
   effects:[EffectSite] (required);
   invocations:[Invocation] (required);

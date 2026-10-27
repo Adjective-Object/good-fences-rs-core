@@ -8,6 +8,7 @@ mod source_maps;
 mod browser;
 mod contexts;
 mod discovery;
+mod enum_recovery;
 mod env;
 mod loader_config;
 mod localization;

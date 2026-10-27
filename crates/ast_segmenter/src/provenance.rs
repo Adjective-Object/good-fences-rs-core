@@ -155,7 +155,8 @@ impl SourceProvenance {
         self.extraction.as_ref().map(|v| v.module_bytes.as_slice())
     }
 
-    pub(crate) fn records_hash(&self) -> [u8; 16] {
+    /// Identity of the sealed source-local extraction, not publisher authentication.
+    pub fn records_hash(&self) -> [u8; 16] {
         self.records_hash
     }
 

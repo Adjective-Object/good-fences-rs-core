@@ -33,6 +33,87 @@ fn coordinates(text: &str, offset: usize) -> (u32, u32) {
     (line, column)
 }
 
+#[test]
+fn const_enum_recovery_preserves_upstream_trailing_directives_and_unmapped_generated_code() {
+    for (script, declaration, original) in [
+        (
+            "api.mjs",
+            "api.d.mts",
+            "export const real = 'ORIGINAL_SENTINEL';",
+        ),
+        (
+            "api.cjs",
+            "api.d.cts",
+            "exports.real = 'ORIGINAL_SENTINEL';",
+        ),
+    ] {
+        let dir = TmpDir::new();
+        let mut builder = oxc_sourcemap::SourceMapBuilder::default();
+        let source = builder.add_source_and_content("original.js", original);
+        for column in 0..original.len() {
+            builder.add_token(0, column as u32, 0, column as u32, Some(source), None);
+        }
+        write(
+            dir.root(),
+            "api.map",
+            &builder.into_sourcemap().to_json_string(),
+        );
+        let executable = format!("{original}\n//# sourceMappingURL=api.map\n");
+        write(dir.root(), script, &executable);
+        write(
+            dir.root(),
+            declaration,
+            "export declare const enum E { A='GENERATED_ENUM_SENTINEL' }",
+        );
+        write(
+            dir.root(),
+            "main.mjs",
+            &format!("import {{E,real}} from './{script}'; console.log(real,E.A);"),
+        );
+        let mut config = options();
+        config.output.source_maps = true;
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let result = session.build(&config).unwrap();
+        assert_origin(
+            &result.product.artifacts,
+            &dir.root().join("original.js"),
+            original,
+            "'ORIGINAL_SENTINEL'",
+        );
+        let mut found = false;
+        for (path, map) in maps(&result.product.artifacts) {
+            let output = &result.product.artifacts.files
+                [Path::new(path.to_str().unwrap().strip_suffix(".map").unwrap())];
+            let table = map.generate_lookup_table();
+            for (offset, _) in output.match_indices("GENERATED_ENUM_SENTINEL") {
+                let (line, column) = coordinates(output, offset);
+                assert!(map
+                    .lookup_source_view_token(&table, line, column)
+                    .is_none_or(|t| t.get_source().is_none()));
+                found = true;
+            }
+        }
+        assert!(found);
+        let path = dir.root().join(script);
+        let prepared = session.sources[&path].text.text(&path).unwrap();
+        let hint = session.sources[&path]
+            .record
+            .module()
+            .facts()
+            .emission()
+            .source_map()
+            .unwrap();
+        assert!(prepared[..hint.start as usize].contains("GENERATED_ENUM_SENTINEL"));
+        assert!(prepared[hint.start as usize..hint.end as usize].contains("sourceMappingURL"));
+        assert_eq!(
+            observe(&result.product.artifacts),
+            b"ORIGINAL_SENTINEL GENERATED_ENUM_SENTINEL\n"
+        );
+        let noop = session.build(&config).unwrap();
+        assert!(Rc::ptr_eq(&result.product, &noop.product));
+    }
+}
+
 fn assert_origin(artifacts: &link::Artifacts, original: &Path, source: &str, needle: &str) {
     let expected = coordinates(source, source.find(needle).unwrap());
     let url = url::Url::from_file_path(original).unwrap().to_string();
