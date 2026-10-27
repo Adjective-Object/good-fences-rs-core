@@ -1,5 +1,19 @@
 # bundler
 
+Only *.locstring.json gets Ori localization: pure named ESM values plus one
+clean default object; all underscore metadata is removed. Require resources
+unwrap that default on Node as well as Browser, from ESM callers too.
+Only explicitly marked pure localized defaults authorize
+Node ESM require availability, never arbitrary ESM or ordinary JSON policy changes.
+Check pseudo padding/products and total capacity; reserve fallibly before expansion.
+Load the global locale catalog
+once per build through inventory/snapshot, key generated text by one sealed
+config/catalog-byte/match-set fingerprint, and freshly recheck consumed bytes
+and catalog sets at return/publication boundaries. Preserve original resource
+identity separately; no schema bump or runtime string store. Ori pseudo uses
+original UTF-8 byte offsets, rune delimiter rewind and byte-length trailing
+padding; preserve algorithm/table licenses beside localization.rs.
+
 Parsed import.meta.env occurrences are typed virtual imports of one ordinary
 synthetic ESM segment, never source text substitution or host environment reads.
 BuildOptions.env supplies explicit JSON fields (default empty); computed keys

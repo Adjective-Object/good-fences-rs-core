@@ -17,6 +17,7 @@ pub(crate) enum ResourceKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RequireValue {
     Default,
+    LocalizedDefault,
     Namespace,
 }
 

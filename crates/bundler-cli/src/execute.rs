@@ -20,6 +20,14 @@ pub(crate) fn build(invocation: &Invocation, stdout: &mut impl Write) -> eyre::R
     if invocation.css_auto_mount {
         options.css.load = CssLoad::AutoMount;
     }
+    if let Some(locale) = invocation
+        .locale
+        .as_ref()
+        .filter(|locale| locale.as_str() != "default")
+    {
+        options.locale.default = locale.clone();
+        options.locale.validate().wrap_err("validating --locale")?;
+    }
     for path in &invocation.entries {
         let name = path
             .to_str()

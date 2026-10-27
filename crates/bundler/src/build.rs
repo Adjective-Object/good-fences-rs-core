@@ -30,6 +30,8 @@ mod discovery;
 #[path = "entry_outputs.rs"]
 mod entry_outputs;
 mod env;
+mod localization;
+pub use localization::{LocaleOptions, PseudoLocaleOptions};
 mod policy;
 mod prepare;
 pub use policy::{PolicyAllowance, PolicyName, PreparationErrors};
@@ -66,6 +68,8 @@ pub struct BuildOptions {
     /// Explicit JSON fields shared by all parsed import.meta.env references.
     /// Never populated from the host process environment.
     pub env: BTreeMap<String, serde_json::Value>,
+    /// Source strings by default; optional Ori-compatible translation/pseudo locale.
+    pub locale: LocaleOptions,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -136,6 +140,7 @@ impl Default for BuildOptions {
             output: OutputOptions::default(),
             css: CssOptions::default(),
             env: BTreeMap::new(),
+            locale: LocaleOptions::default(),
         }
     }
 }
@@ -343,6 +348,9 @@ impl BuildSession {
         let declarations_key = declarations.fingerprint();
         drop(declaration_span);
         let inventory = Inventory::new(&self.root);
+        let localization = localization::Localization::new(&inventory, &options.locale)
+            .wrap_err("preparing localization catalogs")?;
+        warnings.extend(localization.warnings.iter().cloned());
         let mut styles = crate::css::Styles::new(
             &self.root,
             &inventory,
@@ -708,8 +716,14 @@ impl BuildSession {
                             == crate::resource::ResourceKind::Stylesheet { module: false }
                             && options.css.load == CssLoad::CallerLoaded)
                         {
-                            require_resources
-                                .insert(path.clone(), crate::resource::RequireValue::Default);
+                            let value = if kind == crate::resource::ResourceKind::Json
+                                && localization::matches(&path)
+                            {
+                                crate::resource::RequireValue::LocalizedDefault
+                            } else {
+                                crate::resource::RequireValue::Default
+                            };
+                            require_resources.insert(path.clone(), value);
                         } else if kind
                             == (crate::resource::ResourceKind::Stylesheet { module: true })
                             && options.css.load == CssLoad::CallerLoaded
@@ -794,14 +808,23 @@ impl BuildSession {
                                 )
                                 .then(|| styles.identity(&path))
                                 .transpose()?;
+                                let locstring = kind == crate::resource::ResourceKind::Json
+                                    && localization::matches(&path);
+                                let resource_format = if locstring {
+                                    ModuleFormat::Esm
+                                } else {
+                                    wrapper_format
+                                };
                                 let parser_path = prepared_css.as_ref().map_or_else(
-                                    || crate::resource::parser_path(&path, wrapper_format),
+                                    || crate::resource::parser_path(&path, resource_format),
                                     |prepared| prepared.parser_path.clone(),
                                 );
                                 let parser_package = prepared_css
                                     .as_ref()
                                     .map_or(format, |prepared| prepared.package);
-                                let text = if let Some(prepared) = prepared_css {
+                                let text = if locstring {
+                                    localization.source(&path, &input, &mut warnings)?
+                                } else if let Some(prepared) = prepared_css {
                                     relocations.insert(path.clone(), prepared.relocations);
                                     prepared.source
                                 } else {
@@ -943,7 +966,9 @@ impl BuildSession {
                             if dependency.broad_context() {
                                 let warning = format!(
                                     "{} at bytes {}..{}: unannotated dynamic import captures all files in the importing directory and below; broad recursive capture may increase bundle size",
-                                    path.display(), dependency.span().start, dependency.span().end,
+                                    path.display(),
+                                    dependency.span().start,
+                                    dependency.span().end,
                                 );
                                 tracing::warn!(target: "bundler::progress", "{warning}");
                                 warnings.push(warning);
@@ -1364,7 +1389,7 @@ impl BuildSession {
         );
         fingerprints.output = Fingerprint::of(
             format!(
-                "{fingerprints:?}:{emitter:?}:{}:{:?}:{}:{:?}:{:?}:{}:{}:{:?}:{}:{:?}:{:?}:{:?}",
+                "{fingerprints:?}:{emitter:?}:{}:{:?}:{}:{:?}:{:?}:{}:{}:{:?}:{}:{:?}:{:?}:{:?}:{:?}",
                 crate::css_syntax::PARSER_REVISION,
                 options.entries,
                 public_base.as_str(),
@@ -1391,6 +1416,7 @@ impl BuildSession {
                         .map(|map| (path, cache_flatbuffers::hash128(map.bytes()))))
                     .collect::<Vec<_>>()),
                 self.env.as_ref().map(|env| &*env.text),
+                localization.fingerprint(),
             )
             .as_bytes(),
         );
@@ -1398,6 +1424,9 @@ impl BuildSession {
         if let Some(last) = &self.last {
             if last.fingerprints == fingerprints {
                 tracing::info!(target: "bundler::progress", "Rechecking inputs for unchanged build");
+                localization
+                    .recheck()
+                    .wrap_err("rechecking localization before build reuse")?;
                 Self::recheck(&self.sources, &inventory)
                     .wrap_err("rechecking sources before build reuse")?;
                 counters.inventory_directory_reads = inventory.directory_reads();
@@ -1432,6 +1461,9 @@ impl BuildSession {
                     .wrap_err("rechecking CSS URL inputs after resolution-cache publication")?;
                 self.resolution_memory
                     .retain_used(&resolver, &sass_resolver, &css_url_resolver);
+                localization
+                    .recheck()
+                    .wrap_err("rechecking localization after cache publication")?;
                 warnings.sort();
                 counters.record_parses(before_parses);
                 counters.elapsed = start.elapsed();
@@ -1588,6 +1620,9 @@ impl BuildSession {
             .wrap_err("rendering output artifacts and source maps")?;
         drop(finalize_span);
         tracing::info!(target: "bundler::progress", "Rechecking build inputs");
+        localization
+            .recheck()
+            .wrap_err("rechecking localization before build success")?;
         Self::recheck(&self.sources, &inventory)
             .wrap_err("rechecking sources before build success")?;
         counters.inventory_directory_reads = inventory.directory_reads();
@@ -1622,6 +1657,9 @@ impl BuildSession {
             .wrap_err("rechecking CSS URL inputs after resolution-cache publication")?;
         self.resolution_memory
             .retain_used(&resolver, &sass_resolver, &css_url_resolver);
+        localization
+            .recheck()
+            .wrap_err("rechecking localization after cache publication")?;
         warnings.sort();
         counters.emissions = 1;
         counters.record_parses(before_parses);

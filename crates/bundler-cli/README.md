@@ -141,6 +141,38 @@ exclusion suffixes override scoping. See the bundler README for resource,
 source-map, lazy-runtime and CSS semantics. Auto-mount requires a usable DOM;
 inserting links synchronously does not promise stylesheet readiness.
 
+### Localization
+
+`*.locstring.json` supports named exports plus a clean default string object;
+underscore-prefixed metadata is stripped and missing `_key.comment` entries warn.
+Ordinary JSON is unchanged. For example:
+
+```json
+{
+  "locale": {
+    "default": "ploc",
+    "ploc": {
+      "prepend": "[!!",
+      "append": "!!]",
+      "startDelimiter": "{",
+      "endDelimiter": "}",
+      "extend": 0.2,
+      "omitKeys": ["productName"]
+    }
+  }
+}
+```
+
+`--locale NAME` overrides `locale.default`; `--locale default` uses configuration.
+Omitted/empty locale or `none` keeps source strings. Case-insensitive Ori pseudo
+aliases select pseudo-localization. Other names load root-relative
+`locale/NAME/**/*.locstrings.json` string catalogs; missing/empty translations
+fall back, duplicate keys fail, and missing directories fail. Empty catalogs warn.
+Names must contain only ASCII letters/digits/hyphens/underscores (max 128 bytes).
+Configuration is strict, including `locale`/`ploc`; `override` is an optional
+replacement character set. See bundler's README for exact Unicode, delimiter,
+padding, cache and provenance behavior. No `ori.json` is automatically loaded.
+
 ## Positional and fixture builds
 
 ```sh

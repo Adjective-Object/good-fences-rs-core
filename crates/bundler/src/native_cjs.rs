@@ -233,78 +233,109 @@ impl CommonJs {
                 result.namespaces.insert(original, value.path.clone());
             }
         }
-        if browser {
-            for (&file, module) in modules {
-                for dependency in module
-                    .parsed
-                    .facts()
-                    .dependencies()
-                    .iter()
-                    .filter(|d| !d.type_only() && d.kind() == DependencyKind::Require)
-                {
-                    for target in target_files(graph, file, dependency)? {
-                        if modules[&target].parsed.facts().commonjs() {
-                            continue;
-                        }
-                        let original = graph.file_path(target).unwrap();
-                        let name = format!("{prefix}esm_{}", digest(original.to_str().unwrap()));
-                        let facts = &modules[&target].parsed.facts();
-                        let resource = require_resources.get(original);
-                        if resource == Some(&crate::resource::RequireValue::Default) {
-                            result.require_defaults.insert(target);
-                        }
-                        if facts.dependencies().iter().all(|d| d.type_only())
-                            && (resource.is_some()
-                                || facts
-                                    .effects()
-                                    .iter()
-                                    .all(|effect| effect.deferred().is_some()))
-                        {
-                            // Instantiating a dependency-free, effect-free leaf
-                            // cannot activate application code. Keep its native
-                            // namespace, including shared static/dynamic users.
-                            result.eager_esm.insert(target, name);
-                            continue;
-                        }
-                        let path = PathBuf::from(format!(
-                            "native/require-esm-{}.mjs",
-                            digest(original.to_str().unwrap())
-                        ));
-                        result.require_esm.insert(
-                            target,
-                            Value {
-                                path: path.clone(),
-                                name: name.clone(),
-                                exported: name,
+        for (path, resource) in require_resources {
+            let Some(file) = graph.file_id(path) else {
+                continue;
+            };
+            if matches!(
+                resource,
+                crate::resource::RequireValue::Default
+                    | crate::resource::RequireValue::LocalizedDefault
+            ) && modules
+                .get(&file)
+                .is_some_and(|module| !module.parsed.facts().commonjs())
+            {
+                result.require_defaults.insert(file);
+            }
+        }
+        for (&file, module) in modules {
+            if !browser && module.parsed.facts().commonjs() {
+                continue;
+            }
+            for dependency in module
+                .parsed
+                .facts()
+                .dependencies()
+                .iter()
+                .filter(|d| !d.type_only() && d.kind() == DependencyKind::Require)
+            {
+                for target in target_files(graph, file, dependency)? {
+                    if modules[&target].parsed.facts().commonjs() {
+                        continue;
+                    }
+                    let original = graph.file_path(target).unwrap();
+                    let name = format!("{prefix}esm_{}", digest(original.to_str().unwrap()));
+                    let facts = &modules[&target].parsed.facts();
+                    let resource = require_resources.get(original);
+                    if !browser
+                        && resource != Some(&crate::resource::RequireValue::LocalizedDefault)
+                    {
+                        continue;
+                    }
+                    if facts.dependencies().iter().all(|d| d.type_only())
+                        && (resource.is_some()
+                            || facts
+                                .effects()
+                                .iter()
+                                .all(|effect| effect.deferred().is_some()))
+                    {
+                        // Instantiating a dependency-free, effect-free leaf
+                        // cannot activate application code. Keep its native
+                        // namespace, including shared static/dynamic users.
+                        result.eager_esm.insert(target, name);
+                        continue;
+                    }
+                    if !browser {
+                        continue;
+                    }
+                    let path = PathBuf::from(format!(
+                        "native/require-esm-{}.mjs",
+                        digest(original.to_str().unwrap())
+                    ));
+                    result.require_esm.insert(
+                        target,
+                        Value {
+                            path: path.clone(),
+                            name: name.clone(),
+                            exported: name,
+                        },
+                    );
+                    result
+                        .members
+                        .insert(NodeId::Module(original.to_owned()), path.clone());
+                    for (index, _) in modules[&target].parsed.segments().iter().enumerate() {
+                        result.members.insert(
+                            NodeId::Segment {
+                                module: original.to_owned(),
+                                index: index as u32,
                             },
+                            path.clone(),
                         );
-                        result
-                            .members
-                            .insert(NodeId::Module(original.to_owned()), path.clone());
-                        for (index, _) in modules[&target].parsed.segments().iter().enumerate() {
-                            result.members.insert(
-                                NodeId::Segment {
-                                    module: original.to_owned(),
-                                    index: index as u32,
-                                },
-                                path.clone(),
-                            );
-                        }
                     }
                 }
             }
+        }
+        if browser {
             // Only require-owned synchronous leaves can move into a lexical
             // initializer without changing native static/dynamic namespace jobs.
             for &target in result.require_esm.keys() {
                 let original = graph.file_path(target).unwrap();
                 ensure!(
-                    modules[&target].parsed.facts().dependencies().iter().all(|d| d.type_only()),
+                    modules[&target]
+                        .parsed
+                        .facts()
+                        .dependencies()
+                        .iter()
+                        .all(|d| d.type_only()),
                     "{}: browser synchronous require of ESM currently needs a dependency-free leaf; use import() for this evaluation boundary",
                     original.display()
                 );
                 ensure!(
-                    !plan.roots.values().any(|seed| seed.evaluation_roots.contains(&target)
-                        || seed.binding_roots.iter().any(|node| matches!(node,
+                    !plan
+                        .roots
+                        .values()
+                        .any(|seed| seed.evaluation_roots.contains(&target)
+                            || seed.binding_roots.iter().any(|node| matches!(node,
                             GraphNode::Module(file) if *file == target))),
                     "{}: browser synchronous require cannot also expose the ESM target as a native entry or dynamic-import job",
                     original.display()
@@ -323,7 +354,9 @@ impl CommonJs {
                             ensure!(
                                 dependency.kind() == DependencyKind::Require,
                                 "{}:{}..{}: browser synchronous require of {} cannot share a native static/dynamic ESM job",
-                                graph.file_path(file).unwrap().display(), dependency.span().start, dependency.span().end,
+                                graph.file_path(file).unwrap().display(),
+                                dependency.span().start,
+                                dependency.span().end,
                                 graph.file_path(target).unwrap().display()
                             );
                         }
@@ -370,7 +403,7 @@ impl CommonJs {
                 availability,
             });
         }
-        if let Some(name) = self.eager_esm.get(&target) {
+        if let Some(name) = self.eager_esm.get(&target).filter(|_| self.browser || esm) {
             return Ok(RequireExpression {
                 expression: if self.require_defaults.contains(&target) {
                     format!("{name}.default").into()
@@ -390,7 +423,14 @@ impl CommonJs {
         );
         Ok(RequireExpression {
             expression: Code::request(namespaces[&target].clone(), RequestKind::Require)
-                .surrounded("require(", ")"),
+                .surrounded(
+                    "require(",
+                    if self.require_defaults.contains(&target) {
+                        ").default"
+                    } else {
+                        ")"
+                    },
+                ),
             availability: None,
         })
     }
@@ -675,7 +715,9 @@ impl CommonJs {
                 format!("exports.{0} = {0};", value.name)
             };
             let paths = if self.browser {
-                format!("import.meta.url, {runtime}.apply({runtime}.slice, import.meta.url, [0, {runtime}.apply({runtime}.lastIndexOf, import.meta.url, ['/']) + 1])")
+                format!(
+                    "import.meta.url, {runtime}.apply({runtime}.slice, import.meta.url, [0, {runtime}.apply({runtime}.lastIndexOf, import.meta.url, ['/']) + 1])"
+                )
             } else {
                 "__filename, __dirname".into()
             };
@@ -706,7 +748,9 @@ impl CommonJs {
                     ensure!(
                         !self.browser || dependency.kind() != DependencyKind::Require,
                         "{}:{}..{}: browser target cannot require external {specifier:?}; use an ESM import or bundle the dependency",
-                        graph.file_path(file).unwrap().display(), dependency.span().start, dependency.span().end
+                        graph.file_path(file).unwrap().display(),
+                        dependency.span().start,
+                        dependency.span().end
                     );
                     let (kind, prefix) = match dependency.kind() {
                         DependencyKind::Require => (RequestKind::Require, "require("),

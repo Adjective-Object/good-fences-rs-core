@@ -1,5 +1,8 @@
 # bundler-cli
 
+locale is a strict shared LocaleOptions object; --locale overrides only default,
+while --locale default retains configuration. Never discover ori.json.
+
 Strict JSON `env` is an explicit object of JSON fields, defaulting to empty.
 Forward it to BuildOptions.env; never read host environment values or execute JS configs.
 

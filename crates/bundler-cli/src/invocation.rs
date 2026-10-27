@@ -10,6 +10,7 @@ pub(crate) struct Invocation {
     pub entries: Vec<PathBuf>,
     pub trace_file: Option<PathBuf>,
     pub css_auto_mount: bool,
+    pub locale: Option<String>,
     pub config: ConfigSource,
 }
 
@@ -45,6 +46,7 @@ impl Invocation {
             fixture_config,
             trace_file,
             css_auto_mount,
+            locale,
             root,
             output,
             entries,
@@ -58,6 +60,7 @@ impl Invocation {
                 entries,
                 trace_file,
                 css_auto_mount,
+                locale,
                 config: fixture_config.map_or_else(
                     || ConfigSource::Loaded(Box::default()),
                     |path| ConfigSource::Fixture(cwd.join(path)),
@@ -100,6 +103,7 @@ impl Invocation {
                 trace_file: trace_file.or_else(|| config.trace_file.as_ref().map(|p| root.join(p))),
                 root,
                 css_auto_mount,
+                locale,
                 config: ConfigSource::Loaded(Box::new(config)),
             })
         }

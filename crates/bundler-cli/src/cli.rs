@@ -27,6 +27,10 @@ pub struct Cli {
     #[arg(long)]
     pub css_auto_mount: bool,
 
+    /// Override locale.default; 'none' keeps source strings, 'ploc' pseudo-localizes.
+    #[arg(long, value_name = "LOCALE")]
+    pub locale: Option<String>,
+
     /// Input project root (positional mode only).
     #[arg(value_name = "ROOT", requires = "output")]
     pub root: Option<PathBuf>,

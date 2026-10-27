@@ -59,6 +59,51 @@ including strict/reversed equality) retain native host reads and short-circuit
 timing. Their aliases create no dependencies or injected loader; ordinary native
 CJS initialization, missing-module errors and host getters remain intact.
 
+### Localization
+
+Only `*.locstring.json` receives the localization transform; ordinary JSON stays
+unchanged. Inputs must be strict string-to-string JSON objects. All underscore-
+prefixed metadata is removed, and each other key without `_key.comment` warns on
+every build, including cache/no-op hits. Values have independently tree-shakable
+named ESM exports and one shared clean default object. Nonidentifier/reserved keys
+use string export aliases; a key named `default` stays in the default object's
+properties. CommonJS and ESM literal requires return that same object on both
+targets, including Node ESM callers; this does not enable arbitrary Node
+ESM-to-ESM synchronous require.
+
+`BuildOptions::locale` (`build::LocaleOptions`) defaults to source strings.
+Set `default` to `none` or empty for source values, a locale name to load all
+root-relative `locale/<name>/**/*.locstrings.json` catalogs, or a case-insensitive
+Ori pseudo alias (`ploc`, `qps-ploc`, `pseudo`, `pseudo-loc`, `pseudo-locale`,
+`pseudo-locstring(s)`, `pseudoloc`, `pseudolocale`, `pseudolocstring(s)`).
+Catalog keys are global: duplicates report both paths; missing/empty translations
+fall back to source values. Missing locale directories and malformed objects fail;
+empty catalogs warn. No `ori.json` or runtime string store is read.
+
+`locale.ploc` (`build::PseudoLocaleOptions`) accepts optional `prepend`, `append`,
+`start_delimiter`, `end_delimiter`, `extend`, `override_`, and `omit_keys`.
+JSON uses `startDelimiter`, `endDelimiter`, `override`, and `omitKeys`.
+Defaults are `[[`, `]]`, `{`, `}`, and 0.5 extension. Ori's exact algorithm
+indexes accent/override characters by original UTF-8 byte offset, preserves
+placeholder runs (including multi-character delimiters), and pads with
+`floor(extend * original UTF-8 length)` spaces before the suffix. Negative extension
+clamps to zero; extension must be finite. Unrepresentable padding or output
+capacity and allocation failures return source-contextual errors. Empty prefix/suffix are valid;
+an empty start delimiter retains `{`, an empty end delimiter never closes, and
+an empty override retains accents. `omit_keys` bypasses pseudo transformation only.
+For client-style output use prefix `[!!`, suffix `!!]`, extension 0.2.
+Algorithm/table provenance and full upstream licenses accompany
+`src/build/localization.LICENSE.txt`; synthetic oracle cases use Ori 050d85e7.
+
+Catalogs are read once per build, sharing the inventory snapshot. One deterministic
+configuration/catalog-byte-and-match-set fingerprint keys generated resources,
+without hashing the catalog per source. Original source bytes remain separately
+sealed. Fresh input and catalog-set rechecks surround success/no-op and resolution
+cache publication, so edits/additions/deletions/renames cannot reuse stale output.
+Generated source spans describe generated JavaScript, not invented JSON mappings.
+No source-cache schema/extractor bump is needed: the existing prepared-source
+identity/provenance and verified borrowed extraction records remain authoritative.
+
 Preparation stages only source identities and settled resolutions, not owning
 graph inputs or a second source-text map. New products construct graph inputs
 once from checked session records after the no-op check. Sessions retain original

@@ -505,9 +505,12 @@ pub(crate) fn esm_plan_configured(
                 matches!(graph.dependency_target(file, dependency.id()),
                     Some(DependencyTarget::File(target))
                     if matches!(target.extension().and_then(|ext| ext.to_str()), Some("json" | "jsonc"))
-                        && require_resources.get(target) == Some(&crate::resource::RequireValue::Default)),
+                        && matches!(require_resources.get(target),
+                            Some(crate::resource::RequireValue::Default | crate::resource::RequireValue::LocalizedDefault))),
                 "{}: JSON import attribute at bytes {}..{} requires a checked prepared JSON resource",
-                module.path.display(), dependency.span().start, dependency.span().end
+                module.path.display(),
+                dependency.span().start,
+                dependency.span().end
             );
         }
     }
@@ -637,15 +640,15 @@ fn async_modules(
             for target in target_files(graph, file, dependency)? {
                 if let Some(&(origin, span)) = asynchronous.get(&target) {
                     eyre::bail!(
-                    "{}: require of async ESM {} at bytes {}..{} (top-level await in {} at bytes {}..{})",
-                    graph.file_path(file).unwrap().display(),
-                    graph.file_path(target).unwrap().display(),
-                    dependency.span().start,
-                    dependency.span().end,
-                    graph.file_path(origin).unwrap().display(),
-                    span.start,
-                    span.end
-                );
+                        "{}: require of async ESM {} at bytes {}..{} (top-level await in {} at bytes {}..{})",
+                        graph.file_path(file).unwrap().display(),
+                        graph.file_path(target).unwrap().display(),
+                        dependency.span().start,
+                        dependency.span().end,
+                        graph.file_path(origin).unwrap().display(),
+                        span.start,
+                        span.end
+                    );
                 }
             }
         }

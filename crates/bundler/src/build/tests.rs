@@ -9,6 +9,7 @@ mod browser;
 mod contexts;
 mod discovery;
 mod env;
+mod localization;
 #[path = "policy_tests.rs"]
 mod policy_tests;
 mod resolution_cache;

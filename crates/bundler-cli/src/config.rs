@@ -28,6 +28,7 @@ pub(crate) struct Config {
     #[serde(rename = "policyAllowlist")]
     policy_allowlist: Vec<PolicyAllowance>,
     env: std::collections::BTreeMap<String, serde_json::Value>,
+    locale: bundler::build::LocaleOptions,
 }
 
 impl Default for Config {
@@ -46,6 +47,7 @@ impl Default for Config {
             cache: Cache::default(),
             policy_allowlist: Vec::new(),
             env: Default::default(),
+            locale: Default::default(),
         }
     }
 }
@@ -167,6 +169,11 @@ impl Config {
         let mut options = BuildOptions::default();
         let config = self;
         options.env = config.env;
+        config
+            .locale
+            .validate()
+            .wrap_err("validating locale configuration")?;
+        options.locale = config.locale;
         options.policy_allowlist = config
             .policy_allowlist
             .into_iter()
@@ -254,6 +261,36 @@ impl Config {
 mod tests {
     use super::*;
     use test_tmpdir::TmpDir;
+
+    #[test]
+    fn localization_configuration_is_strict_and_preserves_empty_pseudo_options() {
+        let dir = TmpDir::new();
+        for json in [
+            r#"{"locale":null}"#,
+            r#"{"locale":"fr"}"#,
+            r#"{"locale":{"default":42}}"#,
+            r#"{"locale":{"unknown":true}}"#,
+            r#"{"locale":{"ploc":{"extend":"0.2"}}}"#,
+            r#"{"locale":{"ploc":{"omitKeys":true}}}"#,
+            r#"{"locale":{"ploc":{"unknown":true}}}"#,
+        ] {
+            assert!(serde_json::from_str::<Config>(json).is_err(), "{json}");
+        }
+        for locale in ["../fr", "fr/x", "fr\\x", "."] {
+            let config: Config =
+                serde_json::from_value(serde_json::json!({"locale":{"default":locale}})).unwrap();
+            assert!(config.into_options(dir.root()).is_err());
+        }
+        let config: Config = serde_json::from_str(
+            r#"{"locale":{"default":"ploc","ploc":{"prepend":"","append":"","startDelimiter":"","endDelimiter":"","extend":-1,"override":"","omitKeys":["a"]}}}"#,
+        ).unwrap();
+        let locale = config.into_options(dir.root()).unwrap().locale;
+        assert_eq!(locale.default, "ploc");
+        assert_eq!(locale.ploc.prepend.as_deref(), Some(""));
+        assert_eq!(locale.ploc.end_delimiter.as_deref(), Some(""));
+        assert_eq!(locale.ploc.extend, Some(-1.0));
+        assert!(locale.ploc.omit_keys.contains("a"));
+    }
 
     #[test]
     fn env_is_an_explicit_json_object() {

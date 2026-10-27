@@ -1,0 +1,602 @@
+[
+  [
+    "",
+    {},
+    "[[]]"
+  ],
+  [
+    "",
+    {
+      "prepend": "",
+      "append": "",
+      "extend": -1,
+      "override": "XY😀"
+    },
+    ""
+  ],
+  [
+    "",
+    {
+      "startDelimiter": "\u003c%",
+      "endDelimiter": "%\u003e",
+      "extend": 0.2
+    },
+    "[[]]"
+  ],
+  [
+    "",
+    {
+      "startDelimiter": "界界",
+      "endDelimiter": "終",
+      "override": "012"
+    },
+    "[[]]"
+  ],
+  [
+    "",
+    {
+      "startDelimiter": "aa",
+      "endDelimiter": "bb",
+      "extend": 0
+    },
+    "[[]]"
+  ],
+  [
+    "",
+    {
+      "startDelimiter": "",
+      "endDelimiter": "",
+      "override": ""
+    },
+    "[[]]"
+  ],
+  [
+    "",
+    {
+      "prepend": "[!!",
+      "append": "!!]",
+      "extend": 0.2
+    },
+    "[!!!!]"
+  ],
+  [
+    "Hello {name}",
+    {},
+    "[[Ĥĕľŀō {name}      ]]"
+  ],
+  [
+    "Hello {name}",
+    {
+      "prepend": "",
+      "append": "",
+      "extend": -1,
+      "override": "XY😀"
+    },
+    "XY😀XY😀{name}"
+  ],
+  [
+    "Hello {name}",
+    {
+      "startDelimiter": "\u003c%",
+      "endDelimiter": "%\u003e",
+      "extend": 0.2
+    },
+    "[[Ĥĕľŀō {ņąmę}  ]]"
+  ],
+  [
+    "Hello {name}",
+    {
+      "startDelimiter": "界界",
+      "endDelimiter": "終",
+      "override": "012"
+    },
+    "[[012012012012      ]]"
+  ],
+  [
+    "Hello {name}",
+    {
+      "startDelimiter": "aa",
+      "endDelimiter": "bb",
+      "extend": 0
+    },
+    "[[Ĥĕľŀō {ņąmę}]]"
+  ],
+  [
+    "Hello {name}",
+    {
+      "startDelimiter": "",
+      "endDelimiter": "",
+      "override": ""
+    },
+    "[[Ĥĕľŀō {name}      ]]"
+  ],
+  [
+    "Hello {name}",
+    {
+      "prepend": "[!!",
+      "append": "!!]",
+      "extend": 0.2
+    },
+    "[!!Ĥĕľŀō {name}  !!]"
+  ],
+  [
+    "éAb世界c😀d",
+    {},
+    "[[éÂƄ世界ċ😀đ        ]]"
+  ],
+  [
+    "éAb世界c😀d",
+    {
+      "prepend": "",
+      "append": "",
+      "extend": -1,
+      "override": "XY😀"
+    },
+    "X😀XYYY😀X"
+  ],
+  [
+    "éAb世界c😀d",
+    {
+      "startDelimiter": "\u003c%",
+      "endDelimiter": "%\u003e",
+      "extend": 0.2
+    },
+    "[[éÂƄ世界ċ😀đ   ]]"
+  ],
+  [
+    "éAb世界c😀d",
+    {
+      "startDelimiter": "界界",
+      "endDelimiter": "終",
+      "override": "012"
+    },
+    "[[02011120        ]]"
+  ],
+  [
+    "éAb世界c😀d",
+    {
+      "startDelimiter": "aa",
+      "endDelimiter": "bb",
+      "extend": 0
+    },
+    "[[éÂƄ世界ċ😀đ]]"
+  ],
+  [
+    "éAb世界c😀d",
+    {
+      "startDelimiter": "",
+      "endDelimiter": "",
+      "override": ""
+    },
+    "[[éÂƄ世界ċ😀đ        ]]"
+  ],
+  [
+    "éAb世界c😀d",
+    {
+      "prepend": "[!!",
+      "append": "!!]",
+      "extend": 0.2
+    },
+    "[!!éÂƄ世界ċ😀đ   !!]"
+  ],
+  [
+    "first {{name}} last",
+    {},
+    "[[ƒīřšť {{name}} ĺäŝţ         ]]"
+  ],
+  [
+    "first {{name}} last",
+    {
+      "prepend": "",
+      "append": "",
+      "extend": -1,
+      "override": "XY😀"
+    },
+    "XY😀XY😀{{name}Y😀XY😀X"
+  ],
+  [
+    "first {{name}} last",
+    {
+      "startDelimiter": "\u003c%",
+      "endDelimiter": "%\u003e",
+      "extend": 0.2
+    },
+    "[[ƒīřšť {{ňǻmě}} ĺäŝţ   ]]"
+  ],
+  [
+    "first {{name}} last",
+    {
+      "startDelimiter": "界界",
+      "endDelimiter": "終",
+      "override": "012"
+    },
+    "[[0120120120120120120         ]]"
+  ],
+  [
+    "first {{name}} last",
+    {
+      "startDelimiter": "aa",
+      "endDelimiter": "bb",
+      "extend": 0
+    },
+    "[[ƒīřšť {{ňǻmě}} ĺäŝţ]]"
+  ],
+  [
+    "first {{name}} last",
+    {
+      "startDelimiter": "",
+      "endDelimiter": "",
+      "override": ""
+    },
+    "[[ƒīřšť {{name}} last         ]]"
+  ],
+  [
+    "first {{name}} last",
+    {
+      "prepend": "[!!",
+      "append": "!!]",
+      "extend": 0.2
+    },
+    "[!!ƒīřšť {{name}} ĺäŝţ   !!]"
+  ],
+  [
+    "a\u003c%name%\u003eb",
+    {},
+    "[[à\u003c%ŉämȇ%\u003eƄ     ]]"
+  ],
+  [
+    "a\u003c%name%\u003eb",
+    {
+      "prepend": "",
+      "append": "",
+      "extend": -1,
+      "override": "XY😀"
+    },
+    "XY😀XY😀XY😀X"
+  ],
+  [
+    "a\u003c%name%\u003eb",
+    {
+      "startDelimiter": "\u003c%",
+      "endDelimiter": "%\u003e",
+      "extend": 0.2
+    },
+    "[[à\u003c%name%\u003eƄ  ]]"
+  ],
+  [
+    "a\u003c%name%\u003eb",
+    {
+      "startDelimiter": "界界",
+      "endDelimiter": "終",
+      "override": "012"
+    },
+    "[[0120120120     ]]"
+  ],
+  [
+    "a\u003c%name%\u003eb",
+    {
+      "startDelimiter": "aa",
+      "endDelimiter": "bb",
+      "extend": 0
+    },
+    "[[à\u003c%ŉämȇ%\u003eƄ]]"
+  ],
+  [
+    "a\u003c%name%\u003eb",
+    {
+      "startDelimiter": "",
+      "endDelimiter": "",
+      "override": ""
+    },
+    "[[à\u003c%ŉämȇ%\u003eƄ     ]]"
+  ],
+  [
+    "a\u003c%name%\u003eb",
+    {
+      "prepend": "[!!",
+      "append": "!!]",
+      "extend": 0.2
+    },
+    "[!!à\u003c%ŉämȇ%\u003eƄ  !!]"
+  ],
+  [
+    "aaabbb",
+    {},
+    "[[àáâƄƅɓ   ]]"
+  ],
+  [
+    "aaabbb",
+    {
+      "prepend": "",
+      "append": "",
+      "extend": -1,
+      "override": "XY😀"
+    },
+    "XY😀XY😀"
+  ],
+  [
+    "aaabbb",
+    {
+      "startDelimiter": "\u003c%",
+      "endDelimiter": "%\u003e",
+      "extend": 0.2
+    },
+    "[[àáâƄƅɓ ]]"
+  ],
+  [
+    "aaabbb",
+    {
+      "startDelimiter": "界界",
+      "endDelimiter": "終",
+      "override": "012"
+    },
+    "[[012012   ]]"
+  ],
+  [
+    "aaabbb",
+    {
+      "startDelimiter": "aa",
+      "endDelimiter": "bb",
+      "extend": 0
+    },
+    "[[aaabbɓ]]"
+  ],
+  [
+    "aaabbb",
+    {
+      "startDelimiter": "",
+      "endDelimiter": "",
+      "override": ""
+    },
+    "[[àáâƄƅɓ   ]]"
+  ],
+  [
+    "aaabbb",
+    {
+      "prepend": "[!!",
+      "append": "!!]",
+      "extend": 0.2
+    },
+    "[!!àáâƄƅɓ !!]"
+  ],
+  [
+    "a界界VALUE終b",
+    {},
+    "[[à界界VĄŁŰĚ終Ƅ        ]]"
+  ],
+  [
+    "a界界VALUE終b",
+    {
+      "prepend": "",
+      "append": "",
+      "extend": -1,
+      "override": "XY😀"
+    },
+    "XYYY😀XY😀XX"
+  ],
+  [
+    "a界界VALUE終b",
+    {
+      "startDelimiter": "\u003c%",
+      "endDelimiter": "%\u003e",
+      "extend": 0.2
+    },
+    "[[à界界VĄŁŰĚ終Ƅ   ]]"
+  ],
+  [
+    "a界界VALUE終b",
+    {
+      "startDelimiter": "界界",
+      "endDelimiter": "終",
+      "override": "012"
+    },
+    "[[0界界VALUE終0        ]]"
+  ],
+  [
+    "a界界VALUE終b",
+    {
+      "startDelimiter": "aa",
+      "endDelimiter": "bb",
+      "extend": 0
+    },
+    "[[à界界VĄŁŰĚ終Ƅ]]"
+  ],
+  [
+    "a界界VALUE終b",
+    {
+      "startDelimiter": "",
+      "endDelimiter": "",
+      "override": ""
+    },
+    "[[à界界VĄŁŰĚ終Ƅ        ]]"
+  ],
+  [
+    "a界界VALUE終b",
+    {
+      "prepend": "[!!",
+      "append": "!!]",
+      "extend": 0.2
+    },
+    "[!!à界界VĄŁŰĚ終Ƅ   !!]"
+  ],
+  [
+    "ABC xyz 123",
+    {},
+    "[[ÀƁĊ xƴž 123     ]]"
+  ],
+  [
+    "ABC xyz 123",
+    {
+      "prepend": "",
+      "append": "",
+      "extend": -1,
+      "override": "XY😀"
+    },
+    "XY😀XY😀XY😀XY"
+  ],
+  [
+    "ABC xyz 123",
+    {
+      "startDelimiter": "\u003c%",
+      "endDelimiter": "%\u003e",
+      "extend": 0.2
+    },
+    "[[ÀƁĊ xƴž 123  ]]"
+  ],
+  [
+    "ABC xyz 123",
+    {
+      "startDelimiter": "界界",
+      "endDelimiter": "終",
+      "override": "012"
+    },
+    "[[01201201201     ]]"
+  ],
+  [
+    "ABC xyz 123",
+    {
+      "startDelimiter": "aa",
+      "endDelimiter": "bb",
+      "extend": 0
+    },
+    "[[ÀƁĊ xƴž 123]]"
+  ],
+  [
+    "ABC xyz 123",
+    {
+      "startDelimiter": "",
+      "endDelimiter": "",
+      "override": ""
+    },
+    "[[ÀƁĊ xƴž 123     ]]"
+  ],
+  [
+    "ABC xyz 123",
+    {
+      "prepend": "[!!",
+      "append": "!!]",
+      "extend": 0.2
+    },
+    "[!!ÀƁĊ xƴž 123  !!]"
+  ],
+  [
+    "a{name}b{other}",
+    {},
+    "[[à{name}Ƃ{other}       ]]"
+  ],
+  [
+    "a{name}b{other}",
+    {
+      "prepend": "",
+      "append": "",
+      "extend": -1,
+      "override": "XY😀"
+    },
+    "X{name}Y{other}"
+  ],
+  [
+    "a{name}b{other}",
+    {
+      "startDelimiter": "\u003c%",
+      "endDelimiter": "%\u003e",
+      "extend": 0.2
+    },
+    "[[à{ňãmȅ}Ƃ{ŏťħȅŗ}   ]]"
+  ],
+  [
+    "a{name}b{other}",
+    {
+      "startDelimiter": "界界",
+      "endDelimiter": "終",
+      "override": "012"
+    },
+    "[[012012012012012       ]]"
+  ],
+  [
+    "a{name}b{other}",
+    {
+      "startDelimiter": "aa",
+      "endDelimiter": "bb",
+      "extend": 0
+    },
+    "[[à{ňãmȅ}Ƃ{ŏťħȅŗ}]]"
+  ],
+  [
+    "a{name}b{other}",
+    {
+      "startDelimiter": "",
+      "endDelimiter": "",
+      "override": ""
+    },
+    "[[à{name}b{other}       ]]"
+  ],
+  [
+    "a{name}b{other}",
+    {
+      "prepend": "[!!",
+      "append": "!!]",
+      "extend": 0.2
+    },
+    "[!!à{name}Ƃ{other}   !!]"
+  ],
+  [
+    "a{unterminated",
+    {},
+    "[[à{unterminated       ]]"
+  ],
+  [
+    "a{unterminated",
+    {
+      "prepend": "",
+      "append": "",
+      "extend": -1,
+      "override": "XY😀"
+    },
+    "X{unterminated"
+  ],
+  [
+    "a{unterminated",
+    {
+      "startDelimiter": "\u003c%",
+      "endDelimiter": "%\u003e",
+      "extend": 0.2
+    },
+    "[[à{ŭŉťȅŕmįŉȁŧȅđ  ]]"
+  ],
+  [
+    "a{unterminated",
+    {
+      "startDelimiter": "界界",
+      "endDelimiter": "終",
+      "override": "012"
+    },
+    "[[01201201201201       ]]"
+  ],
+  [
+    "a{unterminated",
+    {
+      "startDelimiter": "aa",
+      "endDelimiter": "bb",
+      "extend": 0
+    },
+    "[[à{ŭŉťȅŕmįŉȁŧȅđ]]"
+  ],
+  [
+    "a{unterminated",
+    {
+      "startDelimiter": "",
+      "endDelimiter": "",
+      "override": ""
+    },
+    "[[à{unterminated       ]]"
+  ],
+  [
+    "a{unterminated",
+    {
+      "prepend": "[!!",
+      "append": "!!]",
+      "extend": 0.2
+    },
+    "[!!à{unterminated  !!]"
+  ]
+]

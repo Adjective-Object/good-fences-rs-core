@@ -71,6 +71,78 @@ fn import_meta_env_project_configuration_builds_and_runs() {
 }
 
 #[test]
+fn localization_cli_overrides_config_and_default_uses_config() {
+    let dir = TmpDir::new();
+    std::fs::write(
+        dir.root().join("main.mjs"),
+        "import {overflowLabel} from './strings.locstring.json'; console.log(overflowLabel);",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.root().join("strings.locstring.json"),
+        r#"{"overflowLabel":"More","_overflowLabel.comment":"menu"}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.root().join("locale/fr")).unwrap();
+    std::fs::write(
+        dir.root().join("locale/fr/menu.locstrings.json"),
+        r#"{"overflowLabel":"Encore"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.root().join("bundler.config.json"),
+        r#"{"entries":["main.mjs"],"target":"browser","locale":{"default":"fr","ploc":{"prepend":"[!!","append":"!!]","extend":0.2,"override":"x"}}}"#,
+    )
+    .unwrap();
+    for (args, expected) in [
+        (vec![], "Encore\n"),
+        (vec!["--locale", "default"], "Encore\n"),
+        (vec!["--locale", "none"], "More\n"),
+        (vec!["--locale=PsEuDo"], "[!!xxxx!!]\n"),
+    ] {
+        let result = command(&dir, &args);
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+        let entry = std::path::Path::new(report["directory"].as_str().unwrap())
+            .join(report["entries"]["main.mjs"].as_str().unwrap());
+        let observed = Command::new("node")
+            .arg(entry.file_name().unwrap())
+            .current_dir(entry.parent().unwrap())
+            .output()
+            .unwrap();
+        assert!(
+            observed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&observed.stderr)
+        );
+        assert_eq!(String::from_utf8(observed.stdout).unwrap(), expected);
+    }
+    let invalid = command(&dir, &["--locale", "../escape"]);
+    assert!(!invalid.status.success());
+    assert!(invalid.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&invalid.stderr).contains("validating --locale"));
+    std::fs::write(
+        dir.root().join("bundler.config.json"),
+        r#"{"entries":["main.mjs"],"target":"node","locale":{"default":"ploc","ploc":{"extend":1e308}}}"#,
+    )
+    .unwrap();
+    let overflow = command(&dir, &[]);
+    assert!(!overflow.status.success());
+    assert!(overflow.stdout.is_empty());
+    let diagnostic = String::from_utf8_lossy(&overflow.stderr);
+    assert!(
+        diagnostic.contains("pseudo-localizing")
+            && diagnostic.contains("strings.locstring.json")
+            && diagnostic.contains("padding length"),
+        "{diagnostic}"
+    );
+}
+
+#[test]
 fn invalid_arguments_use_clap_diagnostics_without_building() {
     let dir = TmpDir::new();
     for args in [
