@@ -5,6 +5,162 @@ use tracing_subscriber::prelude::*;
 #[derive(Clone, Default)]
 struct Diagnostics(Arc<Mutex<Vec<String>>>);
 
+#[test]
+fn guarded_computed_module_probe_preserves_browser_fallback_and_cache_parity() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "export function load() { return require('./probe.cjs'); }",
+    );
+    write(
+        dir.root(),
+        "probe.cjs",
+        r#"
+        trace.push('factory');
+        if (globalThis.clearModule) module = null;
+        var enqueueTaskImpl;
+        try {
+            var requireString = ('require' + Math.random()).slice(0, 7);
+            var nodeRequire = module && module[requireString];
+            enqueueTaskImpl = nodeRequire.call(module, 'timers').setImmediate;
+        } catch (error) {
+            trace.push('fallback');
+            var channel = new MessageChannel();
+            channel.port1.onmessage = function() { trace.push('delivered'); };
+            enqueueTaskImpl = function() { channel.port2.postMessage(null); };
+        }
+        exports.enqueue = function() { enqueueTaskImpl(); };
+        "#,
+    );
+    let mut config = options();
+    config.resolver.target_env = TargetEnv::Browser;
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let cold = session.build(&config).unwrap();
+    let memory = session.build(&config).unwrap();
+    let disk = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(cold.counters.source_parses, 2);
+    assert_eq!(memory.counters.source_parses, 0);
+    assert_eq!(memory.counters.memory_hits, 2);
+    assert_eq!(disk.counters.source_parses, 0);
+    assert_eq!(disk.counters.disk_hits, 2);
+    assert!(cold.warnings.is_empty());
+    assert!(memory.warnings.is_empty());
+    assert!(disk.warnings.is_empty());
+    assert_eq!(cold.product.artifacts.backend, crate::link::Backend::Native);
+    assert_eq!(cold.product.artifacts, disk.product.artifacts);
+    let probe = cold
+        .product
+        .graph
+        .file_id(&dir.root().join("probe.cjs"))
+        .unwrap();
+    assert!(cold
+        .product
+        .graph
+        .file_facts(probe)
+        .unwrap()
+        .dependencies()
+        .is_empty());
+    for mode in ["absent", "throw", "callable", "null"] {
+        let entry = serde_json::to_string(&format!(
+            "./{}",
+            cold.product.artifacts.entries["main"].display()
+        ))
+        .unwrap();
+        let check = format!(
+            r#"
+            import assert from 'node:assert/strict';
+            globalThis.trace = [];
+            globalThis.clearModule = '{mode}' === 'null';
+            globalThis.MessageChannel = class {{
+                constructor() {{
+                    trace.push('channel');
+                    this.port1 = {{}};
+                    this.port2 = {{postMessage: () => this.port1.onmessage()}};
+                }}
+            }};
+            if ('{mode}' !== 'absent') Object.defineProperty(Object.prototype, 'require', {{
+                configurable: true,
+                get() {{
+                    assert.equal(Object.hasOwn(this, 'exports'), true);
+                    trace.push('get');
+                    if ('{mode}' === 'throw') throw Error('unavailable');
+                    return function(request) {{
+                        assert.equal(Object.hasOwn(this, 'exports'), true);
+                        assert.equal(request, 'timers');
+                        trace.push('call');
+                        return {{setImmediate() {{ trace.push('immediate'); }}}};
+                    }};
+                }}
+            }});
+            try {{
+                const ns = await import({entry});
+                assert.deepEqual(trace, []);
+                const value = ns.load();
+                assert.equal(ns.load(), value);
+                value.enqueue();
+                assert.deepEqual(trace, '{mode}' === 'callable'
+                    ? ['factory', 'get', 'call', 'immediate']
+                    : '{mode}' === 'throw'
+                        ? ['factory', 'get', 'fallback', 'channel', 'delivered']
+                        : ['factory', 'fallback', 'channel', 'delivered']);
+            }} finally {{
+                delete Object.prototype.require;
+            }}
+            console.log('probe passed');
+            "#
+        );
+        for build in [&cold, &memory, &disk] {
+            assert_eq!(
+                observe_named(&build.product.artifacts, &check),
+                b"probe passed\n"
+            );
+        }
+    }
+}
+
+#[test]
+fn guarded_computed_module_probe_does_not_cache_adjacent_module_waivers() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.cjs",
+        "const key = 'require'; const r = module && module[key]; r.call(module, 'timers'); module[other];",
+    );
+    let mut config = options();
+    config.entries.get_mut("main").unwrap().path = "main.cjs".into();
+    config.policy_allowlist =
+        vec![PolicyAllowance::new("main.cjs", [PolicyName::ModuleAccess]).unwrap()];
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let cold = session.build(&config).unwrap();
+    let memory = session.build(&config).unwrap();
+    let mut disk_session = BuildSession::new(dir.root()).unwrap();
+    let disk = disk_session.build(&config).unwrap();
+    assert_eq!(cold.warnings.len(), 1);
+    assert_eq!(memory.warnings, cold.warnings);
+    assert_eq!(disk.warnings, cold.warnings);
+    assert_eq!(memory.counters.memory_hits, 1);
+    assert_eq!(disk.counters.disk_hits, 1);
+    config.policy_allowlist.clear();
+    for session in [&mut session, &mut disk_session] {
+        let error = session.build(&config).err().unwrap();
+        let failures = error.downcast_ref::<PreparationErrors>().unwrap();
+        let cause = failures.errors().values().next().unwrap()[0]
+            .downcast_ref::<ast_segmenter::policy::PolicyErrors>()
+            .unwrap();
+        assert_eq!(cause.violations().len(), 1);
+        assert_eq!(cause.violations()[0].policy(), PolicyName::ModuleAccess);
+        assert!(format!("{error:#}").contains("module[other]"));
+    }
+    assert!(BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .is_err());
+}
+
 impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Diagnostics {
     fn on_event(&self, event: &tracing::Event<'_>, _: tracing_subscriber::layer::Context<'_, S>) {
         if event.metadata().target() != "bundler::diagnostic" {

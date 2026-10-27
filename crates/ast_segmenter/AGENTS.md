@@ -115,7 +115,15 @@ negated nodeType/truthy detector tail, optionally behind an && guard, plus direc
 equality/inequality comparisons with null. These comparisons expose no module
 value and never authorize adjacent escapes or member operations. Preserve
 opaque aliases/getters/identity; do not infer loaders or dependencies from aliases.
-Direct module.require/computed unknown members and bare wrapper escapes stay rejected.
+CommonJS also admits read-only `module && module[key]` capability detectors.
+Only a bounded `require` key (literal or `('require' + suffix).slice(0, 7)`,
+directly or through one single-declaration, unwritten binding) can authorize a
+single-declaration, unreassigned alias to pass the unshadowed wrapper as
+`.call(module, ...)`'s receiver; match binding identity, never alias spelling.
+Unknown/non-capability keys, including exports aliases, never authorize receivers.
+Require all alias uses to be checked receiver sites; property mutation and
+potentially mutating escapes disqualify the binding, regardless of source order.
+Direct module.require/unguarded computed members and other wrapper escapes stay rejected.
 CommonJS `typeof require` and `typeof require == 'function' && require` retain
 native host reads (strict/reversed equality too), never inferred dependencies or
 an injected loader. Other loader escapes and direct operations on the detector

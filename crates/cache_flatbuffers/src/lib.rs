@@ -53,7 +53,7 @@ use eyre::{ensure, Result};
 /// Independent resolution and upstream-map limit; source facts have no byte cap.
 pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
 pub const SCHEMA_VERSION: u32 = 22;
-pub const EXTRACTOR_VERSION: u32 = 36;
+pub const EXTRACTOR_VERSION: u32 = 37;
 pub const MODULE_IDENTIFIER: &str = "GFSM";
 const CHECKSUM_BYTES: usize = 16;
 

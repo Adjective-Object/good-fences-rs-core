@@ -1,5 +1,5 @@
 //! Checked source-local subset; resolution and runtime support are separate gates.
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use oxc_ast::ast::*;
 use oxc_ast_visit::{walk, Visit};
@@ -45,6 +45,15 @@ pub(crate) fn collect(program: &Program<'_>, facts: &ModuleFacts) -> Vec<PolicyV
         wrapper_arguments: HashSet::new(),
         module_receivers: HashSet::new(),
         module_probes: HashSet::new(),
+        unresolved_modules: facts
+            .references()
+            .iter()
+            .filter(|reference| reference.name() == "module" && reference.binding().is_none())
+            .map(|reference| reference.span().start)
+            .collect(),
+        module_aliases: HashMap::new(),
+        module_require_keys: HashSet::new(),
+        module_alias_receivers: Vec::new(),
         typeof_names: HashSet::new(),
         require_selections: HashSet::new(),
         wrapper_operations: HashSet::new(),
@@ -53,6 +62,7 @@ pub(crate) fn collect(program: &Program<'_>, facts: &ModuleFacts) -> Vec<PolicyV
         errors: Vec::new(),
     };
     policy.visit_program(program);
+    policy.admit_module_alias_receivers(facts);
     let requires: Vec<_> = facts
         .dependencies()
         .iter()
@@ -157,6 +167,10 @@ struct Policy {
     wrapper_arguments: HashSet<u32>,
     module_receivers: HashSet<u32>,
     module_probes: HashSet<u32>,
+    unresolved_modules: HashSet<u32>,
+    module_aliases: HashMap<u32, Option<u32>>,
+    module_require_keys: HashSet<u32>,
+    module_alias_receivers: Vec<(u32, u32)>,
     typeof_names: HashSet<u32>,
     require_selections: HashSet<u32>,
     wrapper_operations: HashSet<u32>,
@@ -166,6 +180,84 @@ struct Policy {
 }
 
 impl Policy {
+    fn admit_module_alias_receivers(&mut self, facts: &ModuleFacts) {
+        if self.module_aliases.is_empty() || self.module_alias_receivers.is_empty() {
+            return;
+        }
+        // Only checked .call receiver sites may use the alias: other references
+        // can mutate its properties or escape to code that does.
+        let receiver_aliases: HashSet<_> = self
+            .module_alias_receivers
+            .iter()
+            .map(|(alias, _)| *alias)
+            .collect();
+        let mut aliases: HashSet<_> = facts
+            .bindings()
+            .iter()
+            .filter(|binding| {
+                self.module_aliases.contains_key(&binding.id().0)
+                    && binding.declarations().len() == 1
+            })
+            .map(|binding| binding.id())
+            .collect();
+        let mut require_keys: HashSet<_> = facts
+            .bindings()
+            .iter()
+            .filter(|binding| {
+                self.module_require_keys.contains(&binding.id().0)
+                    && binding.declarations().len() == 1
+            })
+            .map(|binding| binding.id())
+            .collect();
+        let mut reference_bindings = HashMap::new();
+        for reference in facts.references() {
+            if let Some(binding) = reference.binding() {
+                reference_bindings.insert(reference.span().start, binding);
+                if reference.write() {
+                    require_keys.remove(&binding);
+                }
+                if self.module_aliases.contains_key(&binding.0)
+                    && (reference.write() || !receiver_aliases.contains(&reference.span().start))
+                {
+                    aliases.remove(&binding);
+                }
+            }
+        }
+        // Unknown/exports keys can select an object mutated through another
+        // identity. Do not grant those aliases a raw wrapper receiver.
+        aliases.retain(|binding| {
+            self.module_aliases[&binding.0].is_none_or(|key| {
+                reference_bindings
+                    .get(&key)
+                    .is_some_and(|binding| require_keys.contains(binding))
+            })
+        });
+        for (alias, receiver) in &self.module_alias_receivers {
+            if reference_bindings
+                .get(alias)
+                .is_some_and(|binding| aliases.contains(binding))
+            {
+                self.module_probes.insert(*receiver);
+            }
+        }
+    }
+
+    fn computed_module_detector(&self, expression: &LogicalExpression<'_>) -> Option<[u32; 2]> {
+        if expression.operator != LogicalOperator::And {
+            return None;
+        }
+        let guard = module_identifier(&expression.left)?;
+        let Expression::ComputedMemberExpression(member) = expression.right.get_inner_expression()
+        else {
+            return None;
+        };
+        let object = module_identifier(&member.object)?;
+        (!member.optional
+            && self.unresolved_modules.contains(&guard)
+            && self.unresolved_modules.contains(&object))
+        .then_some([guard, object])
+    }
+
     fn reject(&mut self, span: Span, policy: PolicyName) {
         self.errors.push(PolicyViolation::new(policy, span));
     }
@@ -196,6 +288,37 @@ fn module_identifier(expression: &Expression<'_>) -> Option<u32> {
         Expression::Identifier(id) if id.name == "module" => Some(id.span.start),
         _ => None,
     }
+}
+
+fn module_require_key(expression: &Expression<'_>) -> bool {
+    if matches!(expression.get_inner_expression(), Expression::StringLiteral(s) if s.value == "require")
+    {
+        return true;
+    }
+    let Expression::CallExpression(call) = expression.get_inner_expression() else {
+        return false;
+    };
+    let Expression::StaticMemberExpression(member) = call.callee.get_inner_expression() else {
+        return false;
+    };
+    let Expression::BinaryExpression(prefix) = member.object.get_inner_expression() else {
+        return false;
+    };
+    // React's obfuscated capability key, not general constant propagation.
+    !call.optional
+        && !member.optional
+        && member.property.name == "slice"
+        && prefix.operator == BinaryOperator::Addition
+        && matches!(prefix.left.get_inner_expression(), Expression::StringLiteral(s) if s.value == "require")
+        && call.arguments.len() == 2
+        && call
+            .arguments
+            .iter()
+            .zip([0.0, 7.0])
+            .all(|(argument, value)| {
+                matches!(argument.as_expression().map(Expression::get_inner_expression),
+                Some(Expression::NumericLiteral(number)) if number.value == value)
+            })
 }
 
 fn require_detector(expression: &LogicalExpression<'_>) -> Option<u32> {
@@ -375,6 +498,9 @@ impl<'a> Visit<'a> for Policy {
 
     fn visit_logical_expression(&mut self, expression: &LogicalExpression<'a>) {
         if self.commonjs && !self.operation {
+            if let Some(references) = self.computed_module_detector(expression) {
+                self.module_probes.extend(references);
+            }
             if let Some(references) = module_detector(expression) {
                 self.module_probes.extend(references);
             }
@@ -395,6 +521,27 @@ impl<'a> Visit<'a> for Policy {
     }
 
     fn visit_call_expression(&mut self, expression: &CallExpression<'a>) {
+        if self.commonjs && !expression.optional {
+            if let Expression::StaticMemberExpression(member) =
+                expression.callee.get_inner_expression()
+            {
+                if !member.optional && member.property.name == "call" {
+                    if let Expression::Identifier(alias) = member.object.get_inner_expression() {
+                        if let Some(receiver) = expression
+                            .arguments
+                            .first()
+                            .and_then(Argument::as_expression)
+                            .and_then(module_identifier)
+                        {
+                            if self.unresolved_modules.contains(&receiver) {
+                                self.module_alias_receivers
+                                    .push((alias.span.start, receiver));
+                            }
+                        }
+                    }
+                }
+            }
+        }
         let saved = self.operation;
         self.operation = true;
         self.visit_expression(&expression.callee);
@@ -568,6 +715,37 @@ impl<'a> Visit<'a> for Policy {
             self.reject(declaration.span, PolicyName::ResourceManagementTransform);
         }
         walk::walk_variable_declaration(self, declaration);
+    }
+
+    fn visit_variable_declarator(&mut self, declaration: &VariableDeclarator<'a>) {
+        if self.commonjs {
+            if let BindingPattern::BindingIdentifier(binding) = &declaration.id {
+                if declaration.init.as_ref().is_some_and(module_require_key) {
+                    self.module_require_keys.insert(binding.span.start);
+                }
+                if let Some(Expression::LogicalExpression(detector)) = declaration
+                    .init
+                    .as_ref()
+                    .map(Expression::get_inner_expression)
+                {
+                    if self.computed_module_detector(detector).is_some() {
+                        if let Expression::ComputedMemberExpression(member) =
+                            detector.right.get_inner_expression()
+                        {
+                            if module_require_key(&member.expression) {
+                                self.module_aliases.insert(binding.span.start, None);
+                            } else if let Expression::Identifier(key) =
+                                member.expression.get_inner_expression()
+                            {
+                                self.module_aliases
+                                    .insert(binding.span.start, Some(key.span.start));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        walk::walk_variable_declarator(self, declaration);
     }
 
     fn visit_jsx_element(&mut self, element: &JSXElement<'a>) {

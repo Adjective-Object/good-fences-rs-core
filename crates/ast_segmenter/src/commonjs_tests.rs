@@ -418,6 +418,142 @@ fn commonjs_guarded_module_detectors_preserve_wrapper_reference_facts() {
 }
 
 #[test]
+fn commonjs_guarded_computed_module_probe_keeps_opaque_facts() {
+    let source = r#"
+        var enqueueTaskImpl;
+        try {
+            var requireString = ('require' + Math.random()).slice(0, 7);
+            var nodeRequire = module && module[requireString];
+            enqueueTaskImpl = nodeRequire.call(module, 'timers').setImmediate;
+        } catch (error) {
+            var channel = new MessageChannel();
+            enqueueTaskImpl = function(task) { channel.port2.postMessage(task); };
+        }
+        module.exports = enqueueTaskImpl;
+    "#;
+    let parsed = parse(source, "computed.cjs").unwrap();
+    assert!(matches!(parsed.body(), ModuleBody::CommonJs { .. }));
+    assert_eq!(parsed.segments().len(), 1);
+    assert!(parsed.facts().dependencies().is_empty());
+    assert!(parsed.facts().policy_violations().is_empty());
+    assert_eq!(
+        parsed
+            .facts()
+            .references()
+            .iter()
+            .filter(|reference| reference.commonjs() == Some(CommonJsGlobal::Module))
+            .count(),
+        4
+    );
+    for detector in [
+        "(module) && (module)[key]",
+        "module && module['require']",
+        "module && module[('require' + Math.random()).slice(0, 7)]",
+    ] {
+        parse(
+            &format!(
+                "const key = 'require'; const selected = ({detector}); selected.call((module), 'timers');"
+            ),
+            "computed.cjs",
+        )
+        .unwrap();
+    }
+    for key in ["key", "'exports'", "'ex' + 'ports'"] {
+        parse(
+            &format!("const selected = module && module[{key}]; consume(selected);"),
+            "computed.cjs",
+        )
+        .unwrap();
+    }
+    let shadow = parse(
+        "function local(module) {
+            const nodeRequire = module && module[key];
+            return nodeRequire.call(module, 'timers');
+         } module.exports = local;",
+        "shadow.cjs",
+    )
+    .unwrap();
+    assert_eq!(
+        shadow
+            .facts()
+            .references()
+            .iter()
+            .filter(|reference| reference.name() == "module"
+                && reference.binding().is_some()
+                && reference.commonjs().is_none())
+            .count(),
+        3
+    );
+}
+
+#[test]
+fn commonjs_guarded_computed_module_probe_admission_stays_bounded() {
+    for source in [
+        "const r = module[key];",
+        "const r = module && module.require;",
+        "const r = module || module[key];",
+        "const r = other && module[key];",
+        "const r = module && other[key];",
+        "const r = module && module?.[key];",
+        "const r = module && module[module];",
+        "module && (module[key] = 1);",
+        "module && module[key]++;",
+        "module && delete module[key];",
+        "(module && module[key])();",
+        "new (module && module[key])();",
+        "(module && module[key])`tag`;",
+        "(module && module[key]).call(module, 'timers');",
+        "(module && module[key]).x = 1;",
+        "delete (module && module[key]).x;",
+        "const r = module && module[key]; consume(module);",
+        "const r = module && module[key]; r(module);",
+        "const r = module && module[key]; r.apply(module, []);",
+        "const r = module && module[key]; r.call({}, module);",
+        "const r = module && module[key]; r.call(module, module);",
+        "const r = module && module[key]; r?.call(module, 'timers');",
+        "const r = module && module[key]; r.call?.(module, 'timers');",
+        "const r = module && module[key]; other.call(module, 'timers');",
+        "const r = module && module['exports']; r.call = consume; r.call(module);",
+        "exports.call = consume; const r = module && module['exports']; r.call(module);",
+        "const r = module && module['exports']; exports.call = consume; r.call(module);",
+        "module.exports.call = consume; const r = module && module['exports']; r.call(module);",
+        "const key = 'exports'; exports.call = consume; const r = module && module[key]; r.call(module);",
+        "const key = 'ex' + 'ports'; exports.call = consume; const r = module && module[key]; r.call(module);",
+        "const key = ('exports' + Math.random()).slice(0, 7); exports.call = consume; const r = module && module[key]; r.call(module);",
+        "exports.call = consume; const r = module && module[unknown]; r.call(module);",
+        "const r = module && module['require']; r.call = consume; r.call(module);",
+        "const r = module && module['require']; r['call'] = consume; r.call(module);",
+        "const r = module && module['require']; r.call++; r.call(module);",
+        "const r = module && module['require']; delete r.call; r.call(module);",
+        "const r = module && module['require']; [r.call] = [consume]; r.call(module);",
+        "const r = module && module['require']; consume(r); r.call(module);",
+        "const r = module && module['require']; Object.defineProperty(r, 'call', {value: consume}); r.call(module);",
+        "const r = module && module['require']; const escaped = r; escaped.call = consume; r.call(module);",
+        "const r = module && module['require']; const escaped = {r}; escaped.r.call = consume; r.call(module);",
+        "const r = module && module['require']; r.changeCall(); r.call(module);",
+        "const r = module && module['require']; r.call(module, consume(r));",
+        "const r = module && module['require']; function mutate() { r.call = consume; } mutate(); r.call(module);",
+        "let r = module && module['require']; r = other; r.call(module, 'timers');",
+        "let r = module && module['require']; function replace() { r = other; } r.call(module, 'timers');",
+        "var r = module && module['require']; var r; r.call(module, 'timers');",
+        "const r = module && module['require']; function local(r) { r.call(module, 'timers'); }",
+        "const r = module && module[key]; r.call(module);",
+        "let key = 'require'; key = 'exports'; const r = module && module[key]; r.call(module);",
+        "var key = 'require'; var key; const r = module && module[key]; r.call(module);",
+        "const key = 'require'; function local(key) { const r = module && module[key]; r.call(module); }",
+        "const key = 'require'; const other = key; const r = module && module[other]; r.call(module);",
+        "const key = ('require' + Math.random()).slice(1, 7); const r = module && module[key]; r.call(module);",
+        "const key = ('require' + Math.random()).slice(0, 8); const r = module && module[key]; r.call(module);",
+        "function local(module) { return module && module[key]; } other.call(module, 'timers');",
+        "function local(module) { var r = module && module[key]; } r.call(module, 'timers');",
+        "const r = module && module[key]; module[other];",
+    ] {
+        let error = format!("{:#}", parse(source, "bad.cjs").unwrap_err());
+        assert!(error.contains("module access"), "{}: {}", source, error);
+    }
+}
+
+#[test]
 fn commonjs_module_null_checks_preserve_wrapper_reference_facts() {
     for operator in ["==", "!=", "===", "!=="] {
         for comparison in [

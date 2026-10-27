@@ -7,7 +7,7 @@
   Aggregate updates copy verified borrowed request tables directly into a new
   builder, preserving untouched requests without unpacking input/proof trees.
 
-- This is the production `.seg.fb` backend (schema 22/extractor 36).
+- This is the production `.seg.fb` backend (schema 22/extractor 37).
   `segment_cache` adds source-local semantic validation before exposing records.
 - Independent `style.fbs` schema 1/extractor 1 stores source-local URL/module
   syntax in `GFST` records, sealing original/prepared bytes and extraction config.

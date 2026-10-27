@@ -1,6 +1,6 @@
 # Typed source-cache FlatBuffers
 
-**Production source-cache backend: schema 22/extractor 36, `.seg.fb`.**
+**Production source-cache backend: schema 22/extractor 37, `.seg.fb`.**
 `segment_cache` reads these immutable buffers through AST/Ecco views and runs
 full semantic validation before exposing checked records. Byte-backed parsed
 modules feed graph linking, effect solving and native emission without unpacking
@@ -87,7 +87,7 @@ while graph ranges and derived analysis/emission plans are explicitly owned.
 AST and bundler differential tests cover complete record equality, byte borrowing,
 owner lifetime, execution/recipe validation, ESM/CJS outputs and parallel emission.
 
-Schema 22/extractor 36 are active production identities, included in bundler
+Schema 22/extractor 37 are active production identities, included in bundler
 source-parse fingerprints. Atomic sibling publication uses `.seg.fb.stage-*`;
 inventory ignores current and legacy `.seg.cbor` artifacts, without deleting them.
 Old formats miss/rebuild. This crate's handwritten wire path does not use Serde.
@@ -142,7 +142,7 @@ not construction; its schema name now matches the existing interpreter meaning.
 ## Independent resolution records
 
 `resolution.fbs` defines schema **2** (`GFRS`), independent of source schema
-22/extractor 36. `resolution::WireResolution` retains private `Arc<[u8]>` bytes.
+22/extractor 37. `resolution::WireResolution` retains private `Arc<[u8]>` bytes.
 Source/map hashes, extraction module seals, filesystem proof content seals and
 all three framing checksums use 16-byte big-endian XXH3-128, matching existing
 fingerprint byte order. These are corruption checks, not authentication.

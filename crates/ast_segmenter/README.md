@@ -230,6 +230,19 @@ preceded by an `&&` guard. Equality can be strict or operand-reversed; parenthes
 are transparent. Detector aliases remain ordinary values in the opaque body:
 property getters, short-circuiting and exports identity are not rewritten.
 Alias capability probes do not create dependencies or provide a Node loader.
+Read-only `module && module[key]` capability probes are also supported.
+A directly initialized, single-declaration, unreassigned alias may use
+`.call(module, ...)` with that wrapper receiver only for a bounded `require` key:
+the literal or `('require' + suffix).slice(0, 7)`, directly or through one
+single-declaration, unwritten key binding. Unknown keys and exports aliases
+remain valid reads but never authorize a raw wrapper receiver, even when mutated
+through another object identity. No recursive alias or general constant analysis
+is performed. Binding identity excludes
+shadowed or reassigned aliases; every alias use must be such a checked call site,
+excluding property mutations and potentially mutating escapes.
+Unguarded computed reads, writes and other bare
+wrapper escapes remain rejected. The opaque body preserves getters, exceptions
+and browser fallbacks without adding a dependency for the alias's request.
 Direct `module == null`, `module != null`, `module === null` and
 `module !== null` checks are also supported, with either operand order and
 parentheses. They retain the real wrapper value and original short-circuit
