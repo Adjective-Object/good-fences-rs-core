@@ -342,7 +342,7 @@ impl Extractor<'_, '_> {
     }
 
     fn context_dependency(&mut self, kind: DependencyKind, span: Span, source: &Expression<'_>) {
-        fn pieces(source: &Expression<'_>, parts: &mut Vec<String>) -> Option<()> {
+        fn pieces(source: &Expression<'_>, parts: &mut Vec<String>, nested: bool) -> Option<()> {
             match source.get_inner_expression() {
                 Expression::StringLiteral(s) => {
                     parts.last_mut().unwrap().push_str(s.value.as_str()?)
@@ -350,7 +350,11 @@ impl Extractor<'_, '_> {
                 Expression::TemplateLiteral(t) => {
                     for (index, quasi) in t.quasis.iter().enumerate() {
                         if index > 0 {
-                            parts.push(String::new());
+                            if nested {
+                                pieces(&t.expressions[index - 1], parts, nested)?;
+                            } else {
+                                parts.push(String::new());
+                            }
                         }
                         if let Some(cooked) = &quasi.value.cooked {
                             parts.last_mut().unwrap().push_str(cooked.as_str()?);
@@ -358,20 +362,26 @@ impl Extractor<'_, '_> {
                     }
                 }
                 Expression::BinaryExpression(b) if b.operator == BinaryOperator::Addition => {
-                    pieces(&b.left, parts)?;
-                    pieces(&b.right, parts)?;
+                    pieces(&b.left, parts, nested)?;
+                    pieces(&b.right, parts, nested)?;
                 }
                 _ => parts.push(String::new()),
             }
             Some(())
         }
         let mut pattern = vec![String::new()];
-        if pieces(source, &mut pattern).is_none() {
+        if pieces(
+            source,
+            &mut pattern,
+            !self.commonjs && kind == DependencyKind::Require,
+        )
+        .is_none()
+        {
             self.reject(span, "module request contains a lone UTF-16 surrogate");
             return;
         }
         if !pattern[0].starts_with("./") && !pattern[0].starts_with("../") {
-            if kind == DependencyKind::Require {
+            if kind == DependencyKind::Require && self.commonjs {
                 self.reject(
                     span,
                     "nonliteral require requires a relative literal prefix",
@@ -380,7 +390,9 @@ impl Extractor<'_, '_> {
             }
             // The empty-prefix wildcard denotes the importing directory, not
             // an unrestricted filesystem scope. Runtime arguments stay intact.
-            pattern = vec![String::new(), String::new()];
+            if kind == DependencyKind::DynamicImport {
+                pattern = vec![String::new(), String::new()];
+            }
         }
         self.facts.dependencies_mut().push(Dependency::new(
             DependencyId(span.start),

@@ -180,6 +180,8 @@ pub(super) struct Connections {
     pub native_exports: BTreeMap<SegmentKey, Code>,
     pub native_requests: HashMap<(u32, ast_segmenter::owned::DependencyId), NativeRequest>,
     pub require_imports: BTreeMap<Owner, Code>,
+    pub require_contexts:
+        HashMap<(u32, ast_segmenter::owned::DependencyId), crate::context::Dispatch>,
     pub lazy: BTreeMap<Owner, Vec<LazyInstance>>,
     pub lazy_selectors: BTreeMap<(u32, u32), String>,
     pub lazy_options: BTreeMap<SegmentKey, OptionsConnection>,
@@ -224,6 +226,7 @@ impl Connections {
             native_exports: BTreeMap::new(),
             native_requests: HashMap::new(),
             require_imports: BTreeMap::new(),
+            require_contexts: HashMap::new(),
             lazy: BTreeMap::new(),
             lazy_selectors: BTreeMap::new(),
             lazy_options: BTreeMap::new(),
@@ -788,13 +791,9 @@ impl Connections {
             if cjs.contains(file) {
                 continue;
             }
-            for dependency in module
-                .parsed
-                .facts()
-                .dependencies()
-                .iter()
-                .filter(|d| !d.type_only() && d.pattern().is_none())
-            {
+            for dependency in module.parsed.facts().dependencies().iter().filter(|d| {
+                !d.type_only() && (d.pattern().is_none() || d.kind() == DependencyKind::Require)
+            }) {
                 if plan.lazy_modules.modules().iter().any(|module| {
                     module.owner.file_id == file && module.dependency == dependency.id()
                 }) {
@@ -812,31 +811,64 @@ impl Connections {
                 }
                 if dependency.kind() == DependencyKind::Require {
                     ensure!(
-                        !matches!(graph.dependency_target(file, dependency.id()), Some(DependencyTarget::External(_))),
+                        !matches!(
+                            graph.dependency_target(file, dependency.id()),
+                            Some(DependencyTarget::External(_))
+                        ),
                         "{}:{}..{}: native ESM cannot require external {:?}; use an ESM import or bundle the dependency",
-                        graph.file_path(file).unwrap().display(), dependency.span().start, dependency.span().end,
+                        graph.file_path(file).unwrap().display(),
+                        dependency.span().start,
+                        dependency.span().end,
                         dependency.specifier()
                     );
-                    let target = target_file(graph, file, dependency)?;
                     let owner = placement.owners[&SegmentKey::new(file, index as u32)];
-                    let planned = cjs
-                        .require_target(target, &self.namespaces, &owner.path(graph), true)
-                        .wrap_err_with(|| {
-                            format!(
-                                "{}:{}..{}: planning synchronous require of {:?}",
-                                graph.file_path(file).unwrap().display(),
-                                dependency.span().start,
-                                dependency.span().end,
-                                dependency.specifier()
-                            )
-                        })?;
-                    if let Some((name, import)) = planned.availability {
-                        availability.entry(owner).or_default().insert(name, import);
+                    let targets = match graph.dependency_target(file, dependency.id()) {
+                        Some(DependencyTarget::Context(candidates)) => candidates
+                            .iter()
+                            .map(|(request, path)| {
+                                Ok((
+                                    request.clone(),
+                                    graph
+                                        .file_id(path)
+                                        .ok_or_eyre("missing require context target")?,
+                                ))
+                            })
+                            .collect::<eyre::Result<BTreeMap<_, _>>>()?,
+                        _ => BTreeMap::from([(
+                            dependency.specifier().to_owned(),
+                            target_file(graph, file, dependency)?,
+                        )]),
+                    };
+                    let mut requests = BTreeMap::new();
+                    for (request, target) in targets {
+                        let planned = cjs
+                            .require_target(target, &self.namespaces, &owner.path(graph), true)
+                            .wrap_err_with(|| {
+                                format!(
+                                    "{}:{}..{}: planning synchronous require of {:?}",
+                                    graph.file_path(file).unwrap().display(),
+                                    dependency.span().start,
+                                    dependency.span().end,
+                                    dependency.specifier()
+                                )
+                            })?;
+                        if let Some((name, import)) = planned.availability {
+                            availability.entry(owner).or_default().insert(name, import);
+                        }
+                        requests.insert(request, planned.expression);
+                    }
+                    if dependency.pattern().is_some() {
+                        self.require_contexts
+                            .insert((file, dependency.id()), cjs.require_dispatch(requests));
+                        continue;
                     }
                     self.native_requests.insert(
                         (file, dependency.id()),
                         NativeRequest {
-                            code: planned.expression,
+                            code: requests
+                                .into_values()
+                                .next()
+                                .ok_or_eyre("missing literal require target")?,
                             whole: true,
                         },
                     );

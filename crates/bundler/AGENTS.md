@@ -121,7 +121,15 @@ JSON/asset/global CSS wrappers and finite require/dynamic-import contexts.
 Availability imports never invoke factories; require sites/facades own activation.
 ESM literal requires share CJS expression planning in ordinary and reconstructed
 recipes: typed availability imports plus whole-call replacements, never static
-facade activation or an injected loader. ESM require contexts remain rejected.
+facade activation or an injected loader. Bounded ESM require contexts reuse checked
+inventory expansion/resolver proofs and the same per-candidate availability plans.
+Dispatch composes original argument operations once, rejects parent components
+before exact sorted-key lookup, and activates only the selected initializer.
+Candidate match-set rechecks govern memory/disk/no-op reuse; no resolved candidates
+or admission decisions enter source sidecars. Keep CJS context matching unchanged.
+ESM context gaps follow Ori: after slash use recursive **/*, otherwise component *;
+terminal gaps work and static pieces stay literal. Early syntax events carry the
+effective format, so fresh and borrowed inventory matching use the same semantics.
 Resolve explicit one-step exact aliases before builtin policy. Browser bare
 builtin spellings require real installed packages through checked resolution,
 inventory and graph loading, never external escape. Reject remaining node:

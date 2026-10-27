@@ -2,6 +2,45 @@ use super::*;
 use std::path::Path;
 
 #[test]
+fn unsupported_esm_require_patterns_are_typed_source_local_policy_evidence() {
+    let declarations = crate::PreparedDeclarations::new(ecco::LocalFacts::default()).unwrap();
+    for source in [
+        "export const load = path => require(path);",
+        "export const load = name => require(`pkg/${name}.js`);",
+        "export const load = name => require(`/root/${name}.js`);",
+        "export const load = name => require(`../${name}.js`);",
+        "export const load = name => require(`./a/../${name}.js`);",
+        "export const load = name => require(name + '.js');",
+        "export const load = name => require(`./parts/${name}/../x.js`);",
+        "export const load = name => require(`file:./parts/${name}.js`);",
+    ] {
+        let error = crate::parse_module(
+            &logger::StdioLogger::new(),
+            source,
+            Path::new("source.mjs"),
+            crate::ModuleFormat::Esm,
+        )
+        .unwrap_err();
+        let violations = error.downcast_ref::<PolicyErrors>().unwrap().violations();
+        assert_eq!(violations.len(), 1, "{source}: {error:#}");
+        assert_eq!(violations[0].policy(), PolicyName::EsmRequireContext);
+        let parsed = crate::parse_module_reporting_policies_with_format(
+            &logger::StdioLogger::new(),
+            source,
+            Path::new("source.mjs"),
+            crate::ModuleFormat::Esm,
+            &declarations,
+            |_, found, commonjs| {
+                assert!(!commonjs);
+                assert_eq!(found, violations);
+            },
+        )
+        .unwrap();
+        assert_eq!(parsed.facts().policy_violations(), violations.to_vec());
+    }
+}
+
+#[test]
 fn import_meta_env_reads_and_property_mutation_are_not_binding_mutation() {
     for source in [
         "const env = import.meta.env; env.MODE = 'test';",
@@ -77,13 +116,16 @@ fn structured_policy_names_keep_mutation_and_indirect_uses_distinct() {
             PolicyName::ModuleAccess,
         ]
     );
-    let parsed = crate::parse_module_reporting_policies(
+    let parsed = crate::parse_module_reporting_policies_with_format(
         &logger::StdioLogger::new(),
         source,
         Path::new("source.cjs"),
         crate::ModuleFormat::CommonJs,
         &declarations,
-        |_, found| assert_eq!(found, violations),
+        |_, found, commonjs| {
+            assert!(commonjs);
+            assert_eq!(found, violations);
+        },
     )
     .unwrap();
     assert_eq!(parsed.facts().policy_violations(), violations.to_vec());

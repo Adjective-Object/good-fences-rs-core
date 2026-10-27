@@ -1234,6 +1234,75 @@ fn mixed_esm_require_roundtrips_checked_borrowed_recipes_without_reparsing() {
 }
 
 #[test]
+fn esm_require_context_roundtrips_borrowed_patterns_and_rejects_missing_policy_evidence() {
+    let source = "export const load = CLIENT => require(`./${CLIENT}/HostClient`).default;";
+    let original = record(source, "factory.mjs", ModuleFormat::Esm);
+    let bytes = original.encode(source).unwrap();
+    let parses = ast_segmenter::module_parse_count();
+    let cached = CacheRecord::decode(&bytes, source, original.config()).unwrap();
+    let parsed = cached.to_parsed(source).unwrap();
+    crate::validate_parsed(source, &parsed).unwrap();
+    assert!(parsed.owned_facts().is_err());
+    let facts = parsed.facts();
+    let dependency = facts.dependencies().get(0).unwrap();
+    assert_eq!(
+        dependency.pattern().unwrap().iter().collect::<Vec<_>>(),
+        ["./", "/HostClient"]
+    );
+    assert!(dependency.bounded_require_context());
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+    let invalid = corrupt(&original, |record| {
+        record.set(
+            "module.facts.dependencies.0.pattern",
+            serde_json::json!(["../", "/HostClient"]),
+        );
+        record.set("module.facts.dependencies.0.specifier", "../*/HostClient");
+    });
+    let error =
+        CacheRecord::decode(&invalid.envelope(true), source, original.config()).unwrap_err();
+    assert!(
+        format!("{error:#}").contains("typed policy evidence"),
+        "{error:#}"
+    );
+    let empty = corrupt(&original, |record| {
+        record.set("module.facts.dependencies.0.pattern", serde_json::json!([]));
+        record.set("module.facts.dependencies.0.specifier", "");
+    });
+    assert!(CacheRecord::decode(&empty.envelope(true), source, original.config()).is_err());
+    for (expression, matches, misses) in [
+        (
+            "'./prefix' + name + '.js'",
+            "./prefixone.js",
+            "./prefix/one.js",
+        ),
+        ("'./parts/' + name", "./parts/deep/one.js", "./other/one.js"),
+        (
+            "`./parts/${name}-${tail}.js`",
+            "./parts/deep/a-b.js",
+            "./parts/a-b/c.js",
+        ),
+    ] {
+        let source = format!("export const load = (name, tail) => require({expression});");
+        let original = record(&source, "factory.mjs", ModuleFormat::Esm);
+        let parses = ast_segmenter::module_parse_count();
+        let cached = CacheRecord::decode(
+            &original.encode(&source).unwrap(),
+            &source,
+            original.config(),
+        )
+        .unwrap();
+        let parsed = cached.to_parsed(&source).unwrap();
+        crate::validate_parsed(&source, &parsed).unwrap();
+        assert!(parsed.owned_facts().is_err());
+        let dependency = parsed.facts().dependencies().get(0).unwrap();
+        assert!(dependency.bounded_require_context());
+        assert!(dependency.matches_esm_require_specifier(matches));
+        assert!(!dependency.matches_esm_require_specifier(misses));
+        assert_eq!(ast_segmenter::module_parse_count(), parses);
+    }
+}
+
+#[test]
 fn rejects_corrupt_execution_contexts_and_access_timing() {
     let source =
         "let x; const stored = (p = x++) => () => x; (() => x++)(); class C { field = x++; }";

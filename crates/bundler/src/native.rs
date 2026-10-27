@@ -1145,6 +1145,10 @@ fn reconstruct(
                     .iter()
                     .find(|d| d.id() == *dependency)
                     .ok_or_eyre("missing original dependency")?;
+                if let Some(dispatch) = values.contexts.get(&(file, dependency.id())) {
+                    renderer.context(dependency, dispatch.clone());
+                    continue;
+                }
                 if matches!(
                     dependency.kind(),
                     DependencyKind::Import
@@ -1165,10 +1169,6 @@ fn reconstruct(
                 {
                     None
                 } else {
-                    if let Some(dispatch) = values.contexts.get(&(file, dependency.id())) {
-                        renderer.context(dependency, dispatch.clone());
-                        continue;
-                    }
                     if let Some(request) = values.dynamic_sites.get(&(file, dependency.id())) {
                         renderer.edit(
                             operation_index as u32,

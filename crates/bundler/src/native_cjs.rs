@@ -507,8 +507,18 @@ impl CommonJs {
         Ok(Some(crate::context::Dispatch {
             requests,
             dynamic: true,
+            reject_parent: false,
             runtime: self.runtime.clone(),
         }))
+    }
+
+    pub fn require_dispatch(&self, requests: BTreeMap<String, Code>) -> crate::context::Dispatch {
+        crate::context::Dispatch {
+            requests,
+            dynamic: false,
+            reject_parent: true,
+            runtime: self.runtime.clone(),
+        }
     }
 
     pub fn import(
@@ -778,6 +788,7 @@ impl CommonJs {
                         crate::context::Dispatch {
                             requests,
                             dynamic: false,
+                            reject_parent: false,
                             runtime: self.runtime.clone(),
                         },
                     );

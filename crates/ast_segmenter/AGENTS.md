@@ -141,9 +141,13 @@ short-circuit aliases and lexical TDZ; keep direct wrapper operations rejected.
 Conditional value branches may select bare require as a native host read, without
 inferring loader dependencies. Preserve missing-host errors and selected getters;
 direct operations on conditional wrapper values remain rejected.
-Direct unshadowed literal require calls in ESM retain ESM format and ordinary
-dependency recipes. Reject ESM require contexts, other aliases, writes and
-indirect uses; target compatibility and call-site activation remain linker policy.
+Direct unshadowed require calls in ESM retain ESM format and ordinary dependency
+recipes. Computed template/addition requests need a ./ local prefix without parent
+components. Ori-style gaps following slash recurse; partial-component gaps exclude
+slash, and terminal gaps are supported. Other unsupported patterns retain typed policy
+evidence. Nested template literals preserve static pieces; argument operations
+retain original evaluation. Reject other aliases, writes and indirect uses;
+target compatibility and call-site activation remain linker policy.
 Operation context follows selected conditional branches/final sequence values,
 not tests/discarded prefixes; logical operands remain conservatively checked.
 CommonJS path parameters allow var/function redeclarations and nested shadows;

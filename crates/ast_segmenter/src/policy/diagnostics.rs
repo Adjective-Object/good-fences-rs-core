@@ -29,7 +29,7 @@ policies! {
     RequireIndirectUse = 2 => ("require-indirect-use", "unsupported require alias or indirect use"),
     MixedEsmCommonjs = 3 => ("mixed-esm-commonjs", "mixed ESM/CommonJS wrapper reference or mixed CommonJS/ESM declaration"),
     ModuleAccess = 4 => ("module-access", "unsupported module access (expected module.exports or a guarded module detector)"),
-    EsmRequireContext = 5 => ("esm-require-context", "unsupported ESM require context (expected a literal request)"),
+    EsmRequireContext = 5 => ("esm-require-context", "unsupported ESM require context (expected ./ relative template/addition pattern without parent traversal)"),
     WrapperArguments = 6 => ("wrapper-arguments", "unsupported CommonJS wrapper arguments access"),
     WrapperRedeclaration = 7 => ("wrapper-redeclaration", "unsupported CommonJS wrapper redeclaration"),
     ImportAttributes = 8 => ("import-attributes", "unsupported import attributes or import phase"),

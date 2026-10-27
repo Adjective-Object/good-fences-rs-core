@@ -480,6 +480,7 @@ impl BuildSession {
                                    dependencies: &dyn Fn(
             &[ast_segmenter::owned::Dependency],
             policy::Admission,
+            bool,
         )| {
             let result = prepare::read(
                 &path,
@@ -497,7 +498,7 @@ impl BuildSession {
             }
             (path, result)
         };
-        let read = |path| read_with_inventory(path, &inventory, &|_, _| {});
+        let read = |path| read_with_inventory(path, &inventory, &|_, _, _| {});
         let work = |job, report: &dyn Fn(prepare::Early)| {
             let provisional = matches!(&job, prepare::Job::PrepareEarly(_));
             match job {
@@ -506,12 +507,14 @@ impl BuildSession {
                     prepare::Claim::Waiting => (path, None),
                     prepare::Claim::Read => {
                         let dependencies = |dependencies: &[ast_segmenter::owned::Dependency],
-                                            admission| {
+                                            admission,
+                                            commonjs| {
                             report(prepare::Early {
                                 path: path.clone(),
                                 admission,
                                 dependencies: prepare::Dependencies::Early(
                                     dependencies.to_vec().into(),
+                                    commonjs,
                                 ),
                             });
                             #[cfg(test)]
@@ -540,7 +543,7 @@ impl BuildSession {
                                 read_with_inventory(
                                     path.clone(),
                                     &candidate_inventory,
-                                    &|dependencies, admission| {
+                                    &|dependencies, admission, commonjs| {
                                         if admission.error.is_some()
                                             || !admission.warnings.is_empty()
                                         {
@@ -548,6 +551,7 @@ impl BuildSession {
                                                 path: path.clone(),
                                                 dependencies: prepare::Dependencies::Early(
                                                     dependencies.to_vec().into(),
+                                                    commonjs,
                                                 ),
                                                 admission,
                                             });
@@ -818,7 +822,7 @@ impl BuildSession {
                                     options.cache,
                                     (&self.root, &options.policy_allowlist),
                                     &declarations,
-                                    &|_, _| {},
+                                    &|_, _, _| {},
                                 )?;
                                 prepared_sources += 1;
                                 loaded

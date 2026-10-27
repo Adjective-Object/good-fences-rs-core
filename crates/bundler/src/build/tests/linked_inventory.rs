@@ -1116,6 +1116,7 @@ fn diamond_inventory_scans_canonical_directories_once_and_expands_only_context_p
         candidates.into_iter(),
         &config.resolver.extensions,
         &resolver,
+        true,
     )
     .unwrap();
     assert_eq!(
@@ -1160,6 +1161,7 @@ fn diamond_inventory_scans_canonical_directories_once_and_expands_only_context_p
         cycled.candidates(root, &external_importer, (&dependency).into()),
         &config.resolver.extensions,
         &resolver,
+        true,
     )
     .unwrap();
     assert!(
@@ -1220,6 +1222,7 @@ fn context_cross_volume_candidates_keep_same_volume_lexical_aliases() {
                 [PathBuf::from(other), root.join("linked").join("one.mjs")].into_iter(),
                 &[],
                 &Resolver,
+                true,
             )
             .unwrap();
             assert_eq!(resolved.len(), 1);

@@ -2,6 +2,49 @@ use super::*;
 use std::sync::{Arc, Mutex};
 use tracing_subscriber::prelude::*;
 
+#[test]
+fn esm_require_context_policy_waivers_are_exact_and_readmitted_on_every_cache_path() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "export const load = name => require('../parts/' + name);",
+    );
+    write(dir.root(), "parts/a.js", "exports.default = 1;");
+    let mut config = options();
+    config.policy_allowlist =
+        vec![PolicyAllowance::new("main.mjs", [PolicyName::EsmRequireContext]).unwrap()];
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let cold = session.build(&config).unwrap();
+    assert_eq!(cold.warnings.len(), 1);
+    assert!(cold.warnings[0].contains("esm-require-context"));
+    let memory = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&cold.product, &memory.product));
+    assert_eq!(memory.warnings, cold.warnings);
+    let mut disk_session = BuildSession::new(dir.root()).unwrap();
+    let disk = disk_session.build(&config).unwrap();
+    assert_eq!(disk.counters.source_parses, 0);
+    assert_eq!(disk.warnings, cold.warnings);
+    config.policy_allowlist.clear();
+    for session in [&mut session, &mut disk_session] {
+        let error = session.build(&config).err().unwrap();
+        let failures = error.downcast_ref::<PreparationErrors>().unwrap();
+        assert!(failures.errors().values().flatten().any(|error| {
+            error
+                .downcast_ref::<ast_segmenter::policy::PolicyErrors>()
+                .is_some_and(|cause| {
+                    cause.violations()[0].policy() == PolicyName::EsmRequireContext
+                })
+        }));
+    }
+    config.policy_allowlist =
+        vec![PolicyAllowance::new("other.mjs", [PolicyName::EsmRequireContext]).unwrap()];
+    assert!(BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .is_err());
+}
+
 #[derive(Clone, Default)]
 struct Diagnostics(Arc<Mutex<Vec<String>>>);
 

@@ -20,13 +20,14 @@ fn policy_evidence_survives_disk_hits_but_strict_loaders_never_admit_it() {
         package: ModuleFormat::CommonJs,
     };
     let mut observations = 0;
-    let cold = load_prepared_reporting_policies(
+    let cold = load_prepared_reporting_policies_with_format(
         &logger::StdioLogger::new(),
         &path,
         prepared(),
         CacheMode::ReadWrite,
         &declarations,
-        |_, violations| {
+        |_, violations, commonjs| {
+            assert!(commonjs);
             observations += 1;
             assert_eq!(violations.len(), 1);
             assert_eq!(violations[0].policy(), PolicyName::UsesEval);
@@ -293,7 +294,8 @@ fn prepared_sources_cache_generated_coordinates_and_recheck_original_bytes() {
         },
         PolicyHandling::Strict(
             |_: &[ast_segmenter::owned::Dependency],
-             _: &[ast_segmenter::policy::PolicyViolation]| {},
+             _: &[ast_segmenter::policy::PolicyViolation],
+             _: bool| {},
         ),
     )
     .unwrap_err();

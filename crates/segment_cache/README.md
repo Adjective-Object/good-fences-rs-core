@@ -22,7 +22,10 @@ module body and ordered statement ranges, not lossy legacy dependency/name sets.
 `CacheRecord` and `CachedModule` have private storage. Consumers and validators
 use borrowed accessors such as `record.module().facts()` and
 `record.module().segments()`; no mutable view of sealed records is exposed.
-Production loading/publication uses typed FlatBuffers, schema 22/extractor 38.
+Production loading/publication uses typed FlatBuffers, schema 22/extractor 40.
+Bounded ESM require contexts reuse typed dependency patterns and original argument
+recipes. Borrowed validation requires exact typed policy evidence for unsupported
+shapes; resolved candidates and per-build policy admission are never persisted.
 Extractor 38 adds typed `ImportMetaEnv` virtual-import occurrences with original
 member spans and checked binding/import/reference links. Values and synthetic
 target paths remain build-local. This appends an enum discriminant without

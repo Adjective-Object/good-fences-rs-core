@@ -34,7 +34,7 @@ syntax/emission/execution records and Ecco precursors. Keep storage fields
 private in record modules; scoped construction APIs are for extraction before
 provenance sealing, not consumer mutation. Owned adapter moves are explicit.
 Scalar IDs/spans and enum discriminants/payload matching remain value APIs.
-Production source sidecars are typed FlatBuffers, schema 22/extractor 38.
+Production source sidecars are typed FlatBuffers, schema 22/extractor 40.
 Cache typed source-local policy occurrences, never allow/deny decisions. Admit
 current exact source/policy waivers on every build, including memory/disk hits.
 Source/preparation identities, extraction seals and cache framing use big-endian

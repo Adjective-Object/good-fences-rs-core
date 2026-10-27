@@ -36,7 +36,7 @@ Graph linking, effect policy, Ecco registration, execution constraints and nativ
 recipe rendering consume owned-or-wire AST views. A byte-backed graph retains
 verified owners, including Ecco's nested storage, without unpacking extraction
 trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
-`.seg.fb` records (schema 22/extractor 38); parse fingerprints include both active
+`.seg.fb` records (schema 22/extractor 40); parse fingerprints include both active
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
 
@@ -2144,8 +2144,20 @@ Direct unshadowed literal `require()` calls are supported in ESM without changin
 its format. Ordinary and reconstructed recipes share whole-call expression
 planning: availability imports do not invoke CJS factories; the original call site
 owns cached activation. Browser ESM/resource targets follow the synchronous leaf
-and shared-default rules above. ESM require contexts, other loader aliases,
-mutations and external requires remain rejected. On Node, mixed ESM may require bundled CJS
+and shared-default rules above. Computed ESM template/addition requests such as
+``require(`./${CLIENT}/HostClient`).default`` use the existing finite context
+inventory and resolver. They require a `./` local prefix. Gaps after `/` recurse
+into directories (`**/*`); partial-component gaps match within one component (`*`).
+Terminal gaps are supported; adjacent gaps share the first gap's wildcard kind.
+Static pieces, including glob/regexp punctuation and decoded escapes, stay literal.
+Arbitrary/bare/absolute requests and literal parent traversal retain the typed
+`esm-require-context` diagnostic. Runtime parent components (including backslash
+separators) throw synchronously before lookup. Unknown keys throw `MODULE_NOT_FOUND`.
+The original argument evaluates once in place, including nested dependency edits;
+only the selected candidate activates. Extension/index aliases follow resolver
+policy, with deterministic checked enumeration and fresh candidate-set rechecks on
+memory/disk/no-op builds. No loader, source evaluation or runtime filesystem is added.
+Other loader aliases, mutations and external requires remain rejected. On Node, mixed ESM may require bundled CJS
 (including prepared JSON), but synchronous ESM targets remain unsupported there.
 Unused native `module`/`exports` reads, `typeof require` and conditional host-loader
 selections retain their read effects through Ecco refinement, including host

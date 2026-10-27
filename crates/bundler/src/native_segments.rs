@@ -2095,6 +2095,12 @@ pub(super) fn emit(
                 })
         }) {
             if dependency.kind() == DependencyKind::Require {
+                if let Some(dispatch) = connections.require_contexts.get(&(file, dependency.id())) {
+                    values
+                        .contexts
+                        .insert((file, dependency.id()), dispatch.clone());
+                    continue;
+                }
                 values.requires.insert(
                     (file, dependency.id()),
                     connections

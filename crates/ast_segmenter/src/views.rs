@@ -563,6 +563,76 @@ impl<'a> Dependency<'a> {
             Self::Wire(v) => v.pattern().map(Sequence::Wire),
         }
     }
+    /// Local ESM contexts admit component and directory gaps, including terminal gaps.
+    pub fn bounded_require_context(self) -> bool {
+        self.kind() == o::DependencyKind::Require
+            && self.pattern().is_some_and(|parts| {
+                parts.len() >= 2
+                    && parts.first().is_some_and(|part| part.starts_with("./"))
+                    && parts.iter().all(|part| {
+                        !part.contains(['\\', ':', '?', '#']) && !part.chars().any(char::is_control)
+                    })
+                    && !parts
+                        .iter()
+                        .collect::<Vec<_>>()
+                        .join("*")
+                        .split('/')
+                        .any(|part| part == "..")
+            })
+    }
+    /// Ori-style gaps following `/` recurse; other gaps cannot consume `/`.
+    /// Static pieces are literal bytes, never glob or regular-expression syntax.
+    pub fn matches_esm_require_specifier(self, request: &str) -> bool {
+        let Some(parts) = self.pattern() else {
+            return request == self.specifier();
+        };
+        let mut positions = vec![0];
+        let mut previous = "";
+        for (index, part) in parts.iter().enumerate() {
+            if index != 0 && !part.is_empty() {
+                let mut next = vec![false; request.len() + 1];
+                for start in positions {
+                    next[start] = true;
+                }
+                let mut active = false;
+                for (offset, matches) in next.iter_mut().enumerate() {
+                    active |= *matches;
+                    *matches = active;
+                    if !previous.ends_with('/') && request.as_bytes().get(offset) == Some(&b'/') {
+                        active = false;
+                    }
+                }
+                positions = next
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(offset, matches)| {
+                        (matches && request.is_char_boundary(offset)).then_some(offset)
+                    })
+                    .collect();
+            } else if index != 0 && index + 1 == parts.len() {
+                return positions
+                    .into_iter()
+                    .any(|start| previous.ends_with('/') || !request[start..].contains('/'));
+            }
+            // Adjacent runtime gaps coalesce and keep the first gap's kind.
+            if index != 0 && part.is_empty() {
+                continue;
+            }
+            positions.retain_mut(|offset| {
+                if request[*offset..].starts_with(part) {
+                    *offset += part.len();
+                    true
+                } else {
+                    false
+                }
+            });
+            if positions.is_empty() {
+                return false;
+            }
+            previous = part;
+        }
+        positions.contains(&request.len())
+    }
     pub fn matches_specifier(self, request: &str) -> bool {
         let Some(parts) = self.pattern() else {
             return request == self.specifier();

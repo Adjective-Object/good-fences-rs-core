@@ -70,7 +70,9 @@ pub(crate) fn collect(program: &Program<'_>, facts: &ModuleFacts) -> Vec<PolicyV
         .collect();
     if !policy.commonjs {
         for dependency in &requires {
-            if dependency.pattern().is_some() {
+            if dependency.pattern().is_some()
+                && !crate::views::Dependency::Owned(dependency).bounded_require_context()
+            {
                 policy.reject(dependency.span(), PolicyName::EsmRequireContext);
             }
         }

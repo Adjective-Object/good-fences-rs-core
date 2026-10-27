@@ -976,8 +976,12 @@ fn esm_require_rejects_unsupported_loader_forms_and_contexts() {
         "require?.('./x');",
         "require('./x', effect());",
         "require(path);",
-        "require(`./parts/${name}.js`);",
-        "require('./parts/' + name);",
+        "require(`../parts/${name}.js`);",
+        "require(`./parts/../${name}.js`);",
+        "require(`pkg/${name}.js`);",
+        "require(`/parts/${name}.js`);",
+        "require(`./parts\\\\${name}.js`);",
+        "require(name + '.js');",
     ] {
         let error = format!("{:#}", parse(source, "bad.mjs").unwrap_err());
         assert!(
@@ -986,6 +990,96 @@ fn esm_require_rejects_unsupported_loader_forms_and_contexts() {
             source,
             error
         );
+    }
+}
+
+#[test]
+fn esm_require_context_retains_original_argument_and_lexical_shadows() {
+    let source = "import {HostClientType} from './enums'; \
+        export const load = CLIENT => require(`./${CLIENT}/HostClient`).default; \
+        export const concat = name => require('./parts/' + name + '.js'); \
+        function shadow(require) { return require(`./${arbitrary}/HostClient`); }";
+    let parsed = parse(source, "factory.mjs").unwrap();
+    assert_eq!(parsed.body(), ModuleBody::Esm);
+    let facts = parsed.facts();
+    let dependencies = facts.dependencies();
+    assert_eq!(dependencies.len(), 3);
+    for (index, expected) in [(1, "./${CLIENT}/HostClient"), (2, "./parts/")] {
+        let dependency = dependencies.get(index).unwrap();
+        assert!(dependency.bounded_require_context());
+        assert!(dependency.enclosing_function().is_some());
+        let span = dependency.specifier_span();
+        assert!(source[span.start as usize..span.end as usize].contains(expected));
+    }
+}
+
+#[test]
+fn esm_require_context_globs_match_component_recursive_and_literal_pieces() {
+    for (expression, matches, misses) in [
+        (
+            "'./prefix' + name + '.js'",
+            vec!["./prefix.js", "./prefixone.js"],
+            vec!["./prefix/one.js"],
+        ),
+        (
+            "'./parts/' + name",
+            vec!["./parts/one.js", "./parts/deep/one.js"],
+            vec!["./other/one.js"],
+        ),
+        (
+            "'./prefix' + name",
+            vec!["./prefix", "./prefixone.js"],
+            vec!["./prefix/one.js"],
+        ),
+        (
+            "`./parts/${a}-${b}.js`",
+            vec!["./parts/a-b.js", "./parts/deep/a-b.js", "./parts/a-b-c.js"],
+            vec!["./parts/a-b/c.js"],
+        ),
+        (
+            "`./parts/${a}${b}/x${c}.js`",
+            vec!["./parts/a/b/x.js", "./parts/a/xone.js"],
+            vec!["./parts/a/x/one.js"],
+        ),
+        (
+            "'./pre[.+*]fix' + name + '.js'",
+            vec!["./pre[.+*]fixone.js"],
+            vec!["./preZfixone.js", "./pre[.+*]fix/one.js"],
+        ),
+        (
+            "`./pr\\u0065fix${name}.js`",
+            vec!["./prefixone.js"],
+            vec!["./prefix/one.js"],
+        ),
+        (
+            "`./parts/${a}ab${b}c.js`",
+            vec!["./parts/ab/abc.js"],
+            vec!["./parts/ab/ab/c.js"],
+        ),
+    ] {
+        let parsed = parse(
+            &format!("export const load = (name,a,b,c) => require({expression});"),
+            "glob.mjs",
+        )
+        .unwrap();
+        let dependency = parsed.facts().dependencies().get(0).unwrap();
+        assert!(dependency.bounded_require_context(), "{}", expression);
+        for request in matches {
+            assert!(
+                dependency.matches_esm_require_specifier(request),
+                "{}: {}",
+                expression,
+                request
+            );
+        }
+        for request in misses {
+            assert!(
+                !dependency.matches_esm_require_specifier(request),
+                "{}: {}",
+                expression,
+                request
+            );
+        }
     }
 }
 

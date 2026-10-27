@@ -282,7 +282,7 @@ unchanged.
 | CJS directives/hashbang/top-level return | Preserved; hashbang recorded separately; one opaque body even when empty |
 | CJS wrapper `arguments` access, including arrows capturing it | Diagnostic; ordinary nested functions' own `arguments` supported |
 | ESM environment probes | `typeof require`, bare `require` selected by conditional value branches, and read-only `module`/`exports` references and property reads remain native globals; host-loader selections/lodash-style aliases infer no dependencies and inject no bindings or constants |
-| ESM direct unshadowed literal `require()` | Preserves ESM format and occurrence recipes, including parenthesized calls; target/activation support is a linker check. ESM require contexts remain rejected |
+| ESM direct unshadowed `require()` | Preserves ESM format and occurrence recipes, including parenthesized calls. Computed template/addition patterns need a `./` local prefix without parent traversal. Ori-style slash-ended gaps recurse; partial-component gaps exclude slash; terminal gaps work too. Static pieces remain literal. Other unsupported shapes retain typed `esm-require-context` evidence. Target/activation support is a linker check |
 | Mixed-file static ESM/CJS syntax, ESM wrapper writes/deletes/updates/calls/construction/tags, or other ESM loader use except the environment reads above | Diagnostic; direct require support never enables CommonJS wrapper operations |
 | Read-only unshadowed `eval` values (e.g. primordial identity tables) | Native free references; no injected evaluator or code transformation |
 | Unshadowed `eval` operations (calls, construction, tags, writes), nested `with`, unsupported `import.meta` | Diagnostic; lexically shadowed eval is an ordinary call |

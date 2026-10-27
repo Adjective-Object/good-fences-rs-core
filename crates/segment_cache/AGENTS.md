@@ -26,7 +26,7 @@
   parser identity, UTF-8 ranges, local IDs, links and order on both boundaries.
 - Preserve sealed extraction provenance on both boundaries and in `to_parsed`;
   never bless unrelated parsed facts by hashing separately supplied source text.
-- Schema 22/extractor 38 retains typed nested module buffers and wire seals,
+- Schema 22/extractor 40 retains typed nested module buffers and wire seals,
   including dynamic namespace observations, deferred recipes, async references
   and lazy construction candidates with original argument slots.
 - ImportMetaEnv is typed source-local virtual-import evidence, with checked
@@ -43,6 +43,10 @@
 - The two-empty-piece dynamic pattern captures the importing directory tree;
   require patterns still need a relative prefix. Ignored imports have no dependency
   occurrence, but retain ordinary source/input effect and reference facts.
+- ESM require patterns need a ./ local prefix without literal parent components.
+  Component and terminal gaps are supported; slash-ended gaps recurse.
+  Unsupported shapes retain exact typed
+  EsmRequireContext evidence, checked through borrowed views before admission.
 - Persist effective syntax-detected format alongside its requested detection
   policy. Match requests without reparsing; run semantic validation against the
   cached sealed effective config, never the unresolved package fallback.

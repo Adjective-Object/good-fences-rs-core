@@ -509,7 +509,40 @@ impl<'a> CachedRenderer<'a> {
             return Ok(replacement.clone());
         }
         if let Some((span, dispatch)) = self.contexts.get(&index).cloned() {
-            let argument = self.children(span, Some(index))?;
+            // ESM invocation operations can surround the complete loader call
+            // between its dependency operation and argument operations.
+            let roots = self
+                .recipe
+                .operations()
+                .iter()
+                .enumerate()
+                .filter_map(|(child, operation)| {
+                    if child == index as usize
+                        || !crate::link::contains(
+                            span,
+                            operation.kind().span(self.facts, self.recipe),
+                        )
+                    {
+                        return None;
+                    }
+                    let mut parent = operation.parent();
+                    while let Some(ancestor) = parent {
+                        if ancestor == index {
+                            return Some(child as u32);
+                        }
+                        let operation = self.recipe.operations().get(ancestor as usize).unwrap();
+                        if crate::link::contains(
+                            span,
+                            operation.kind().span(self.facts, self.recipe),
+                        ) {
+                            return None;
+                        }
+                        parent = operation.parent();
+                    }
+                    None
+                })
+                .collect::<Vec<_>>();
+            let argument = self.roots(span, roots, Vec::new())?;
             return Ok(dispatch.emit(argument));
         }
         let operation = self.recipe.operations().get(index as usize).unwrap();

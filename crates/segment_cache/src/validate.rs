@@ -467,16 +467,30 @@ pub(crate) fn validate_module(
     for d in facts.dependencies() {
         if let Some(pattern) = &d.pattern() {
             ensure!(
-                matches!(
-                    d.kind(),
-                    DependencyKind::DynamicImport | DependencyKind::Require
-                ) && (d.broad_context()
-                    || pattern
-                        .first()
-                        .is_some_and(|p| p.starts_with("./") || p.starts_with("../")))
+                !pattern.is_empty()
+                    && matches!(
+                        d.kind(),
+                        DependencyKind::DynamicImport | DependencyKind::Require
+                    )
+                    && (d.broad_context()
+                        || (!config.commonjs() && d.kind() == DependencyKind::Require)
+                        || pattern
+                            .first()
+                            .is_some_and(|p| p.starts_with("./") || p.starts_with("../")))
                     && d.specifier() == pattern.iter().collect::<Vec<_>>().join("*"),
                 "invalid relative dependency pattern"
             );
+            if !config.commonjs() && d.kind() == DependencyKind::Require {
+                ensure!(
+                    d.bounded_require_context()
+                        || facts.policy_violations().iter().any(|violation| {
+                            violation.span() == d.span()
+                                && violation.policy()
+                                    == ast_segmenter::policy::PolicyName::EsmRequireContext
+                        }),
+                    "unsupported ESM require pattern lacks typed policy evidence"
+                );
+            }
         }
         span(source, d.span())?;
         span(source, d.specifier_span())?;

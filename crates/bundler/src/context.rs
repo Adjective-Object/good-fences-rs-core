@@ -10,12 +10,32 @@ use import_resolver::structural::{DependencyResolver, ResolutionMode, ResolvedDe
 
 use crate::assembly::{self, Code};
 
+fn nonlocal_require(dependency: Dependency<'_>) -> bool {
+    dependency.kind() == DependencyKind::Require
+        && dependency.pattern().is_some_and(|parts| {
+            !parts
+                .first()
+                .is_some_and(|part| part.starts_with("./") || part.starts_with("../"))
+        })
+}
+
 fn candidate_requests(
     importer: &Path,
     target: &Path,
     dependency: Dependency<'_>,
     extensions: &[String],
+    commonjs: bool,
 ) -> Vec<String> {
+    let matches = |request: &str| {
+        if !commonjs && dependency.kind() == DependencyKind::Require {
+            dependency.matches_esm_require_specifier(request)
+        } else {
+            dependency.matches_specifier(request)
+        }
+    };
+    if nonlocal_require(dependency) {
+        return Vec::new();
+    }
     // Context enumeration selects runtime inputs, not TypeScript declarations.
     // Keep explicit requests on the normal resolver/precompiler error path.
     if target
@@ -42,7 +62,7 @@ fn candidate_requests(
     let mut requests = Vec::new();
     if dependency.kind() == DependencyKind::DynamicImport {
         if let Some(encoded) = assembly::relative_request(importer, target, true) {
-            if dependency.matches_specifier(&encoded) {
+            if matches(&encoded) {
                 requests.push(encoded);
             }
         }
@@ -50,7 +70,7 @@ fn candidate_requests(
             return requests;
         }
     }
-    if dependency.matches_specifier(&request) {
+    if matches(&request) {
         requests.push(request.clone());
     }
     if dependency.kind() == DependencyKind::Require {
@@ -58,12 +78,12 @@ fn candidate_requests(
             if let Some(stem) =
                 request.strip_suffix(&format!(".{}", extension.trim_start_matches('.')))
             {
-                if dependency.matches_specifier(stem) {
+                if matches(stem) {
                     requests.push(stem.to_owned());
                 }
                 if let Some(directory) = stem.strip_suffix("/index") {
                     for alias in [directory.to_owned(), format!("{directory}/")] {
-                        if dependency.matches_specifier(&alias) {
+                        if matches(&alias) {
                             requests.push(alias);
                         }
                     }
@@ -79,8 +99,9 @@ pub(crate) fn matches_candidate(
     target: &Path,
     dependency: Dependency<'_>,
     extensions: &[String],
+    commonjs: bool,
 ) -> bool {
-    !candidate_requests(importer, target, dependency, extensions).is_empty()
+    !candidate_requests(importer, target, dependency, extensions, commonjs).is_empty()
 }
 
 pub(crate) fn resolve(
@@ -90,6 +111,7 @@ pub(crate) fn resolve(
     inventory: impl Iterator<Item = impl AsRef<Path>>,
     extensions: &[String],
     resolver: &impl DependencyResolver,
+    commonjs: bool,
 ) -> eyre::Result<BTreeMap<String, PathBuf>> {
     let mut requests = BTreeMap::new();
     for relative in inventory {
@@ -101,7 +123,7 @@ pub(crate) fn resolve(
         let Some(request) = assembly::relative_request(importer, &target, false) else {
             continue;
         };
-        for key in candidate_requests(importer, &target, dependency, extensions) {
+        for key in candidate_requests(importer, &target, dependency, extensions, commonjs) {
             let resolved_request = if dependency.kind() == DependencyKind::Require {
                 key.clone()
             } else {
@@ -132,6 +154,9 @@ pub(crate) fn may_match_directory(
     directory: &Path,
     dependency: Dependency<'_>,
 ) -> bool {
+    if nonlocal_require(dependency) {
+        return false;
+    }
     if dependency.broad_context() {
         return importer
             .parent()
@@ -162,6 +187,7 @@ pub(crate) fn may_match_directory(
 pub(crate) struct Dispatch {
     pub requests: BTreeMap<String, Code>,
     pub dynamic: bool,
+    pub reject_parent: bool,
     pub runtime: String,
 }
 
@@ -172,6 +198,11 @@ impl Dispatch {
             // Native import coerces once and turns coercion failures into
             // rejected promises rather than synchronous throws.
             output.push_str("try { key = `${key}`; } catch (error) { return import({toString() { throw error; }}); }\n");
+        } else if self.reject_parent {
+            output.push_str(&format!(
+                "for (let i = 0; i < key.length; i++) {{ if (key[i] === '.' && key[i + 1] === '.' && (i === 0 || key[i - 1] === '/' || key[i - 1] === '\\\\') && (i + 2 === key.length || key[i + 2] === '/' || key[i + 2] === '\\\\')) {{ const error = new {}.Error('Parent traversal is not supported in require context: ' + key); error.code = 'MODULE_NOT_FOUND'; throw error; }} }}\n",
+                self.runtime
+            ));
         }
         output.push_str("switch (key) {\n");
         for (request, expression) in &self.requests {

@@ -95,7 +95,7 @@ pub fn parse_module_with_dependencies(
         package_format,
         declarations,
         true,
-        |deps, _| dependencies(deps),
+        |deps, _, _| dependencies(deps),
     )
 }
 
@@ -108,6 +108,25 @@ pub fn parse_module_reporting_policies(
     package_format: ModuleFormat,
     declarations: &crate::PreparedDeclarations,
     observations: impl FnOnce(&[crate::owned::Dependency], &[crate::policy::PolicyViolation]),
+) -> eyre::Result<ParsedModule> {
+    parse_module_reporting_policies_with_format(
+        logger,
+        source,
+        path,
+        package_format,
+        declarations,
+        |deps, violations, _| observations(deps, violations),
+    )
+}
+
+/// Evidence-reporting extraction with the syntax-detected CommonJS format.
+pub fn parse_module_reporting_policies_with_format(
+    logger: &impl logger::Logger,
+    source: &str,
+    path: &Path,
+    package_format: ModuleFormat,
+    declarations: &crate::PreparedDeclarations,
+    observations: impl FnOnce(&[crate::owned::Dependency], &[crate::policy::PolicyViolation], bool),
 ) -> eyre::Result<ParsedModule> {
     parse_module_inner(
         logger,
@@ -127,7 +146,7 @@ fn parse_module_inner(
     package_format: ModuleFormat,
     declarations: &crate::PreparedDeclarations,
     strict: bool,
-    observations: impl FnOnce(&[crate::owned::Dependency], &[crate::policy::PolicyViolation]),
+    observations: impl FnOnce(&[crate::owned::Dependency], &[crate::policy::PolicyViolation], bool),
 ) -> eyre::Result<ParsedModule> {
     let allocator = Allocator::default();
     MODULE_PARSES.with(|count| count.set(count.get() + 1));
@@ -150,7 +169,11 @@ fn parse_module_inner(
         return Err(crate::policy::PolicyErrors::new(path, Some(source), violations).into());
     }
     facts.set_policy_violations(violations);
-    observations(facts.dependencies(), facts.policy_violations());
+    observations(
+        facts.dependencies(),
+        facts.policy_violations(),
+        facts.commonjs(),
+    );
     crate::owned::extract_recipes(&parsed.program, &mut facts);
     *facts.ecco_declarations_hash_mut() = declarations.fingerprint();
     let (body, segments) = if parsed.program.source_type.is_commonjs() {

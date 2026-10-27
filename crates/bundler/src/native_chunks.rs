@@ -812,6 +812,12 @@ fn emit_inner(
                         && contains(module.parsed.segments().get(index).unwrap().span, d.span())
                 }) {
                     if let Some(dispatch) =
+                        connections.require_contexts.get(&(root, dependency.id()))
+                    {
+                        renderer.context(dependency, dispatch.clone());
+                        continue;
+                    }
+                    if let Some(dispatch) =
                         cjs.context_dynamic(graph, root, dependency, &connections.namespaces)?
                     {
                         renderer.context(dependency, dispatch);

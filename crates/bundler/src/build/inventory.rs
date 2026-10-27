@@ -415,7 +415,7 @@ impl Inventory {
         dependency: ast_segmenter::views::Dependency<'_>,
         extensions: &[String],
     ) -> eyre::Result<std::collections::btree_map::IntoKeys<PathBuf, PathBuf>> {
-        let candidates = self.scan(importer, dependency, extensions, false)?;
+        let candidates = self.scan(importer, dependency, extensions, false, owner.commonjs())?;
         self.state.lock().unwrap().contexts.push(Context {
             importer: importer.into(),
             owner: owner.clone(),
@@ -440,6 +440,7 @@ impl Inventory {
         dependency: ast_segmenter::views::Dependency<'_>,
         extensions: &[String],
         fresh: bool,
+        commonjs: bool,
     ) -> eyre::Result<BTreeMap<PathBuf, PathBuf>> {
         let _span = tracing::info_span!("inventory.context_candidates").entered();
         let (scopes, mut candidates) = {
@@ -452,7 +453,9 @@ impl Inventory {
                     .files
                     .iter()
                     .filter(|path| {
-                        crate::context::matches_candidate(importer, path, dependency, extensions)
+                        crate::context::matches_candidate(
+                            importer, path, dependency, extensions, commonjs,
+                        )
                     })
                     .map(|path| (path.clone(), path.clone()))
                     .collect::<BTreeMap<_, _>>(),
@@ -473,6 +476,7 @@ impl Inventory {
                 importer,
                 extensions,
                 fresh,
+                commonjs,
                 &mut directories,
                 &mut BTreeSet::new(),
                 &mut candidates,
@@ -497,8 +501,13 @@ impl Inventory {
                 .iter()
                 .find(|dependency| dependency.id() == context.dependency)
                 .expect("retained context occurrence");
-            let candidates =
-                self.scan(&context.importer, dependency, &context.extensions, false)?;
+            let candidates = self.scan(
+                &context.importer,
+                dependency,
+                &context.extensions,
+                false,
+                context.owner.commonjs(),
+            )?;
             if candidates == context.candidates {
                 continue;
             }
@@ -509,6 +518,7 @@ impl Inventory {
                 candidates.keys(),
                 &context.extensions,
                 resolver,
+                context.owner.commonjs(),
             )
             .wrap_err_with(|| {
                 format!(
@@ -542,6 +552,7 @@ impl Inventory {
         importer: &Path,
         extensions: &[String],
         fresh: bool,
+        commonjs: bool,
         directories: &mut BTreeMap<PathBuf, Vec<OsString>>,
         active: &mut BTreeSet<PathBuf>,
         candidates: &mut BTreeMap<PathBuf, PathBuf>,
@@ -588,8 +599,9 @@ impl Inventory {
             if excluded(&path) {
                 continue;
             }
-            let matches =
-                crate::context::matches_candidate(importer, &path, dependency, extensions);
+            let matches = crate::context::matches_candidate(
+                importer, &path, dependency, extensions, commonjs,
+            );
             if !matches && !crate::context::may_match_directory(importer, &path, dependency) {
                 continue;
             }
@@ -605,6 +617,7 @@ impl Inventory {
                     importer,
                     extensions,
                     fresh,
+                    commonjs,
                     directories,
                     active,
                     candidates,
@@ -663,8 +676,13 @@ impl Inventory {
                 .find(|dependency| dependency.id() == context.dependency)
                 .expect("retained context occurrence");
             ensure!(
-                self.scan(&context.importer, dependency, &context.extensions, true)?
-                    == context.candidates,
+                self.scan(
+                    &context.importer,
+                    dependency,
+                    &context.extensions,
+                    true,
+                    context.owner.commonjs()
+                )? == context.candidates,
                 "context candidates changed during build"
             );
         }

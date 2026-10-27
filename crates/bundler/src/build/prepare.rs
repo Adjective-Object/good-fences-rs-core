@@ -55,7 +55,7 @@ impl Job {
 /// Provisional syntax or a checked borrowed owner, never solved cache state.
 #[derive(Clone)]
 pub(super) enum Dependencies {
-    Early(std::sync::Arc<[ast_segmenter::owned::Dependency]>),
+    Early(std::sync::Arc<[ast_segmenter::owned::Dependency]>, bool),
     Checked(CacheRecord),
 }
 
@@ -64,8 +64,15 @@ impl Dependencies {
         &self,
     ) -> ast_segmenter::views::Sequence<'_, ast_segmenter::views::Dependency<'_>> {
         match self {
-            Self::Early(dependencies) => ast_segmenter::views::Sequence::Owned(dependencies),
+            Self::Early(dependencies, _) => ast_segmenter::views::Sequence::Owned(dependencies),
             Self::Checked(record) => record.module().facts().dependencies(),
+        }
+    }
+
+    pub(super) fn commonjs(&self) -> bool {
+        match self {
+            Self::Early(_, commonjs) => *commonjs,
+            Self::Checked(record) => record.module().facts().commonjs(),
         }
     }
 }
@@ -235,6 +242,7 @@ pub(super) fn resolve(
                         )?,
                         &options.resolver.extensions,
                         resolver,
+                        dependencies.commonjs(),
                     )
                     .wrap_err_with(|| {
                         format!(
@@ -331,7 +339,7 @@ pub(super) fn read(
     options: &BuildOptions,
     declarations: &PreparedDeclarations,
     base: &crate::output_url::PublicBase,
-    dependencies: &dyn Fn(&[ast_segmenter::owned::Dependency], policy::Admission),
+    dependencies: &dyn Fn(&[ast_segmenter::owned::Dependency], policy::Admission, bool),
 ) -> eyre::Result<Prepared> {
     let _span = tracing::info_span!("prepare.read").entered();
     ensure!(
@@ -433,7 +441,7 @@ pub(super) fn load(
     cache: CacheMode,
     policy: (&Path, &[PolicyAllowance]),
     declarations: &PreparedDeclarations,
-    dependencies: &dyn Fn(&[ast_segmenter::owned::Dependency], policy::Admission),
+    dependencies: &dyn Fn(&[ast_segmenter::owned::Dependency], policy::Admission, bool),
 ) -> eyre::Result<Loaded> {
     let _span = tracing::info_span!("prepare.load", bytes = input.len()).entered();
     let config = ParserConfig::for_path(parser_path, package)?;
@@ -459,7 +467,7 @@ pub(super) fn load(
             transpiled: None,
         });
     }
-    let loaded = segment_cache::load_prepared_reporting_policies(
+    let loaded = segment_cache::load_prepared_reporting_policies_with_format(
         &logger::StdioLogger::new(),
         path,
         segment_cache::PreparedSource {
@@ -470,7 +478,7 @@ pub(super) fn load(
         },
         cache,
         declarations,
-        |deps, violations| {
+        |deps, violations, commonjs| {
             dependencies(
                 deps,
                 policy::Admission::check(
@@ -480,6 +488,7 @@ pub(super) fn load(
                     violations.iter().copied(),
                     policy.1,
                 ),
+                commonjs,
             )
         },
     )

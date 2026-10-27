@@ -99,7 +99,8 @@ pub fn load_prepared_with_dependencies(
         || Ok(()),
         PolicyHandling::Strict(
             |deps: &[ast_segmenter::owned::Dependency],
-             _: &[ast_segmenter::policy::PolicyViolation]| dependencies(deps),
+             _: &[ast_segmenter::policy::PolicyViolation],
+             _: bool| dependencies(deps),
         ),
     )
     .wrap_err_with(|| format!("loading prepared source cache for {}", path.display()))
@@ -116,6 +117,29 @@ pub fn load_prepared_reporting_policies(
     observations: impl FnOnce(
         &[ast_segmenter::owned::Dependency],
         &[ast_segmenter::policy::PolicyViolation],
+    ),
+) -> eyre::Result<CacheOutcome> {
+    load_prepared_reporting_policies_with_format(
+        logger,
+        path,
+        prepared,
+        mode,
+        declarations,
+        |deps, violations, _| observations(deps, violations),
+    )
+}
+
+/// Policy-reporting loading with the syntax-detected CommonJS format on cold observations.
+pub fn load_prepared_reporting_policies_with_format(
+    logger: &impl logger::Logger,
+    path: &Path,
+    prepared: PreparedSource<'_>,
+    mode: CacheMode,
+    declarations: &ast_segmenter::PreparedDeclarations,
+    observations: impl FnOnce(
+        &[ast_segmenter::owned::Dependency],
+        &[ast_segmenter::policy::PolicyViolation],
+        bool,
     ),
 ) -> eyre::Result<CacheOutcome> {
     load_prepared_inner(
@@ -237,7 +261,8 @@ fn load(
         before_publish,
         PolicyHandling::Strict(
             |_: &[ast_segmenter::owned::Dependency],
-             _: &[ast_segmenter::policy::PolicyViolation]| {},
+             _: &[ast_segmenter::policy::PolicyViolation],
+             _: bool| {},
         ),
     )
 }
@@ -250,7 +275,11 @@ fn load_prepared_inner(
     declarations: &ast_segmenter::PreparedDeclarations,
     before_publish: impl FnOnce() -> eyre::Result<()>,
     policies: PolicyHandling<
-        impl FnOnce(&[ast_segmenter::owned::Dependency], &[ast_segmenter::policy::PolicyViolation]),
+        impl FnOnce(
+            &[ast_segmenter::owned::Dependency],
+            &[ast_segmenter::policy::PolicyViolation],
+            bool,
+        ),
     >,
 ) -> eyre::Result<CacheOutcome> {
     let (strict, observations) = match policies {
@@ -289,10 +318,10 @@ fn load_prepared_inner(
                     prepared.parser_path,
                     prepared.package,
                     declarations,
-                    |deps| observations(deps, &[]),
+                    |deps| observations(deps, &[], config.commonjs()),
                 )
             } else {
-                ast_segmenter::parse_module_reporting_policies(
+                ast_segmenter::parse_module_reporting_policies_with_format(
                     logger,
                     source,
                     prepared.parser_path,
