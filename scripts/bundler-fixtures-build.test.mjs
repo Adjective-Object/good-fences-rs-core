@@ -508,7 +508,7 @@ for (const suffix of ['.module.css', '.module.cjs']) {
   test(`explicit fixture configuration selects ${suffix} CSS transforms and preserves byte resources`, () => {
     withCorpus(`export {buttonLabel} from './style${suffix}';`, ({ run, configure, caseDir }) => {
       configure({
-        fixtureConfig: { output: { base_url: '/static/' }, css: { css_modules: suffix === '.module.css' ? true : `ext:${suffix}` } },
+        fixtureConfig: { output: { base_url: '/static/' }, loaders: { [suffix]: 'css-modules' } },
         cssObservation: 'observe.mjs',
         expectations: { stdout: ['CSS mapping'], backend: 'native' },
       });
@@ -543,7 +543,7 @@ test('driver rejects unknown, malformed and oversized config before publication'
       '{"output":{"min_chunk_bytes":-1}}',
       '{"output":{"min_chunk_bytes":1.5}}',
       '{"entries":[]}', '{"css":{"load":"plugin"}}',
-      '{"css":{"css_modules":"ext:../css"}}',
+      '{"loaders":{"../css":"css-modules"}}',
       '{"output":{"base_url":"javascript:bad"}}', '{',
       '{"resolveConditions":"source"}', '{"resolveConditions":[1]}',
       '{"resolveConditions":[" "]}',

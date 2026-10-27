@@ -9,6 +9,7 @@ mod browser;
 mod contexts;
 mod discovery;
 mod env;
+mod loader_config;
 mod localization;
 #[path = "policy_tests.rs"]
 mod policy_tests;
@@ -29,6 +30,7 @@ fn write(root: &Path, path: &str, text: &str) {
 
 fn options() -> BuildOptions {
     BuildOptions {
+        loaders: global_styles(),
         entries: BTreeMap::from([(
             "main".into(),
             Entry {
@@ -39,6 +41,40 @@ fn options() -> BuildOptions {
         )]),
         ..Default::default()
     }
+}
+
+fn global_styles() -> crate::loaders::LoaderPolicy {
+    use crate::loaders::Loader;
+    crate::loaders::LoaderPolicy::from_overrides([
+        (".module.css", Some(Loader::Css)),
+        (".module.scss", Some(Loader::Scss)),
+        (".module.sass", Some(Loader::Sass)),
+    ])
+    .unwrap()
+}
+
+fn all_style_modules() -> crate::loaders::LoaderPolicy {
+    use crate::loaders::Loader;
+    crate::loaders::LoaderPolicy::from_overrides([
+        (".css", Some(Loader::CssModules)),
+        (".scss", Some(Loader::ScssModules)),
+        (".sass", Some(Loader::SassModules)),
+        (".global.css", Some(Loader::CssModules)),
+        (".global.scss", Some(Loader::ScssModules)),
+        (".global.sass", Some(Loader::SassModules)),
+    ])
+    .unwrap()
+}
+
+fn globally_named_styles() -> crate::loaders::LoaderPolicy {
+    use crate::loaders::Loader;
+    all_style_modules()
+        .with_override(".global.css", Some(Loader::Css))
+        .unwrap()
+        .with_override(".global.scss", Some(Loader::Scss))
+        .unwrap()
+        .with_override(".global.sass", Some(Loader::Sass))
+        .unwrap()
 }
 
 #[test]
@@ -953,7 +989,7 @@ fn parallel_preparation_css_frontier_errors_do_not_depend_on_script_discovery() 
             );
             write(dir.root(), "z.module.css", ".z { color: blue }");
             let mut config = options();
-            config.css.css_modules = CssModules::Enabled;
+            config.loaders = crate::loaders::LoaderPolicy::default();
             config.execution = crate::execution::ExecutionOptions::new(
                 std::num::NonZeroUsize::new(workers).unwrap(),
             );
@@ -1420,13 +1456,23 @@ fn css_configuration_transitions_keep_javascript_warm_and_low_level_sources_prep
     assert_eq!(cold.counters.source_parses, 2);
     let mut previous = cold;
     for (selection, reparses) in [
-        (CssModules::Enabled, 1),
-        (CssModules::Everything, 0),
-        (CssModules::Extension(".scope".into()), 1),
-        (CssModules::Extension(".module.css".into()), 1),
-        (CssModules::Enabled, 0),
+        (crate::loaders::LoaderPolicy::default(), 1),
+        (all_style_modules(), 0),
+        (
+            global_styles()
+                .with_override(".scope", Some(crate::loaders::Loader::CssModules))
+                .unwrap(),
+            1,
+        ),
+        (
+            global_styles()
+                .with_override(".module.css", Some(crate::loaders::Loader::CssModules))
+                .unwrap(),
+            1,
+        ),
+        (crate::loaders::LoaderPolicy::default(), 0),
     ] {
-        config.css.css_modules = selection;
+        config.loaders = selection;
         let changed = parity(&mut session, &config);
         assert_eq!(changed.counters.source_parses, reparses);
         assert_eq!(changed.counters.memory_hits, 2 - reparses);
@@ -1436,7 +1482,7 @@ fn css_configuration_transitions_keep_javascript_warm_and_low_level_sources_prep
             previous.product.fingerprints.roots,
             changed.product.fingerprints.roots
         );
-        assert_eq!(
+        assert_ne!(
             previous.product.fingerprints.resolution,
             changed.product.fingerprints.resolution
         );
@@ -1480,10 +1526,14 @@ fn css_modules_custom_script_deselection_matches_fresh_error_and_preserves_last_
     );
     write(dir.root(), "style.style.mjs", ".used { color: red }");
     let mut config = options();
-    config.css.css_modules = CssModules::Extension(".style.mjs".into());
+    config.loaders = global_styles()
+        .with_override(".style.mjs", Some(crate::loaders::Loader::CssModules))
+        .unwrap();
     for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
         config.css.load = load;
-        config.css.css_modules = CssModules::Extension(".style.mjs".into());
+        config.loaders = global_styles()
+            .with_override(".style.mjs", Some(crate::loaders::Loader::CssModules))
+            .unwrap();
         let mut session = BuildSession::new(dir.root()).unwrap();
         let selected = session.build(&config).unwrap();
         let original = selected.product.artifacts.clone();
@@ -1494,7 +1544,7 @@ fn css_modules_custom_script_deselection_matches_fresh_error_and_preserves_last_
         let script = dir.root().join("main.mjs");
         let record = session.sources[&script].record.clone();
 
-        config.css.css_modules = CssModules::Disabled;
+        config.loaders = global_styles();
         let fresh_error = format!(
             "{:#}",
             BuildSession::new(dir.root())
@@ -1519,7 +1569,9 @@ fn css_modules_custom_script_deselection_matches_fresh_error_and_preserves_last_
         assert_eq!(selected.product.artifacts, original);
         assert_eq!(session.sources[&script].record, record);
 
-        config.css.css_modules = CssModules::Extension(".style.mjs".into());
+        config.loaders = global_styles()
+            .with_override(".style.mjs", Some(crate::loaders::Loader::CssModules))
+            .unwrap();
         let recovered = session.build(&config).unwrap();
         assert_eq!(recovered.counters.memory_hits, 2);
         assert_eq!(recovered.counters.source_parses, 0);
@@ -1541,7 +1593,7 @@ fn css_loader_transitions_preserve_resources_mappings_and_sealed_generated_sourc
         ".used, .unused { color: red }",
     );
     let mut config = options();
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     let mut session = BuildSession::new(dir.root()).unwrap();
     let caller = session.build(&config).unwrap();
     let path = dir.root().join("style.module.css");
@@ -1600,11 +1652,12 @@ fn css_loader_transitions_preserve_resources_mappings_and_sealed_generated_sourc
 fn css_modules_validate_before_graph_loading_and_preserve_failed_last_product() {
     let dir = TmpDir::new();
     let mut config = options();
-    config.css.css_modules = CssModules::Extension(".bad..suffix".into());
+    config.resolution_extensions = Some(vec![".bad..suffix".into()]);
     let mut session = BuildSession::new(dir.root()).unwrap();
     let error = format!("{:#}", session.build(&config).err().unwrap());
-    assert!(error.contains("invalid css_modules extension"), "{error}");
+    assert!(error.contains("resolutionExtensions"), "{error}");
     assert!(session.sources.is_empty());
+    config.resolution_extensions = None;
 
     write(dir.root(), "main.mjs", "import './style.module.css';");
     write(
@@ -1612,10 +1665,10 @@ fn css_modules_validate_before_graph_loading_and_preserve_failed_last_product() 
         "style.module.css",
         ":global .你好 { color: red }",
     );
-    config.css.css_modules = CssModules::Disabled;
+    config.loaders = global_styles();
     let global = session.build(&config).unwrap();
     assert_eq!(global.product.artifacts.stylesheets.len(), 1);
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     write(
         dir.root(),
         "style.module.css",
@@ -1630,7 +1683,7 @@ fn css_modules_validate_before_graph_loading_and_preserve_failed_last_product() 
         );
         assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &global.product));
     }
-    config.css.css_modules = CssModules::Disabled;
+    config.loaders = global_styles();
     config.css.load = CssLoad::CallerLoaded;
     write(
         dir.root(),
@@ -1652,7 +1705,12 @@ fn css_modules_custom_suffix_reaches_entries_imports_contexts_and_css_closures()
         ".class { color: red }",
     );
     let mut config = options();
-    config.css.css_modules = CssModules::Extension(".any.custom.extension".into());
+    config.loaders = global_styles()
+        .with_override(
+            ".any.custom.extension",
+            Some(crate::loaders::Loader::CssModules),
+        )
+        .unwrap();
     for (entry, main) in [
         ("parts/style.any.custom.extension", ""),
         ("main.mjs", "import './parts/style.any.custom.extension';"),
@@ -1727,7 +1785,7 @@ fn css_modules_animations_are_file_local_without_extra_exports_under_both_loader
         "export * as a from './a.module.css'; export * as b from './b.module.css'; import './global.css';",
     );
     let mut config = options();
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
         config.css.load = load;
         let mut session = BuildSession::new(dir.root()).unwrap();
@@ -1810,7 +1868,7 @@ fn css_modules_highlight_and_property_preserve_nonselector_names_in_css_and_sass
         write(&root, "main.mjs", &format!("export * from './{file}';"));
         let mut config = options();
         config.resolver.target_env = TargetEnv::Browser;
-        config.css.css_modules = CssModules::Enabled;
+        config.loaders = crate::loaders::LoaderPolicy::default();
         for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
             config.css.load = load;
             let mut session = BuildSession::new(&root).unwrap();
@@ -1861,7 +1919,7 @@ fn css_modules_highlight_and_property_reject_nearby_unsupported_forms_on_rebuild
         ".a::highlight(selection) {} @property --angle { syntax: '<angle>'; inherits: false; initial-value: -36deg; }",
     );
     let mut config = options();
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     let mut session = BuildSession::new(&root).unwrap();
     let good = session.build(&config).unwrap();
     for source in [
@@ -1903,7 +1961,7 @@ fn css_modules_scopes_fragments_and_urls_share_original_utf8_edits_under_both_lo
         "export * from './style.module.css';",
     );
     let mut config = options();
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     let mut first = None;
     for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
         config.css.load = load;
@@ -1965,7 +2023,7 @@ fn css_modules_scopes_fragments_and_urls_share_original_utf8_edits_under_both_lo
             .unwrap();
         assert_eq!(cold.product.artifacts, disk.product.artifacts);
     }
-    config.css.css_modules = CssModules::Disabled;
+    config.loaders = global_styles();
     config.css.load = CssLoad::CallerLoaded;
     let global = BuildSession::new(dir.root())
         .unwrap()
@@ -1998,7 +2056,9 @@ fn css_modules_transitive_scope_selection_is_per_stylesheet_not_inherited() {
     );
     write(dir.root(), "leaf.css", ".leaf {}");
     let mut config = options();
-    config.css.css_modules = CssModules::Extension(".scope".into());
+    config.loaders = global_styles()
+        .with_override(".scope", Some(crate::loaders::Loader::CssModules))
+        .unwrap();
     let built = BuildSession::new(dir.root())
         .unwrap()
         .build(&config)
@@ -2033,7 +2093,9 @@ fn css_modules_script_and_json_suffixes_preserve_prepared_mode_and_effects() {
     for suffix in [".module.cjs", ".module.ts", ".module.json"] {
         let stylesheet = format!("style{suffix}");
         write(dir.root(), &stylesheet, ".used, .unused { color: red }");
-        config.css.css_modules = CssModules::Extension(suffix.into());
+        config.loaders = global_styles()
+            .with_override(suffix, Some(crate::loaders::Loader::CssModules))
+            .unwrap();
         for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
             config.css.load = load;
             write(
@@ -2088,7 +2150,7 @@ fn css_modules_script_and_json_suffixes_preserve_prepared_mode_and_effects() {
 fn caller_loaded_css_module_resource_edits_invalidate_output_without_reparsing_mappings() {
     let dir = TmpDir::new();
     let mut config = options();
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     config.entries.get_mut("main").unwrap().path = "style.module.css".into();
     for with_dependencies in [false, true] {
         let dependency = if with_dependencies {
@@ -2167,7 +2229,7 @@ fn css_modules_everything_selects_css_not_javascript_json_or_assets() {
     write(dir.root(), "data.json", "{}");
     write(dir.root(), "image.bin", "binary");
     let mut config = options();
-    config.css.css_modules = CssModules::Everything;
+    config.loaders = all_style_modules();
     let mut session = BuildSession::new(dir.root()).unwrap();
     assert_eq!(
         session
@@ -2218,7 +2280,7 @@ export const dynamic = () => import('./style.module.css');
         "module.exports = () => require('./style.module.css');",
     );
     let mut config = options();
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     for (target, load) in [
         (TargetEnv::Node, CssLoad::CallerLoaded),
         (TargetEnv::Node, CssLoad::AutoMount),
@@ -2296,7 +2358,7 @@ fn css_modules_prune_bindings_not_stylesheets_and_keep_loader_effects() {
         .unwrap()
         .mappings;
     let mut config = options();
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     config.declarations.user.push(ecco::parse_declarations(
         "global fn document.createElement(tag) {call_effects = false returns.*_effects = false}\n\
          global fn document.head.appendChild(link) {call_effects = false returns.*_effects = false}"
@@ -2388,7 +2450,7 @@ fn css_modules_suffix_exclusions_follow_closures_entries_and_cache_transitions()
         export { default as globalCss } from './theme.global.css';\n\
         import './theme.global.scss'; import './theme.global.sass'; import './parent.css';";
     let mut config = options();
-    config.css.css_modules = CssModules::Everything;
+    config.loaders = all_style_modules();
     config.entries.insert(
         "global".into(),
         Entry {
@@ -2397,14 +2459,11 @@ fn css_modules_suffix_exclusions_follow_closures_entries_and_cache_transitions()
             namespace: true,
         },
     );
+    config.resolver.target_env = TargetEnv::Browser;
     for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
         write(dir.root(), "main.mjs", entry);
         config.css.load = load;
-        config.css.css_modules_exclude = vec![
-            ".global.css".into(),
-            ".global.scss".into(),
-            ".global.sass".into(),
-        ];
+        config.loaders = globally_named_styles();
         let mut session = BuildSession::new(dir.root()).unwrap();
         let cold = session.build(&config).unwrap();
         for (filename, selector) in [
@@ -2441,16 +2500,12 @@ fn css_modules_suffix_exclusions_follow_closures_entries_and_cache_transitions()
         assert_eq!(disk.counters.source_parses, 0);
         assert_eq!(disk.product.artifacts.files, cold.product.artifacts.files);
 
-        config.css.css_modules_exclude.clear();
+        config.loaders = all_style_modules();
         let scoped = session.build(&config).unwrap();
         let resource = &scoped.product.artifacts.stylesheets[&dir.root().join("theme.global.css")];
         let css = std::str::from_utf8(&scoped.product.artifacts.resources[resource]).unwrap();
         assert!(!css.contains(".external") && !css.contains("#app"), "{css}");
-        config.css.css_modules_exclude = vec![
-            ".global.css".into(),
-            ".global.scss".into(),
-            ".global.sass".into(),
-        ];
+        config.loaders = globally_named_styles();
         let restored = session.build(&config).unwrap();
         assert_eq!(
             restored.product.artifacts.files,
@@ -2474,9 +2529,10 @@ fn css_modules_suffix_exclusions_follow_closures_entries_and_cache_transitions()
         let error = format!("{:#}", session.build(&config).err().unwrap());
         assert!(error.contains("non-module composition target"), "{error}");
         write(dir.root(), "main.mjs", entry);
-        config.css.css_modules_exclude.push(".css/".into());
+        config.resolution_extensions = Some(vec![".css/".into()]);
         let error = format!("{:#}", session.build(&config).err().unwrap());
-        assert!(error.contains("css_modules_exclude"), "{error}");
+        assert!(error.contains("resolutionExtensions"), "{error}");
+        config.resolution_extensions = None;
     }
 }
 
@@ -2508,7 +2564,7 @@ fn css_modules_composition_resolves_before_pruning_under_both_loaders() {
         .mappings["unused"]
         .clone();
     let mut config = options();
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
         config.css.load = load;
         let mut session = BuildSession::new(dir.root()).unwrap();
@@ -2586,7 +2642,7 @@ fn css_modules_composition_errors_reject_unused_exports_under_both_loaders() {
     let dir = TmpDir::new();
     write(dir.root(), "main.mjs", "import './style.module.css';");
     let mut config = options();
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
         config.css.load = load;
         write(dir.root(), "style.module.css", ".base {}");
@@ -2678,7 +2734,7 @@ fn css_modules_cross_file_composition_is_lazy_shared_ordered_and_render_imports_
         "@import './conditional.module.css' print; .support { color: blue }",
     );
     let mut config = options();
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     config.entries.get_mut("main").unwrap().output_name = Some("deep/main.mjs".into());
     let mut resources = None;
     for reverse in [false, true] {
@@ -2791,7 +2847,7 @@ fn css_modules_cross_file_composition_rechecks_closure_and_invalidates_reverse_u
     write(dir.root(), "imported.css", ".global { color: red }");
     write(dir.root(), "pixel.bin", "one");
     let mut config = options();
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
         config.css.load = load;
         let base = "@import './imported.css'; .base { composes: old from global; background: url('./pixel.bin') }";
@@ -2897,7 +2953,7 @@ fn css_modules_cross_file_composition_hashes_resolved_edges_not_only_closure_mem
         write(dir.root(), &format!("node_modules/pkg/{path}"), ".base {}");
     }
     let mut config = options();
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     let mut session = BuildSession::new(dir.root()).unwrap();
     let mut previous = None;
     for target in ["a", "b"] {
@@ -2937,7 +2993,7 @@ fn css_modules_everything_rejects_non_css_composition_targets_under_both_loaders
     );
     write(dir.root(), "base.txt", ".base { color: red }");
     let mut config = options();
-    config.css.css_modules = CssModules::Everything;
+    config.loaders = all_style_modules();
     for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
         config.css.load = load;
         let error = format!(
@@ -2990,7 +3046,7 @@ fn css_modules_cross_file_composition_rejects_nonlocal_targets_and_file_cycles()
         ".b { composes: a from './a.module.css' }",
     );
     let mut config = options();
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     config.externals.insert("external".into());
     for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
         config.css.load = load;
@@ -3041,7 +3097,7 @@ fn css_modules_cross_file_composition_rejects_unlinked_and_excluded_sources() {
     write(dir.root(), "outside.module.css", ".base {}");
     write(&root, ".bundler-hidden/base.module.css", ".base {}");
     let mut config = options();
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     for request in ["../outside.module.css", "./.bundler-hidden/base.module.css"] {
         write(
             &root,
@@ -3096,7 +3152,7 @@ fn css_modules_stability_content_order_root_and_transitive_selection_invalidate_
             },
         );
         let mut config = options();
-        config.css.css_modules = CssModules::Enabled;
+        config.loaders = crate::loaders::LoaderPolicy::default();
         let mut session = BuildSession::new(dir.root()).unwrap();
         let cold = session.build(&config).unwrap();
         let observation = observe_named(&cold.product.artifacts, "import {a,b} from './main.mjs'; if(a===b) throw new Error('aliased files'); console.log(JSON.stringify([a,b]));");
@@ -3130,7 +3186,7 @@ fn css_modules_stability_content_order_root_and_transitive_selection_invalidate_
             ),
             observation
         );
-        config.css.css_modules = CssModules::Disabled;
+        config.loaders = global_styles();
         // The named JS imports are now invalid, but the resource closure alone
         // must still distinguish global output from the transformed version.
         config.entries.get_mut("main").unwrap().path = "parent.css".into();
@@ -3158,7 +3214,7 @@ fn css_modules_export_collision_has_both_spans_and_preserves_last_product() {
     );
     write(dir.root(), "style.module.css", ".foo-bar {}");
     let mut config = options();
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     let mut session = BuildSession::new(dir.root()).unwrap();
     let built = session.build(&config).unwrap();
     write(dir.root(), "style.module.css", ".foo-bar, #fooBar {}");
@@ -3596,7 +3652,9 @@ fn css_modules_custom_suffix_aliases_keep_owned_paths_and_mount_once_for_each_ba
         ".button-label {color: red}",
     );
     let mut config = options();
-    config.css.css_modules = CssModules::Extension(".module.cjs".into());
+    config.loaders = global_styles()
+        .with_override(".module.cjs", Some(crate::loaders::Loader::CssModules))
+        .unwrap();
     config.entries.get_mut("main").unwrap().path = "source/style.module.cjs".into();
     config.entries.insert(
         "z-alias".into(),
@@ -3782,7 +3840,9 @@ fn css_modules_published_shared_static_dynamic_and_cjs_activation_keep_generatio
     write(dir.root(), "deep.style", ".deep-name {color: green}");
     write(dir.root(), "required.style", ".required-name {color: blue}");
     let mut config = options();
-    config.css.css_modules = CssModules::Extension(".style".into());
+    config.loaders = global_styles()
+        .with_override(".style", Some(crate::loaders::Loader::CssModules))
+        .unwrap();
     config.css.load = CssLoad::AutoMount;
     config.entries.get_mut("main").unwrap().output_name = Some("deep/app/main.mjs".into());
     for (name, path, output) in [
@@ -4503,7 +4563,7 @@ fn css_urls_preserve_local_first_relative_paths_and_decoded_filenames() {
     }
     assert!(css.contains("?size=2#icon"), "{css}");
     assert!(css.contains("layer(local)"), "{css}");
-    assert!(artifacts
+    assert!(!artifacts
         .files
         .values()
         .any(|text| text.contains("script JS preference")));
@@ -4761,7 +4821,7 @@ fn css_modules_discovery_failures_do_not_finalize_partial_styles() {
         );
         let mut config = options();
         config.cache = CacheMode::Disabled;
-        config.css.css_modules = CssModules::Enabled;
+        config.loaders = crate::loaders::LoaderPolicy::default();
         let mut session = BuildSession::new(dir.root()).unwrap();
         let error = session.build(&config).err().unwrap();
         let report = format!("{error:#}");

@@ -22,7 +22,7 @@ pub(super) fn target<'a>(
         );
     };
     ensure!(
-        crate::resource::kind(target, &options.css) == crate::resource::ResourceKind::Script,
+        crate::resource::kind(target, &options.loaders) == crate::resource::ResourceKind::Script,
         "{}: module worker URL requires a script target: {}",
         path.display(),
         target.display()

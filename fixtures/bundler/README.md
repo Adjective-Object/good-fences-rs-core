@@ -345,7 +345,8 @@ configure external dependencies, effects, entry renames or custom plugins:
   "fixtureConfig": {
     "output": {"base_url": "./", "min_chunk_bytes": 0},
     "workers": 4,
-    "css": {"load": "caller-loaded", "css_modules": true}
+    "css": {"load": "caller-loaded"},
+    "loaders": {".css": "css-modules"}
   },
   "cssObservation": "observe.mjs"
 }
@@ -353,7 +354,8 @@ configure external dependencies, effects, entry renames or custom plugins:
 
 Top-level config/output/CSS toggles are optional; registered runtime identities
 require the exact fields above. The shipped defaults are base `"./"`,
-chunk target `0` (disabled), load `"caller-loaded"` and modules `false`.
+chunk target `0` (disabled), load `"caller-loaded"` and the default loader policy
+(global styles with scoped `.module.*`).
 `min_chunk_bytes` must be a nonnegative safe integer; it is also available for
 ordinary JS differential fixtures.
 Workers default to `1` (inline execution).
@@ -361,21 +363,25 @@ Workers default to `1` (inline execution).
 and output emission, in sequential stages; resolution/CSS/Ecco stay serial.
 Use worker counts 1, 2, 4 and 6 for comparable forthcoming benchmarks.
 The complete serialized config is
-bounded to 16 KiB, with unknown fields rejected at every level. Module selection
-also accepts `"everything"` (CSS only) and `"ext:.custom.suffix"`;
-`true` selects `.module.css`. `"auto-mount"` is independent of selection.
-Mappings always use camelCase named exports, never a configurable naming mode
-or default mapping object. Invalid bases/suffixes, scoped/export collisions,
+bounded to 16 KiB, with unknown fields rejected at every level. `loaders` overlays
+typed suffix rules by longest match; null rejects without fallback.
+`resolutionExtensions` optionally supplies ordered suffix probing after exact
+files; omission derives enabled loader suffixes by length/alphabetical order.
+The obsolete CSS selection fields and `resolveExtensions` spelling are rejected.
+`"auto-mount"` is independent of syntax/scoping selection.
+Mappings use camelCase named exports and one shared default mapping object.
+Invalid bases/suffixes, scoped/export collisions,
 invalid composition and unsupported/recovered module syntax are build errors,
-not accepted runtime outcomes. ICSS `:import`/`:export`, `@value` and preprocessor
-compilation remain unsupported. Detailed selector/animation limits live in the
+not accepted runtime outcomes. SCSS and indented Sass use their selected loaders;
+ICSS `:import`/`:export` and `@value` remain unsupported.
+Detailed selector/animation limits live in the
 [crate CSS contract](../../crates/bundler/README.md#extracted-css).
 
 `cssObservation` explicitly opts into **CSS output observation**, requires
 `expectations.backend: "native"`, and names a regular sibling `.mjs` file beside
 `case.json` (no nested path or symlink). The runner syntax-checks all source JS
-and the observer before building, excluding files selected as CSS by a custom
-suffix (including `.module.cjs`); it does **not** execute raw CSS imports or
+and the observer before building, excluding files selected for non-JS pipelines
+(including CSS with a `.module.cjs` suffix); it does **not** execute raw CSS imports or
 pretend to compare them with Node. CSS/resource parsing and closure validation
 remain the production builder's responsibility. Invalid source JS/observer
 syntax is an input failure and skips the build. No custom Node loader is used.
@@ -390,9 +396,11 @@ checks and separate input/build/backend/output failure stages apply.
 Observer/import/assertion errors are output failures unless explicitly expected;
 ordinary JS cases still compare every source/emitted stdout and error outcome.
 
-Declared resource inventory permits CSS/binary bytes, not executable JS or
-package metadata disguised as resources; undeclared non-JS generation files
-fail. Stylesheet paths must refer to declared owned `.css` resources.
+Declared resource inventory permits CSS/binary bytes, including raw file-loader
+JavaScript bytes only at content-addressed `assets/<sha256>.<extension>` paths,
+not executable chunks or package metadata disguised as resources. Undeclared
+non-JS generation files fail. Stylesheet paths must refer to declared owned
+`.css` resources.
 Caller-loaded applications must load and order root stylesheets themselves and
 serve resources at the configured public base. Auto-mount requires document/head,
 inserts links synchronously at native evaluation/activation, and promises neither

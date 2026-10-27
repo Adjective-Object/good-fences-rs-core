@@ -25,7 +25,7 @@ fn stylesheet_preparation_retains_mapped_facts_and_sass_snapshots_not_original_b
             let mut config = options();
             config.cache = cache;
             config.output.source_maps = source_maps;
-            config.css.css_modules = CssModules::Enabled;
+            config.loaders = crate::loaders::LoaderPolicy::default();
             config.resolver.target_env = TargetEnv::Browser;
             let built = BuildSession::new(&root).unwrap().build(&config).unwrap();
             let mut artifacts = built.product.artifacts.clone();
@@ -44,7 +44,7 @@ fn stylesheet_preparation_retains_mapped_facts_and_sass_snapshots_not_original_b
                 &root,
                 &inventory,
                 &base,
-                &config.css,
+                &config.loaders,
                 &config.resolver,
                 source_maps,
                 cache,

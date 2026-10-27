@@ -21,11 +21,6 @@ pub(crate) fn compilations() -> usize {
     COMPILATIONS.with(std::cell::Cell::get)
 }
 
-pub(crate) fn is_sass(path: &Path) -> bool {
-    path.extension()
-        .is_some_and(|ext| ext == "scss" || ext == "sass")
-}
-
 pub(crate) struct Compiled {
     pub css: String,
     pub source_map: Option<cache_flatbuffers::WireSourceMap>,
@@ -38,19 +33,32 @@ struct ResolverImporter<'a, R> {
     inventory: &'a crate::build::Inventory,
     resolver: &'a R,
     aliases: &'a BTreeSet<String>,
+    loaders: &'a crate::loaders::LoaderPolicy,
     inputs: RefCell<BTreeMap<PathBuf, Vec<u8>>>,
 }
 
-fn syntax(path: &Path) -> sasso::Syntax {
-    match path.extension().and_then(|ext| ext.to_str()) {
-        Some("sass") => sasso::Syntax::Sass,
-        Some("css") => sasso::Syntax::Css,
-        _ => sasso::Syntax::Scss,
-    }
+fn syntax(path: &Path, loaders: &crate::loaders::LoaderPolicy) -> eyre::Result<sasso::Syntax> {
+    use crate::loaders::StylesheetSyntax;
+    Ok(
+        match loaders
+            .select_stylesheet(path)?
+            .stylesheet()
+            .expect("stylesheet")
+            .0
+        {
+            StylesheetSyntax::Sass => sasso::Syntax::Sass,
+            StylesheetSyntax::Css => sasso::Syntax::Css,
+            StylesheetSyntax::Scss => sasso::Syntax::Scss,
+        },
+    )
 }
 
 /// Each tier is checked for ambiguity before considering the next one.
-fn candidates(request: &str, from_import: bool) -> Vec<Vec<String>> {
+fn candidates(
+    request: &str,
+    from_import: bool,
+    loaders: &crate::loaders::LoaderPolicy,
+) -> Vec<Vec<String>> {
     let (directory, name) = request
         .rsplit_once('/')
         .map_or(("", request), |(directory, name)| (directory, name));
@@ -59,26 +67,57 @@ fn candidates(request: &str, from_import: bool) -> Vec<Vec<String>> {
     } else {
         format!("{directory}/")
     };
-    let (stem, extensions): (&str, &[&str]) = if let Some(stem) = name.strip_suffix(".scss") {
-        (stem, &["scss"])
-    } else if let Some(stem) = name.strip_suffix(".sass") {
-        (stem, &["sass"])
-    } else if let Some(stem) = name.strip_suffix(".css") {
+    let concrete = name
+        .rsplit_once('.')
+        .filter(|(_, extension)| matches!(*extension, "scss" | "sass"))
+        .or_else(|| {
+            name.match_indices('.').find_map(|(offset, _)| {
+                loaders
+                    .rules()
+                    .contains_key(&name[offset..])
+                    .then_some((&name[..offset], &name[offset + 1..]))
+            })
+        });
+    let extensions: Vec<_> = loaders
+        .resolution_extensions()
+        .into_iter()
+        .filter(|extension| {
+            loaders
+                .rules()
+                .get(&format!(".{extension}"))
+                .and_then(|loader| *loader)
+                .and_then(|loader| loader.stylesheet())
+                .is_some_and(|(syntax, _)| syntax != crate::loaders::StylesheetSyntax::Css)
+        })
+        .collect();
+    let (stem, extensions) = if let Some(stem) = name.strip_suffix(".css") {
         return vec![vec![
             format!("{prefix}{stem}.css"),
             format!("{prefix}_{stem}.css"),
         ]];
+    } else if let Some((stem, extension)) = concrete {
+        (stem, vec![extension])
     } else {
-        (name, &["scss", "sass"])
+        (name, extensions)
+    };
+    let suffix = |extension: &str, import_only: bool| {
+        if !import_only {
+            return extension.to_owned();
+        }
+        // Sass's import-only marker precedes the final syntax extension, not a loader suffix.
+        match extension.rsplit_once('.') {
+            Some((prefix, syntax @ ("scss" | "sass"))) => format!("{prefix}.import.{syntax}"),
+            _ => format!("import.{extension}"),
+        }
     };
     let tier = |stem: &str, import_only: bool| {
-        let infix = if import_only { ".import" } else { "" };
         extensions
             .iter()
             .flat_map(|ext| {
+                let suffix = suffix(ext, import_only);
                 [
-                    format!("{prefix}{stem}{infix}.{ext}"),
-                    format!("{prefix}_{stem}{infix}.{ext}"),
+                    format!("{prefix}{stem}.{suffix}"),
+                    format!("{prefix}_{stem}.{suffix}"),
                 ]
             })
             .collect::<Vec<_>>()
@@ -94,20 +133,22 @@ fn candidates(request: &str, from_import: bool) -> Vec<Vec<String>> {
             format!("{request}.css"),
             format!("{prefix}_{name}.css"),
         ]);
+        let index_tier = |import_only: bool| {
+            extensions
+                .iter()
+                .flat_map(|extension| {
+                    let suffix = suffix(extension, import_only);
+                    [
+                        format!("{request}/index.{suffix}"),
+                        format!("{request}/_index.{suffix}"),
+                    ]
+                })
+                .collect()
+        };
         if from_import {
-            tiers.push(vec![
-                format!("{request}/index.import.scss"),
-                format!("{request}/_index.import.scss"),
-                format!("{request}/index.import.sass"),
-                format!("{request}/_index.import.sass"),
-            ]);
+            tiers.push(index_tier(true));
         }
-        tiers.push(vec![
-            format!("{request}/index.scss"),
-            format!("{request}/_index.scss"),
-            format!("{request}/index.sass"),
-            format!("{request}/_index.sass"),
-        ]);
+        tiers.push(index_tier(false));
     }
     tiers
 }
@@ -125,14 +166,7 @@ impl<R: DependencyResolver> ResolverImporter<'_, R> {
             "Sass dependency outside bounded source inventory: {}",
             path.display()
         );
-        ensure!(
-            matches!(
-                path.extension().and_then(|ext| ext.to_str()),
-                Some("scss" | "sass" | "css")
-            ),
-            "Sass import resolved to a non-stylesheet: {}",
-            path.display()
-        );
+        self.loaders.select_stylesheet(&path)?;
         Ok(path)
     }
 
@@ -173,8 +207,12 @@ impl<R: DependencyResolver> ResolverImporter<'_, R> {
                 }
             };
         }
-        let tiers = candidates(request, ctx.from_import);
+        let tiers = candidates(request, ctx.from_import, self.loaders);
         if module_request.is_none() {
+            let exact = parent.join(request);
+            if self.inventory.probe_file(&exact)? {
+                return self.checked(exact);
+            }
             for tier in &tiers {
                 let mut paths = BTreeSet::new();
                 for candidate in tier {
@@ -271,7 +309,7 @@ impl<R: DependencyResolver> Importer for ResolverImporter<'_, R> {
             }
             Ok(Some(ImporterResult {
                 contents,
-                syntax: syntax(&path),
+                syntax: syntax(&path, self.loaders)?,
                 source_map_url: None,
             }))
         };
@@ -288,6 +326,7 @@ pub(crate) fn compile(
     resolver: &impl DependencyResolver,
     aliases: &BTreeSet<String>,
     source_maps: bool,
+    loaders: &crate::loaders::LoaderPolicy,
 ) -> eyre::Result<Compiled> {
     #[cfg(test)]
     COMPILATIONS.with(|count| count.set(count.get() + 1));
@@ -296,12 +335,13 @@ pub(crate) fn compile(
         inventory,
         resolver,
         aliases,
+        loaders,
         inputs: RefCell::new(BTreeMap::from([(path.to_owned(), input.to_vec())])),
     };
     let warnings = Rc::new(RefCell::new(Vec::new()));
     let diagnostics = warnings.clone();
     let options = sasso::Options::default()
-        .with_syntax(syntax(path))
+        .with_syntax(syntax(path, loaders)?)
         .with_importer(&importer)
         .with_url(
             path.to_str()

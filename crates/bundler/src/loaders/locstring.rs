@@ -1,8 +1,15 @@
 //! Ori-compatible source strings, translation catalogs and pseudo-localization.
-use super::*;
+use crate::build::Inventory;
+use ast_segmenter::fingerprint::Fingerprint;
+use eyre::{ensure, WrapErr};
 use ftree_cache::inputs::{InputKind, InputSnapshot, PathInput};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::{Path, PathBuf},
+};
 
-/// Localization applies only to `*.locstring.json`, never ordinary JSON.
+/// Options for inputs selected by the locstring loader.
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LocaleOptions {
@@ -61,12 +68,9 @@ impl LocaleOptions {
     }
 }
 
-pub(super) fn matches(path: &Path) -> bool {
-    path.file_name()
-        .is_some_and(|name| name.to_string_lossy().ends_with(".locstring.json"))
-}
-
-pub(super) struct Localization {
+pub(crate) struct Localization {
+    loaded: bool,
+    failure: Option<std::sync::Arc<eyre::Report>>,
     options: LocaleOptions,
     fingerprint: Fingerprint,
     translations: BTreeMap<String, String>,
@@ -75,21 +79,65 @@ pub(super) struct Localization {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug)]
+struct CatalogError(std::sync::Arc<eyre::Report>);
+
+impl std::fmt::Display for CatalogError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("preparing shared localization catalogs")
+    }
+}
+
+impl std::error::Error for CatalogError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.0.as_ref().as_ref())
+    }
+}
+
 impl Localization {
     pub fn fingerprint(&self) -> Fingerprint {
         self.fingerprint
     }
 
-    pub fn new(inventory: &Inventory, options: &LocaleOptions) -> eyre::Result<Self> {
+    pub fn deferred(options: &LocaleOptions) -> eyre::Result<Self> {
         options.validate()?;
-        let mut result = Self {
+        Ok(Self {
+            loaded: false,
+            failure: None,
             options: options.clone(),
             fingerprint: Fingerprint::of(&serde_json::to_vec(options)?),
             translations: BTreeMap::new(),
             inputs: Vec::new(),
             catalog: None,
             warnings: Vec::new(),
-        };
+        })
+    }
+
+    pub fn activate(
+        &mut self,
+        inventory: &Inventory,
+        warnings: &mut Vec<String>,
+    ) -> eyre::Result<()> {
+        if let Some(error) = &self.failure {
+            return Err(CatalogError(error.clone()).into());
+        }
+        if !self.loaded {
+            match Self::new(inventory, &self.options) {
+                Ok(loaded) => *self = loaded,
+                Err(error) => {
+                    let error = std::sync::Arc::new(error);
+                    self.failure = Some(error.clone());
+                    return Err(CatalogError(error).into());
+                }
+            }
+            warnings.extend(self.warnings.iter().cloned());
+        }
+        Ok(())
+    }
+
+    pub fn new(inventory: &Inventory, options: &LocaleOptions) -> eyre::Result<Self> {
+        let mut result = Self::deferred(options)?;
+        result.loaded = true;
         if options.default.is_empty() || options.default == "none" || options.pseudo() {
             return Ok(result);
         }
@@ -302,7 +350,7 @@ fn catalog_paths(
 }
 
 // Ported from Microsoft Ori pseudoloc/pseudoloc.go (MIT); see
-// localization.LICENSE.txt. The accent table originates in bunkat/pseudoloc.
+// locstring.LICENSE.txt. The accent table originates in bunkat/pseudoloc.
 fn pseudo(input: &str, options: &PseudoLocaleOptions) -> eyre::Result<String> {
     let padding = options.extend.unwrap_or(0.5).max(0.0) * input.len() as f64;
     ensure!(
@@ -481,9 +529,9 @@ mod tests {
     fn localization_pseudo_matches_original_go_oracle() {
         // Synthetic cross-product evaluated by Ori 050d85e7's actual Go
         // StringOption/JSONOpts.Convert and rewindable writer, without changes
-        // to their algorithms. See localization.LICENSE.txt for attribution.
+        // to their algorithms. See locstring.LICENSE.txt for attribution.
         let cases: Vec<(String, PseudoLocaleOptions, String)> =
-            serde_json::from_str(include_str!("tests/localization_pseudo.json")).unwrap();
+            serde_json::from_str(include_str!("../build/tests/localization_pseudo.json")).unwrap();
         for (input, options, expected) in cases {
             assert_eq!(
                 pseudo(&input, &options).unwrap(),

@@ -331,7 +331,12 @@ fn localization_catalog_edits_match_sets_failures_and_cache_modes() {
     for invalid in [r#"{"a":42}"#, "{broken", "[]"] {
         write(dir.root(), "locale/fr/first.locstrings.json", invalid);
         let error = session.build(&config).err().unwrap();
-        assert!(error.downcast_ref::<serde_json::Error>().is_some());
+        let failures = error.downcast_ref::<PreparationErrors>().unwrap();
+        assert!(failures
+            .errors()
+            .values()
+            .flatten()
+            .any(|error| error.chain().any(|cause| cause.is::<serde_json::Error>())));
         assert!(format!("{error:#}").contains("first.locstrings.json"));
     }
     config.locale.default = "none".into();

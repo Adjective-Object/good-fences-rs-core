@@ -308,7 +308,7 @@ fn candidates_inner(
     }));
     let candidates = Arc::new(parking_lot::Mutex::new(Vec::new()));
     let discovered = candidates.clone();
-    let css = options.css.clone();
+    let css = options.loaders.clone();
     let dispatch = tracing::dispatcher::get_default(Clone::clone);
     let parent = tracing::Span::current();
     let walk = jwalk::WalkDirGeneric::<(WalkState, ())>::new(&root)

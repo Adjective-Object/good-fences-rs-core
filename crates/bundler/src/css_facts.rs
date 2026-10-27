@@ -29,7 +29,7 @@ pub(crate) fn sidecar(path: &Path) -> PathBuf {
 
 fn config(module: bool) -> [u8; 16] {
     let mut bytes = Vec::from(include_bytes!("css_syntax.rs").as_slice());
-    bytes.extend_from_slice(include_bytes!("css.rs"));
+    bytes.extend_from_slice(include_bytes!("loaders/stylesheet.rs"));
     bytes.extend_from_slice(owned::PARSER_REVISION.as_bytes());
     bytes.push(u8::from(module));
     hash128(&bytes)

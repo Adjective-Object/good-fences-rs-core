@@ -32,7 +32,7 @@ fn sass_modules_compile_before_scoping_and_keep_asset_and_css_imports() {
     write(dir.root(), "icon.svg", "<svg/>");
     let mut config = options();
     config.resolver.target_env = TargetEnv::Browser;
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     let mut session = BuildSession::new(dir.root()).unwrap();
     let cold = session.build(&config).unwrap();
     let text = css(&cold, &dir.root().join("style.module.scss"));
@@ -88,7 +88,7 @@ fn sass_modules_allow_comment_only_trailing_bare_global_scopes() {
     );
     let mut config = options();
     config.resolver.target_env = TargetEnv::Browser;
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     let built = BuildSession::new(dir.root())
         .unwrap()
         .build(&config)
@@ -192,6 +192,62 @@ fn sass_importer_honors_packages_conditions_aliases_and_import_only_partials() {
     assert!(text.contains("color: green"), "{text}");
     assert!(text.contains("width: 8px"), "{text}");
     assert!(text.contains("height: 9px"), "{text}");
+}
+
+#[test]
+fn sass_compound_suffixes_keep_import_only_naming_and_use_separate() {
+    for extension in ["global.scss", "module.scss", "global.sass", "module.sass"] {
+        let dir = TmpDir::new();
+        write(dir.root(), "main.mjs", "import './style.scss';");
+        write(
+            dir.root(),
+            "style.scss",
+            &format!("@import './palette.{extension}'; .item {{ color: $color; }}"),
+        );
+        let (stem, syntax) = extension.rsplit_once('.').unwrap();
+        let value = if syntax == "sass" {
+            "$color: green\n"
+        } else {
+            "$color: green;"
+        };
+        write(
+            dir.root(),
+            &format!("_palette.{stem}.import.{syntax}"),
+            value,
+        );
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let config = options();
+        let imported = session.build(&config).unwrap();
+        assert!(
+            css(&imported, &dir.root().join("style.scss")).contains("color: green"),
+            "{extension}"
+        );
+        write(
+            dir.root(),
+            "style.scss",
+            "@import './palette'; .item { color: $color; }",
+        );
+        let inferred = session.build(&config).unwrap();
+        assert!(
+            css(&inferred, &dir.root().join("style.scss")).contains("color: green"),
+            "{extension}"
+        );
+        write(
+            dir.root(),
+            &format!("_palette.{extension}"),
+            &value.replace("green", "blue"),
+        );
+        write(
+            dir.root(),
+            "style.scss",
+            &format!("@use './palette.{extension}' as palette; .item {{ color: palette.$color; }}"),
+        );
+        let used = session.build(&config).unwrap();
+        assert!(
+            css(&used, &dir.root().join("style.scss")).contains("color: blue"),
+            "{extension}"
+        );
+    }
 }
 
 #[test]
@@ -428,7 +484,7 @@ fn sass_source_maps_compose_scoping_urls_imports_values_and_forwarded_mixins() {
     write(dir.root(), "icon.svg", "<svg/>");
     let mut config = options();
     config.output.source_maps = true;
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     let result = BuildSession::new(dir.root())
         .unwrap()
         .build(&config)
@@ -511,7 +567,7 @@ fn sass_source_maps_toggle_warm_disk_invalidate_mapping_only_edits_and_publish()
     let style = dir.root().join("style.module.sass");
     let variables = dir.root().join("_variables.sass");
     let mut config = options();
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     let mut session = BuildSession::new(dir.root()).unwrap();
     let off = session.build(&config).unwrap();
     assert!(!css(&off, &style).contains("sourceMappingURL"));

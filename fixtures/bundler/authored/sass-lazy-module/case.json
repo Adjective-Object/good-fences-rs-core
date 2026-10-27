@@ -4,7 +4,7 @@
   "entryPoints": ["entry.js"],
   "fixtureConfig": {
     "target": "browser",
-    "css": {"load": "auto-mount", "css_modules": true}
+    "css": {"load": "auto-mount"}
   },
   "cssObservation": "observe.mjs",
   "expectations": {"stdout": ["native Sass deferred mappings and resources"], "backend": "native"},

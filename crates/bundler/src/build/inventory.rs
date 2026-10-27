@@ -134,11 +134,11 @@ fn checked_route(root: &Path, state: &State, route: &Path) -> Option<PathBuf> {
 }
 
 impl Inventory {
-    pub(super) fn root(&self) -> &Path {
+    pub(crate) fn root(&self) -> &Path {
         &self.root
     }
 
-    pub(super) fn snapshot(&self) -> &InputSnapshot {
+    pub(crate) fn snapshot(&self) -> &InputSnapshot {
         &self.snapshot
     }
 

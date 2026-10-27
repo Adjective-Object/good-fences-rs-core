@@ -7,6 +7,12 @@ use std::{collections::BTreeMap, fmt, path::Path, str::FromStr};
 use eyre::{ensure, OptionExt};
 use serde::{de::MapAccess, Deserialize, Deserializer, Serialize};
 
+pub(crate) mod file;
+pub(crate) mod json;
+pub(crate) mod locstring;
+pub(crate) mod script;
+pub(crate) mod stylesheet;
+
 /// A predefined pipeline, never a callback or plugin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -209,15 +215,34 @@ impl LoaderPolicy {
             "native addons are not supported inputs: {}",
             path.display()
         );
-        let (suffix, loader) = self
-            .rules
-            .iter()
-            .filter(|(suffix, _)| suffix.as_str() != "*" && name.ends_with(suffix.as_str()))
-            .max_by_key(|(suffix, _)| suffix.len())
+        let (suffix, loader) = name
+            .match_indices('.')
+            .find_map(|(offset, _)| self.rules.get_key_value(&name[offset..]))
             .or_else(|| self.rules.get_key_value("*"))
             .ok_or_eyre("loader policy has no fallback")?;
         loader
             .ok_or_else(|| eyre::eyre!("loader suffix {suffix:?} rejects input {}", path.display()))
+    }
+
+    /// CSS import context supplies CSS only when no concrete suffix rule matches.
+    /// Explicit file/script/JSON rules and null remain authoritative.
+    pub(crate) fn select_stylesheet(&self, path: &Path) -> eyre::Result<Loader> {
+        let selected = self.select(path)?;
+        if selected.stylesheet().is_some() {
+            return Ok(selected);
+        }
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        ensure!(
+            !name
+                .match_indices('.')
+                .any(|(offset, _)| self.rules.contains_key(&name[offset..])),
+            "stylesheet input has incompatible loader {selected:?}: {}",
+            path.display()
+        );
+        Ok(Loader::Css)
     }
 
     /// Enabled resolver extensions, without leading dots, shortest first then

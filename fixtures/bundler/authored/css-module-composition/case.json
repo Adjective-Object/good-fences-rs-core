@@ -2,7 +2,7 @@
   "id": "authored/css-module-composition",
   "moduleType": "module",
   "entryPoints": ["entry.js"],
-  "fixtureConfig": {"css": {"css_modules": "everything"}},
+  "fixtureConfig": {"loaders": {".css": "css-modules"}},
   "cssObservation": "observe.mjs",
   "expectations": {"stdout": ["composition order and deduplication"], "backend": "native"},
   "goals": ["Resolve local forward references, explicit global tokens and cross-file composition using original selector names under caller-loaded CSS; default maps share the named bindings' composed tokens."]

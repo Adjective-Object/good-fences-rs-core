@@ -342,7 +342,7 @@ fn contexts_settle_late_checked_link_scopes_before_graph_construction() {
     directory_link(&package, &root.join("linked"));
     directory_link(&sibling, &root.join("styles"));
     let mut config = linked_options();
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     let mut session = BuildSession::new(&root).unwrap();
     let first = fresh_parity(&mut session, &config);
     assert!(
@@ -1406,7 +1406,7 @@ fn linked_css_compositions_and_urls_use_bounded_canonical_inputs() {
     write(&package, "pixel.bin", "pixel");
     directory_link(&package, &root.join("node_modules/pkg"));
     let mut config = linked_options();
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     let mut session = BuildSession::new(&root).unwrap();
     let first = fresh_parity(&mut session, &config);
     assert!(

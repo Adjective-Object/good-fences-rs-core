@@ -103,7 +103,7 @@ console.log(JSON.stringify(events));
 "#;
     let mut config = options();
     config.resolver.target_env = TargetEnv::Browser;
-    config.resolver.extensions = vec!["js".into(), "mjs".into(), "cjs".into()];
+    config.resolution_extensions = Some(vec!["js".into(), "mjs".into(), "cjs".into()]);
     let mut session = BuildSession::new(dir.root()).unwrap();
     let cold = session.build(&config).unwrap();
     assert_eq!(

@@ -133,7 +133,9 @@ fn json_import_attributes_reject_non_json_aliases_externals_and_css_overrides() 
         .resolver
         .alias
         .insert("theme-data".into(), "./data.json".into());
-    config.css.css_modules = CssModules::Extension(".json".into());
+    config.loaders = global_styles()
+        .with_override(".json", Some(crate::loaders::Loader::CssModules))
+        .unwrap();
     let error = format!("{:#}", session.build(&config).err().unwrap());
     assert!(
         error.contains("requires a bundled JSON resource"),
@@ -1842,7 +1844,7 @@ export const load = () => import('./data.json');
     );
     write(dir.root(), "style.module.css", ".button { color: red }");
     let mut config = browser_options();
-    config.css.css_modules = CssModules::Enabled;
+    config.loaders = crate::loaders::LoaderPolicy::default();
     config.entries.get_mut("main").unwrap().output_name = Some("nested/entry.mjs".into());
     config.output.base_url = "/static/".into();
     let mut session = BuildSession::new(dir.root()).unwrap();

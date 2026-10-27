@@ -27,8 +27,8 @@ these path-bearing events are excluded from duration traces.
 
 ## Replacement direction and current status
 
-`loaders::LoaderPolicy` is a standalone typed policy API; it is not yet wired into
-`BuildOptions`, the CLI or build dispatch. Construct defaults with `default()`,
+`BuildOptions::loaders` and the CLI's strict `loaders` map select predefined
+pipelines through `loaders::LoaderPolicy`. Construct defaults with `default()`,
 overlay suffixes with `from_overrides([(".theme", Some(Loader::ScssModules))])`,
 or consume/update a policy with `with_override`. JSON deserialization accepts a
 strict suffix-to-label/null map. Selection matches filenames only, longest suffix
@@ -73,8 +73,9 @@ CJS initialization, missing-module errors and host getters remain intact.
 
 ### Localization
 
-Only `*.locstring.json` receives the localization transform; ordinary JSON stays
-unchanged. Inputs must be strict string-to-string JSON objects. All underscore-
+The `locstring` loader (default for `*.locstring.json`) receives the localization
+transform; selecting `json` or `file` bypasses it and catalog IO. Inputs must be
+strict string-to-string JSON objects. All underscore-
 prefixed metadata is removed, and each other key without `_key.comment` warns on
 every build, including cache/no-op hits. Values have independently tree-shakable
 named ESM exports and one shared clean default object. Nonidentifier/reserved keys
@@ -105,7 +106,7 @@ an empty start delimiter retains `{`, an empty end delimiter never closes, and
 an empty override retains accents. `omit_keys` bypasses pseudo transformation only.
 For client-style output use prefix `[!!`, suffix `!!]`, extension 0.2.
 Algorithm/table provenance and full upstream licenses accompany
-`src/build/localization.LICENSE.txt`; synthetic oracle cases use Ori 050d85e7.
+`src/loaders/locstring.LICENSE.txt`; synthetic oracle cases use Ori 050d85e7.
 
 Catalogs are read once per build, sharing the inventory snapshot. One deterministic
 configuration/catalog-byte-and-match-set fingerprint keys generated resources,
@@ -872,10 +873,12 @@ within that package, so nested JSON, CSS and asset requests need no extra
 wildcard map. This intentional Node-encapsulation deviation does not affect
 explicit export maps or their private subpaths.
 
-`BuildSession` accepts `.json` and `.jsonc` dependencies and entries. `.jsonc`
+The `json` and `jsonc` loaders accept dependencies and entries, defaulting to
+`.json` and `.jsonc` respectively. The selected `jsonc` loader
 additionally permits `//` and `/* */` comments and trailing object/array commas,
-not other JavaScript/JSON5 syntax. Ordinary `.json` and `package.json` remain
-strict JSON. Extensionless resolution probes `.jsonc` after existing extensions.
+not other JavaScript/JSON5 syntax. The `json` loader and package metadata remain
+strict JSON. Extension probing follows the effective loader-derived or explicit
+resolution order.
 JSON values are shared
 between default ESM imports, dynamic-import defaults and CommonJS `require`;
 objects remain mutable and are initialized lazily when required. Inputs are
@@ -1054,28 +1057,49 @@ Sasso is a v0.x implementation with documented upstream conformance gaps, not an
 unconditional Dart Sass parity guarantee. Compilation failures are returned, never
 replaced with raw Sass or empty CSS.
 
-`BuildOptions.css.css_modules` (`CssModules`) accepts `false` (default/`Disabled`),
-`true` (`Enabled`, selecting `.module.css`, `.module.scss` and `.module.sass`),
-`"everything"` (`Everything`, all CSS/Sass inputs), or
-`"ext:.any.custom.extension"` (`Extension` with the dotted suffix).
-Suffixes consist of nonempty dot-separated ASCII letters/digits/underscore/hyphen
-components; empty suffixes, separators, whitespace and URL syntax are rejected
-before graph loading, including programmatically constructed invalid options.
-Custom suffixes identify CSS before generic asset classification, for entries,
-static/dynamic imports, require/context candidates and transitive CSS imports.
-Suffixes such as `.module.cjs`, `.module.ts` and `.module.json` still use the
-sealed generated JavaScript parser mode, not the original extension's mode.
-`"everything"` does not reclassify JavaScript, JSON or binary inputs as CSS.
-Each imported stylesheet uses its own selection rule, not its parent's flag.
-`BuildOptions.css.css_modules_exclude` is a default-empty list of dotted filename
-suffixes using the same grammar. Exclusions override module selection, including
-`Everything` and custom suffixes, without changing a selected file's stylesheet
-kind. For example, `[".global.css", ".global.scss", ".global.sass"]` keeps those
-selectors global while other styles remain scoped. Matching is case-sensitive
-and uses the filename only. Excluded styles retain the global stylesheet
-URL-default export contract, not a CSS Modules mapping object. The same policy
-applies to entries, transitive CSS imports and composition targets; composing
-from an excluded stylesheet is an error.
+### Configurable loaders
+
+`BuildOptions.loaders` is a typed `loaders::LoaderPolicy`. Use `default()`,
+`from_overrides`, or consuming `with_override(suffix, Some(Loader::...))`;
+`None` rejects matching inputs, including warm/disk/no-op builds.
+CLI `loaders` is a strict map overlaying defaults:
+
+```json
+{
+  "loaders": {
+    ".theme": "scss-modules",
+    ".scss": "scss-modules",
+    ".global.scss": "scss",
+    ".locstring.json": "locstring",
+    ".jsonc": null
+  },
+  "resolutionExtensions": [".web.ts", ".ts", ".tsx", ".js"],
+  "css": {"load": "auto-mount"}
+}
+```
+
+Labels are `js`, `jsx`, `ts`, `tsx`, `json`, `jsonc`, `css`, `css-modules`,
+`scss`, `scss-modules`, `sass`, `sass-modules`, `locstring`, and `file`.
+They select predefined syntax/transforms, never callbacks. A `.theme` selected
+as `scss-modules` compiles SCSS and scopes selectors, while `file` exports the
+URL of exact original bytes even for `.scss`. Script syntax remaps do not change
+explicit original m/c module-format semantics. Parser identities describe prepared
+plain JavaScript; original paths remain source, error, inventory and map identities.
+
+Rules match filenames case-sensitively, longest suffix first, independent of map
+order. Null blocks shorter/wildcard fallback. Suffixes are dotted nonempty ASCII
+letter/digit/underscore/hyphen components; `*` is the fallback.
+Defaults cover script families, JSON/JSONC, global `.css`/`.scss`/`.sass`,
+explicit `.global.*`, scoped `.module.*`, `.locstring.json`, and `*: file`.
+Declarations and native addons remain forbidden regardless of overrides.
+Old `CssModules`, `css_modules`, and `css_modules_exclude` are removed.
+Replace exclusions with longer global loader rules; mounting and locale stay independent.
+Each separately loaded stylesheet in CSS/composition closures selects its own
+syntax and scope. Sass imports select their own input syntax; the compiled CSS
+uses the root stylesheet's scoping, as with ordinary Sass preprocessing.
+Unknown-suffix CSS imports retain contextual CSS interpretation, but explicit
+incompatible or null suffix rules cannot be overridden by context.
+Global styles retain URL defaults; composing from them is an error.
 
 Selected modules scope classes and IDs to `_` plus ten base64url SHA-256 digest
 characters. The versioned `css-local-v1` hash uses the normalized project-relative
@@ -1107,8 +1131,8 @@ independently; demanding the complete object retains its mapping values.
 This never deletes stylesheet rules or the extracted CSS resource.
 Both loaders use identical mappings and CSS bytes;
 auto-mount retains its DOM effects but does not add a URL default to modules.
-Selection is independent of `css.load`. Disabled selection preserves ordinary
-global CSS, including `.module.css` filenames.
+Selection is independent of `css.load`. Selecting a global loader preserves
+unscoped CSS, including for `.module.css` filenames.
 The separately pinned upstream `oxc-css-parser` revision
 `6e1604ddd0ad0d08279aac4a2910ff8ca585f7c6` parses module selectors, decoded names,
 scope markers and composition requests into owned facts with checked original
@@ -1156,10 +1180,8 @@ fail with source paths/byte spans, even for unused exports. Cross-file
 `composes: base-name from "./other.module.css"` uses the same bounded import
 resolver/inventory as JavaScript, including package exports and CSS string
 escapes. Names refer to decoded original local selectors, not their camelCase JS
-aliases. Targets must be selected CSS modules exporting that local name,
-classified as stylesheets by their `.css` or configured custom suffix. Unlike
-CSS `@import`, `composes` cannot treat arbitrary filenames as stylesheets,
-even under `"everything"`;
+aliases. Targets must use a stylesheet-module loader exporting that local name.
+Unlike CSS `@import`, `composes` cannot treat arbitrary filenames as stylesheets;
 missing/global-only names, non-module targets, externals, private package paths,
 unlinked out-of-root files and excluded files are errors.
 Composition closure discovery precedes loader generation. Mappings resolve
@@ -1896,12 +1918,17 @@ Rooted package metadata file paths intentionally resolve from their owning
 manifest directory (`main: "/js/Abt.js"` selects the package's `js/Abt.js`).
 This also covers module/browser paths and recursive exports/imports targets,
 without rebasing direct absolute imports or relaxing checked inventory admission.
-Custom suffix order uses `BuildOptions.resolver.extensions` with
-`prefer_js_extension = false`; otherwise legacy `.js` preference is retained.
-The CLI's `resolveExtensions` sets both, accepting optional leading dots and
-compound suffixes such as `.web.js`. Omission preserves defaults; `[]` disables
-suffix probing without disabling exact-file imports or explicit TypeScript
-substitutions. Effective suffix order and preference participate in cache policy.
+`BuildOptions.resolution_extensions: Option<Vec<String>>` / CLI
+`resolutionExtensions` replaces suffix probing in explicit order, accepting
+optional leading dots and compound suffixes such as `.web.ts`.
+Omission derives enabled loader suffixes by ascending length then alphabetical
+order (excluding null and wildcard). Exact files always win; no hidden `.js`
+preference applies. `Some(vec![])` / `[]` disables suffix probing, not exact-file
+imports or explicit TypeScript substitutions. Effective selection and ordered
+suffixes participate in cache policy. The obsolete CLI `resolveExtensions` spelling
+is rejected. BuildSession rejects nondefault raw `resolver.extensions`: migrate
+explicit library ordering to `resolution_extensions`. Lower-level resolver APIs
+and their legacy preference option remain unchanged outside BuildSession.
 Actual requests retain positive/negative probes for package trees, link retargets,
 priority candidates and deleted targets. Package-format selection seals only
 consulted canonical ancestor `package.json` observations, including misses and

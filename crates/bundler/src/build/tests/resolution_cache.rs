@@ -65,7 +65,7 @@ fn build(root: &Path, config: &BuildOptions) -> BuildResult {
 }
 
 fn sidecar(package: &Path, config: &BuildOptions) -> PathBuf {
-    let policy = resolver::BuildResolver::policy(config)
+    let policy = resolver::BuildResolver::policy(&effective_options(config).unwrap())
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();

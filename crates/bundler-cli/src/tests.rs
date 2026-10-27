@@ -266,7 +266,7 @@ fn resolve_extensions_selects_compound_suffixes_in_order_for_project_and_fixture
     ] {
         let mut settings = serde_json::json!({"target": "browser"});
         if let Some(extensions) = extensions {
-            settings["resolveExtensions"] = extensions;
+            settings["resolutionExtensions"] = extensions;
         }
         std::fs::write(&fixture_path, serde_json::to_vec(&settings).unwrap()).unwrap();
         settings["entries"] = serde_json::json!(["entry.mjs"]);
@@ -293,7 +293,7 @@ fn resolve_extensions_can_disable_probing_without_disabling_explicit_imports() {
     let root = dir.root();
     std::fs::write(
         root.join("bundler.config.json"),
-        r#"{"entries":["entry.mjs"],"resolveExtensions":[]}"#,
+        r#"{"entries":["entry.mjs"],"resolutionExtensions":[]}"#,
     )
     .unwrap();
     std::fs::write(root.join("component.js"), "export const value = 1;").unwrap();
@@ -327,7 +327,7 @@ fn resolve_extensions_rejects_invalid_suffixes_before_building() {
     ] {
         let config = serde_json::json!({
             "entries": ["entry.mjs"],
-            "resolveExtensions": [suffix]
+            "resolutionExtensions": [suffix]
         });
         std::fs::write(
             root.join("bundler.config.json"),
@@ -337,7 +337,7 @@ fn resolve_extensions_rejects_invalid_suffixes_before_building() {
         let mut stdout = Vec::new();
         let error = run_from(root, [], &mut stdout).unwrap_err();
         assert!(
-            format!("{error:#}").contains("resolveExtensions"),
+            format!("{error:#}").contains("resolutionExtensions"),
             "{suffix:?}: {error:#}"
         );
         assert!(stdout.is_empty());

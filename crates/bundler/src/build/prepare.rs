@@ -279,7 +279,7 @@ pub(super) fn resolve(
             if dependency.json_attribute().is_some() {
                 ensure!(
                 matches!(&target, DependencyTarget::File(target)
-                    if crate::resource::kind(target, &options.css) == crate::resource::ResourceKind::Json),
+                    if crate::resource::kind(target, &options.loaders) == crate::resource::ResourceKind::Json),
                 "{}: JSON import attribute at bytes {}..{} requires a bundled JSON resource: {}",
                 path.display(),
                 dependency.span().start,
@@ -318,7 +318,9 @@ pub(super) fn enqueue(
         .into_iter()
         .filter(|path| scheduled.insert(path.clone()))
         .filter(|path| {
-            if crate::resource::kind(path, &options.css) == crate::resource::ResourceKind::Script {
+            if crate::resource::kind(path, &options.loaders)
+                == crate::resource::ResourceKind::Script
+            {
                 true
             } else {
                 resources.insert(path.clone());
@@ -338,10 +340,11 @@ pub(super) fn read(
     previous: Option<&Source>,
     options: &BuildOptions,
     declarations: &PreparedDeclarations,
-    base: &crate::output_url::PublicBase,
+    _base: &crate::output_url::PublicBase,
     dependencies: &dyn Fn(&[ast_segmenter::owned::Dependency], policy::Admission, bool),
 ) -> eyre::Result<Prepared> {
     let _span = tracing::info_span!("prepare.read").entered();
+    let selected = options.loaders.select(path)?;
     ensure!(
         inventory.contains(path),
         "source outside reachable build inventory (or reserved/excluded): {}",
@@ -353,11 +356,13 @@ pub(super) fn read(
     let input = tracing::info_span!("prepare.read_bytes")
         .in_scope(|| fs::read(path))
         .wrap_err_with(|| format!("source {}", path.display()))?;
-    if crate::resource::kind(path, &options.css) != crate::resource::ResourceKind::Script {
+    if crate::resource::kind(path, &options.loaders) != crate::resource::ResourceKind::Script {
         return Ok(Prepared::Resource { input, format });
     }
-    if crate::transpile::required(path) {
-        let config = ParserConfig::for_path(path, format)?;
+    let syntax = selected.script_syntax().expect("selected script");
+    let selected_path = crate::transpile::parser_path(path, syntax);
+    if syntax != crate::loaders::ScriptSyntax::Js {
+        let config = ParserConfig::for_path(&selected_path, format)?;
         if let Some(previous) = previous.filter(|previous| {
             previous.text.matches_input(&input)
                 && previous.transpiled.as_ref().is_some_and(|transpiled| {
@@ -391,7 +396,13 @@ pub(super) fn read(
             .wrap_err_with(|| format!("{}: source is not UTF-8", path.display()))?;
         let compiled =
             tracing::info_span!("prepare.transpile", bytes = input.len()).in_scope(|| {
-                crate::transpile::compile(path, source, format, options.output.source_maps)
+                crate::transpile::compile_selected(
+                    path,
+                    source,
+                    format,
+                    options.output.source_maps,
+                    selected,
+                )
             })?;
         let mut loaded = load(
             path,
@@ -412,16 +423,14 @@ pub(super) fn read(
         });
         return Ok(Prepared::Script(loaded));
     }
-    let wrapper_format = match options.resolver.target_env {
-        TargetEnv::Browser => ModuleFormat::Esm,
-        TargetEnv::Node => ModuleFormat::CommonJs,
-    };
-    let text = crate::resource::prepare(path, &input, base, wrapper_format)?;
+    let text = std::str::from_utf8(&input)
+        .wrap_err_with(|| format!("{}: source is not UTF-8", path.display()))?
+        .to_owned();
     Ok(Prepared::Script(load(
         path,
         input,
         text,
-        path,
+        &selected_path,
         format,
         previous,
         options.cache,

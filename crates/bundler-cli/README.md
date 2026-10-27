@@ -33,7 +33,8 @@ missing/invalid files never fall back to discovery.
   "target": "browser",
   "workers": 4,
   "env": {},
-  "resolveExtensions": [".web.js", ".ts", ".tsx", ".js", ".jsx", ".json", ".node", ".jsonc"],
+  "resolutionExtensions": [".web.ts", ".ts", ".tsx", ".js"],
+  "loaders": {".theme": "scss-modules", ".jsonc": null},
   "output": {"source_maps": true}
 }
 ```
@@ -65,9 +66,7 @@ schema, not serialized
     "source_maps": false
   },
   "css": {
-    "load": "caller-loaded",
-    "css_modules": false,
-    "css_modules_exclude": []
+    "load": "caller-loaded"
   }
 }
 ```
@@ -82,17 +81,29 @@ unchanged source files. This CLI uses `bundler.config.json`, not executable
 `bundler.config.js`; no JavaScript configuration file is loaded.
 `resolveConditions` adds nonempty conditions to target defaults; `import` and
 `require` cannot be overridden.
-`resolveExtensions` replaces the default extension-probing list in the supplied
+`resolutionExtensions` replaces the extension-probing list in the supplied
 order, after exact files, for file and directory-index requests.
-Omitting it preserves existing resolution: a `.js` fast path for extensionless
-files, then suffixes `ts`, `tsx`, `js`, `jsx`, `json`, `node`, `jsonc`.
-Explicit lists bypass that fast path; `[]` disables extension probing, not
+Omitting it derives enabled loader suffixes by ascending length then alphabetical
+order, excluding null and wildcard. There is no hidden `.js` preference.
+`[]` disables extension probing, not
 exact-file imports or explicit TypeScript substitutions.
 Suffixes accept an optional leading dot and may be compound, for example
 `[".web.ts", ".web.tsx", ".web.js", ".ts", ".tsx", ".js", ".jsx", ".json"]`.
 They must have nonempty dot-separated components and contain no whitespace,
 control characters, path separators or reserved filename characters.
 Changing the list or its order changes resolver cache policy.
+The obsolete `resolveExtensions` spelling is rejected.
+`loaders` overlays default suffix rules; longest filename suffix wins regardless
+of map order. Null rejects and blocks fallback. Labels are `js`/`jsx`/`ts`/`tsx`,
+`json`/`jsonc`, `css`/`css-modules`, `scss`/`scss-modules`, `sass`/`sass-modules`,
+`locstring`, and `file`. Defaults include global styles, scoped `.module.*`,
+explicit `.global.*`, `*.locstring.json`, script families, JSON/JSONC and `*: file`.
+For example `{"loaders":{".scss":"scss-modules",".global.scss":"scss"}}`
+scopes SCSS except longer global suffixes. Custom suffixes select actual syntax,
+not just classification. `file` preserves exact original bytes.
+Declarations/native addons cannot be enabled. Old `css_modules` and
+`css_modules_exclude` are rejected; replace them with loader rules.
+Locale/catalog processing runs only for selected `locstring` inputs.
 `lazy_runtimes` accepts at most 16 exact
 `module`/`import`/`action` objects, each containing `module` (a portable
 root-relative file) and `export` (a nonempty, control-free name, max 256 bytes).
@@ -136,8 +147,8 @@ Supported names: `uses-eval`, `require-reassignment`, `require-indirect-use`,
 semantic, extraction, resolution, linking or output validation errors.
 
 CSS loading is `caller-loaded` or `auto-mount`; `--css-auto-mount` overrides it.
-CSS Modules accepts `false`, `true`, `"everything"` or `"ext:.custom.suffix"`;
-exclusion suffixes override scoping. See the bundler README for resource,
+Select syntax and module scoping with `loaders`; mounting does not change either.
+See the bundler README for resource,
 source-map, lazy-runtime and CSS semantics. Auto-mount requires a usable DOM;
 inserting links synchronously does not promise stylesheet readiness.
 

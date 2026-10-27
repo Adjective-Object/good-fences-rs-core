@@ -30,15 +30,13 @@ mod discovery;
 #[path = "entry_outputs.rs"]
 mod entry_outputs;
 mod env;
-mod localization;
+use crate::loaders::locstring as localization;
 pub use localization::{LocaleOptions, PseudoLocaleOptions};
 mod policy;
 mod prepare;
 pub use policy::{PolicyAllowance, PolicyName, PreparationErrors};
 mod scratch;
 mod worker_entries;
-
-pub use crate::css_selection::CssModules;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
@@ -56,6 +54,11 @@ pub struct BuildOptions {
     /// Logical entry IDs mapped to source entries and optional output names.
     pub entries: BTreeMap<String, Entry>,
     pub resolver: NodeModulesResolverOptions,
+    /// Ordered suffix replacement (optional leading dots). None derives enabled
+    /// suffixes from loaders; Some([]) disables suffix probing. BuildSession
+    /// callers must use this field rather than resolver.extensions.
+    pub resolution_extensions: Option<Vec<String>>,
+    pub loaders: crate::loaders::LoaderPolicy,
     pub externals: BTreeSet<String>,
     pub effects: EffectPolicy,
     /// JavaScript and target-selected host contracts, followed by exact user overrides.
@@ -73,12 +76,9 @@ pub struct BuildOptions {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct CssOptions {
     pub load: CssLoad,
-    pub css_modules: CssModules,
-    /// Dotted filename suffixes excluded from module scoping, even when selected.
-    pub css_modules_exclude: Vec<String>,
 }
 
 /// Built-in stylesheet loading policies; custom strategies are not public API.
@@ -132,6 +132,8 @@ impl Default for BuildOptions {
             execution: crate::execution::ExecutionOptions::default(),
             entries: BTreeMap::new(),
             resolver: NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
+            resolution_extensions: None,
+            loaders: crate::loaders::LoaderPolicy::default(),
             externals: BTreeSet::new(),
             effects: EffectPolicy::default(),
             declarations: ecco::DeclarationConfig::default(),
@@ -260,6 +262,45 @@ pub(crate) fn hash(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
 
+fn effective_options(options: &BuildOptions) -> eyre::Result<BuildOptions> {
+    let mut effective = options.clone();
+    let defaults = NodeModulesResolverOptions::default_for_env(options.resolver.target_env);
+    ensure!(
+        options.resolver.extensions == defaults.extensions,
+        "BuildSession resolver.extensions has moved to BuildOptions.resolution_extensions; use Some(ordered_suffixes)"
+    );
+    effective.resolver.extensions = options
+        .resolution_extensions
+        .as_ref()
+        .map(|extensions| {
+            extensions
+                .iter()
+                .map(|suffix| {
+                    let suffix = suffix.strip_prefix('.').unwrap_or(suffix);
+                    ensure!(
+                        suffix.split('.').all(|part| !part.is_empty())
+                            && !suffix.chars().any(|ch| ch.is_whitespace()
+                                || ch.is_control()
+                                || "/\\:*?\"<>|".contains(ch)),
+                        "resolutionExtensions entries must be nonempty file suffixes: {suffix:?}"
+                    );
+                    Ok(suffix.to_owned())
+                })
+                .collect::<eyre::Result<Vec<_>>>()
+        })
+        .transpose()?
+        .unwrap_or_else(|| {
+            options
+                .loaders
+                .resolution_extensions()
+                .into_iter()
+                .map(str::to_owned)
+                .collect()
+        });
+    effective.resolver.prefer_js_extension = false;
+    Ok(effective)
+}
+
 impl BuildSession {
     pub fn new(root: impl AsRef<Path>) -> eyre::Result<Self> {
         let root = root
@@ -289,6 +330,8 @@ impl BuildSession {
     }
 
     pub fn build(&mut self, options: &BuildOptions) -> eyre::Result<BuildResult> {
+        let effective = effective_options(options)?;
+        let options = &effective;
         options
             .execution
             .scoped_pool(|| self.build_inner(options))?
@@ -317,7 +360,6 @@ impl BuildSession {
         let mut warnings = Vec::new();
         let public_base = crate::output_url::PublicBase::new(&options.output.base_url)
             .wrap_err("validating output public base URL")?;
-        options.css.validate().wrap_err("validating CSS options")?;
         tracing::info!(
             target: "bundler::progress",
             entries = options.entries.len(),
@@ -348,14 +390,13 @@ impl BuildSession {
         let declarations_key = declarations.fingerprint();
         drop(declaration_span);
         let inventory = Inventory::new(&self.root);
-        let localization = localization::Localization::new(&inventory, &options.locale)
-            .wrap_err("preparing localization catalogs")?;
-        warnings.extend(localization.warnings.iter().cloned());
+        let mut localization = localization::Localization::deferred(&options.locale)
+            .wrap_err("validating localization options")?;
         let mut styles = crate::css::Styles::new(
             &self.root,
             &inventory,
             &public_base,
-            &options.css,
+            &options.loaders,
             &options.resolver,
             options.output.source_maps,
             options.cache,
@@ -414,6 +455,7 @@ impl BuildSession {
             ensure!(!name.is_empty(), "empty entry name");
             let requested = self.root.join(&entry.path);
             let admitted = (|| -> eyre::Result<PathBuf> {
+                options.loaders.select(&requested)?;
                 let path = inventory
                     .admit(&requested)
                     .wrap_err_with(|| format!("entry {}: {}", name, entry.path.display()))?;
@@ -707,7 +749,8 @@ impl BuildSession {
                             }
                             prepared => prepared,
                         };
-                        let kind = crate::resource::kind(&path, &options.css);
+                        let selected = options.loaders.select(&path)?;
+                        let kind = crate::resource::kind(&path, &options.loaders);
                         if matches!(
                             kind,
                             crate::resource::ResourceKind::Json
@@ -716,9 +759,7 @@ impl BuildSession {
                             == crate::resource::ResourceKind::Stylesheet { module: false }
                             && options.css.load == CssLoad::CallerLoaded)
                         {
-                            let value = if kind == crate::resource::ResourceKind::Json
-                                && localization::matches(&path)
-                            {
+                            let value = if selected == crate::loaders::Loader::Locstring {
                                 crate::resource::RequireValue::LocalizedDefault
                             } else {
                                 crate::resource::RequireValue::Default
@@ -808,8 +849,7 @@ impl BuildSession {
                                 )
                                 .then(|| styles.identity(&path))
                                 .transpose()?;
-                                let locstring = kind == crate::resource::ResourceKind::Json
-                                    && localization::matches(&path);
+                                let locstring = selected == crate::loaders::Loader::Locstring;
                                 let resource_format = if locstring {
                                     ModuleFormat::Esm
                                 } else {
@@ -823,6 +863,9 @@ impl BuildSession {
                                     .as_ref()
                                     .map_or(format, |prepared| prepared.package);
                                 let text = if locstring {
+                                    localization
+                                        .activate(&inventory, &mut warnings)
+                                        .wrap_err("preparing localization catalogs")?;
                                     localization.source(&path, &input, &mut warnings)?
                                 } else if let Some(prepared) = prepared_css {
                                     relocations.insert(path.clone(), prepared.relocations);
@@ -833,6 +876,7 @@ impl BuildSession {
                                         &input,
                                         &public_base,
                                         wrapper_format,
+                                        selected,
                                     )?
                                 };
                                 let loaded = prepare::load(
@@ -977,8 +1021,10 @@ impl BuildSession {
                         if options.output.source_maps
                             && kind == crate::resource::ResourceKind::Script
                         {
-                            let transpiled =
-                                loaded_transpiled.get(&path).or(source.transpiled.as_ref());
+                            let transpiled = (selected.script_syntax()
+                                != Some(crate::loaders::ScriptSyntax::Js))
+                            .then(|| loaded_transpiled.get(&path).or(source.transpiled.as_ref()))
+                            .flatten();
                             let original = source.text.read_input(&path)?;
                             let (text, hint) = if let Some(transpiled) = transpiled {
                                 (std::str::from_utf8(&original)?, transpiled.source_map_hint)
@@ -1116,7 +1162,7 @@ impl BuildSession {
                                         .into_iter()
                                         .filter(|path| {
                                             !scheduled.contains(path)
-                                                && crate::resource::kind(path, &options.css)
+                                                && crate::resource::kind(path, &options.loaders)
                                                     == crate::resource::ResourceKind::Script
                                                 && early_scheduled.insert(path.clone())
                                         })
@@ -1237,8 +1283,18 @@ impl BuildSession {
         }
         // CSS closure identity can change while its generated module stays equal.
         for path in &prepared_paths {
+            let selected = options.loaders.select(path)?;
+            if selected
+                .script_syntax()
+                .is_none_or(|syntax| syntax == crate::loaders::ScriptSyntax::Js)
+            {
+                self.sources
+                    .get_mut(path)
+                    .expect("loaded source")
+                    .transpiled = None;
+            }
             if matches!(
-                crate::resource::kind(path, &options.css),
+                crate::resource::kind(path, &options.loaders),
                 crate::resource::ResourceKind::Stylesheet { .. }
             ) {
                 self.sources
@@ -1365,16 +1421,19 @@ impl BuildSession {
                 include_str!("cjs.rs"),
                 include_str!("context.rs"),
                 include_str!("resource.rs"),
-                include_str!("css.rs"),
+                include_str!("loaders/stylesheet.rs"),
                 include_str!("css_loading.rs"),
-                include_str!("css_selection.rs"),
+                include_str!("loaders/mod.rs"),
                 include_str!("css_syntax.rs"),
                 include_str!("css_names.rs"),
                 include_str!("output_url.rs"),
                 include_str!("emit.rs"),
                 include_str!("sourcemap.rs"),
                 include_str!("upstream.rs"),
-                include_str!("transpile.rs"),
+                include_str!("loaders/script.rs"),
+                include_str!("loaders/json.rs"),
+                include_str!("loaders/file.rs"),
+                include_str!("loaders/locstring.rs"),
                 include_str!("rewrite.rs"),
                 include_str!("lib.rs"),
                 include_str!("chunks.rs"),
@@ -1393,7 +1452,7 @@ impl BuildSession {
                 crate::css_syntax::PARSER_REVISION,
                 options.entries,
                 public_base.as_str(),
-                options.css,
+                (&options.css, &options.loaders),
                 styles.identities()?,
                 options.output.min_chunk_bytes,
                 options.output.synthesize_async_boundaries,
@@ -1497,9 +1556,14 @@ impl BuildSession {
                     .wrap_err_with(|| {
                         format!("borrowing prepared graph facts for {}", path.display())
                     })?;
-                let graph_input = if crate::resource::kind(path, &options.css)
+                let graph_input = if crate::resource::kind(path, &options.loaders)
                     == crate::resource::ResourceKind::Script
                     && source.transpiled.is_none()
+                    && options
+                        .loaders
+                        .select(path)?
+                        .script_syntax()
+                        .is_some_and(|syntax| crate::transpile::parser_path(path, syntax) == *path)
                 {
                     OwnedSourceFileInput::from_parsed
                 } else {
@@ -1550,7 +1614,7 @@ impl BuildSession {
             .iter()
             .filter(|(path, _)| {
                 options.output.source_maps
-                    && crate::resource::kind(path, &options.css)
+                    && crate::resource::kind(path, &options.loaders)
                         == crate::resource::ResourceKind::Script
             })
             .map(|(path, source)| {
@@ -1598,7 +1662,7 @@ impl BuildSession {
             if self.env.as_ref().is_some_and(|env| env.path == path) {
                 continue;
             }
-            let kind = crate::resource::kind(path, &options.css);
+            let kind = crate::resource::kind(path, &options.loaders);
             if kind == crate::resource::ResourceKind::Asset {
                 let input = self.sources[path].text.read_input(path)?;
                 artifacts

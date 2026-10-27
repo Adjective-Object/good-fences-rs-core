@@ -148,7 +148,7 @@ function validateCase(root, directory) {
 }
 
 function validateFixtureConfig(config) {
-  object(config, [], 'fixtureConfig', ['target', 'output', 'css', 'resolveConditions', 'workers', 'cache']);
+  object(config, [], 'fixtureConfig', ['target', 'output', 'css', 'loaders', 'resolutionExtensions', 'resolveConditions', 'workers', 'cache']);
   check(Buffer.byteLength(JSON.stringify(config)) <= 16 * 1024, 'fixtureConfig exceeds 16 KiB');
   if (Object.hasOwn(config, 'target')) {
     check(['node', 'browser'].includes(config.target), 'invalid fixture target');
@@ -164,6 +164,21 @@ function validateFixtureConfig(config) {
     strings(config.resolveConditions, 'fixtureConfig.resolveConditions', { empty: true });
     check(config.resolveConditions.every(condition => !['import', 'require'].includes(condition)),
       'resolveConditions cannot override request-mode conditions import or require');
+  }
+  if (Object.hasOwn(config, 'loaders')) {
+    object(config.loaders, [], 'fixtureConfig.loaders', Object.keys(config.loaders ?? {}));
+    const labels = ['js', 'jsx', 'ts', 'tsx', 'json', 'jsonc', 'css', 'css-modules',
+      'scss', 'scss-modules', 'sass', 'sass-modules', 'locstring', 'file'];
+    for (const [suffix, loader] of Object.entries(config.loaders)) {
+      check(suffix === '*' || /^(?:\.[A-Za-z0-9_-]+)+$/u.test(suffix), 'invalid loader suffix');
+      check(loader === null || labels.includes(loader), 'invalid loader label');
+    }
+  }
+  if (Object.hasOwn(config, 'resolutionExtensions')) {
+    check(Array.isArray(config.resolutionExtensions)
+      && config.resolutionExtensions.every(suffix => typeof suffix === 'string'
+        && /^(?:\.?[^.\s/\\:*?"<>|\u0000-\u001f]+)(?:\.[^.\s/\\:*?"<>|\u0000-\u001f]+)*$/u.test(suffix)),
+    'invalid resolutionExtensions');
   }
   if (Object.hasOwn(config, 'output')) {
     object(config.output, [], 'fixtureConfig.output', ['base_url', 'min_chunk_bytes', 'synthesize_async_boundaries', 'lazy_runtimes']);
@@ -193,21 +208,9 @@ function validateFixtureConfig(config) {
     }
   }
   if (Object.hasOwn(config, 'css')) {
-    object(config.css, [], 'fixtureConfig.css', ['load', 'css_modules', 'css_modules_exclude']);
+    object(config.css, [], 'fixtureConfig.css', ['load']);
     if (Object.hasOwn(config.css, 'load')) {
       check(['caller-loaded', 'auto-mount'].includes(config.css.load), 'invalid css.load');
-    }
-    if (Object.hasOwn(config.css, 'css_modules')) {
-      const selection = config.css.css_modules;
-      check(typeof selection === 'boolean' || selection === 'everything'
-        || (typeof selection === 'string' && /^ext:(?:\.[A-Za-z0-9_-]+)+$/u.test(selection)),
-      'invalid css.css_modules');
-    }
-    if (Object.hasOwn(config.css, 'css_modules_exclude')) {
-      check(Array.isArray(config.css.css_modules_exclude)
-        && config.css.css_modules_exclude.every((suffix) =>
-          typeof suffix === 'string' && /^(?:\.[A-Za-z0-9_-]+)+$/u.test(suffix)),
-      'invalid css.css_modules_exclude: expected an array of dotted suffixes');
     }
   }
 }
@@ -284,15 +287,19 @@ export function copyCase(files, directory, manifest) {
     writeFileSync(path.join(directory, 'package.json'), JSON.stringify({ type: manifest.moduleType }));
   }
   if (manifest.expectations.errors || manifest.cssObservation || manifest.outputObservation) {
-    const selection = manifest.fixtureConfig?.css?.css_modules;
-    const cssSuffix = typeof selection === 'string' && selection.startsWith('ext:')
-      ? selection.slice(4) : undefined;
+    const overrides = Object.entries({
+      '.js': 'js', '.mjs': 'js', '.cjs': 'js', ...manifest.fixtureConfig?.loaders,
+    })
+      .sort(([a], [b]) => b.length - a.length || a.localeCompare(b));
     // Parse failures are not expected runtime throws/rejections.
     function checkSyntax(folder) {
       for (const name of readdirSync(folder).sort()) {
         const filename = path.join(folder, name);
         if (lstatSync(filename).isDirectory()) checkSyntax(filename);
-        else if (/\.(?:js|mjs|cjs)$/u.test(name) && !(cssSuffix && name.endsWith(cssSuffix))) {
+        else if (/\.(?:js|mjs|cjs)$/u.test(name)
+          && (overrides.find(([suffix]) => suffix !== '*' && name.endsWith(suffix))
+            ?? overrides.find(([suffix]) => suffix === '*')
+            ?? ['', 'js'])[1] === 'js') {
           successful(execute(process.execPath, ['--check', filename], directory),
             `${manifest.id}: source syntax validation (${name})`);
         }
@@ -373,7 +380,9 @@ export function buildProject(driver, root, entries, timeoutMs = 30000, fixtureCo
   assert(Array.isArray(build.resources ?? []), 'resources must be an array');
   for (const resource of resources) {
     relativePath(resource, 'resource');
-    assert(!/\.(?:mjs|cjs|js)$/u.test(resource) && path.basename(resource) !== 'package.json',
+    assert((!/\.(?:mjs|cjs|js)$/u.test(resource) ||
+      /^assets\/[a-f0-9]{64}\.(?:mjs|cjs|js)$/u.test(resource)) &&
+      path.basename(resource) !== 'package.json',
       'resources cannot hide executable artifacts');
     regularFile(path.join(build.directory, resource));
   }

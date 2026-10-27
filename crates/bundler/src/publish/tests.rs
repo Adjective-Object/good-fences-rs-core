@@ -101,7 +101,10 @@ fn stylesheet_routes_require_owned_css_and_cannot_be_executable_routes() {
     )
     .unwrap();
     fs::write(dir.root().join("style.custom"), ".button {color: red}").unwrap();
-    options.css.css_modules = crate::build::CssModules::Extension(".custom".into());
+    options.loaders = options
+        .loaders
+        .with_override(".custom", Some(crate::loaders::Loader::CssModules))
+        .unwrap();
     options.output.base_url = "https://cdn.example/styles/".into();
     let output = dir.root().join(".bundler-output");
     let (build, published) = session

@@ -49,7 +49,7 @@ pub(crate) struct Styles<'a> {
     requests: BTreeMap<PathBuf, Vec<Request>>,
     compositions: BTreeMap<PathBuf, Vec<(crate::css_syntax::Name, PathBuf)>>,
     public_base: &'a crate::output_url::PublicBase,
-    options: &'a crate::build::CssOptions,
+    options: &'a crate::loaders::LoaderPolicy,
     transform_identity: [u8; 32],
     names: BTreeMap<PathBuf, crate::css_names::PreparedNames>,
     name_registry: crate::css_names::Registry,
@@ -60,7 +60,7 @@ impl<'a> Styles<'a> {
         root: &'a Path,
         inventory: &'a crate::build::Inventory,
         public_base: &'a crate::output_url::PublicBase,
-        options: &'a crate::build::CssOptions,
+        options: &'a crate::loaders::LoaderPolicy,
         resolver_options: &import_resolver::node_resolver::caching::NodeModulesResolverOptions,
         source_maps: bool,
         cache: segment_cache::CacheMode,
@@ -87,8 +87,8 @@ impl<'a> Styles<'a> {
                 digest.update(crate::css_names::REVISION);
                 digest.update(crate::css_names::TRANSFORM_REVISION);
                 digest.update(crate::css_syntax::PARSER_REVISION);
-                digest.update(include_str!("css_names.rs"));
-                digest.update(include_str!("css_syntax.rs"));
+                digest.update(include_str!("../css_names.rs"));
+                digest.update(include_str!("../css_syntax.rs"));
                 digest.finalize().into()
             },
             names: BTreeMap::new(),
@@ -121,7 +121,15 @@ impl<'a> Styles<'a> {
             }
             let input = self.inputs[&path].read(&path)?;
             let mut upstream = None;
-            let text = if crate::sass::is_sass(&path) {
+            let selected = self.options.select_stylesheet(&path)?;
+            let sass = matches!(
+                selected.stylesheet(),
+                Some((
+                    super::StylesheetSyntax::Scss | super::StylesheetSyntax::Sass,
+                    _
+                ))
+            );
+            let text = if sass {
                 let compiled = crate::sass::compile(
                     &path,
                     &input,
@@ -129,6 +137,7 @@ impl<'a> Styles<'a> {
                     sass_resolver,
                     &self.sass_aliases,
                     self.source_maps,
+                    self.options,
                 )?;
                 upstream = compiled.source_map;
                 self.sass_dependencies
@@ -153,13 +162,13 @@ impl<'a> Styles<'a> {
                     .to_owned()
             };
             let module = matches!(
-                resource::stylesheet_kind(&path, self.options),
+                resource::stylesheet_kind(&path, self.options)?,
                 resource::ResourceKind::Stylesheet { module: true }
             );
             let (facts, warning) = crate::css_facts::load(&path, &input, &text, module, self.cache)
                 .wrap_err_with(|| format!("{}: stylesheet extraction", path.display()))?;
             self.warnings.extend(warning);
-            let prepared = PreparedText::new(&input, &text, crate::sass::is_sass(&path))
+            let prepared = PreparedText::new(&input, &text, sass)
                 .wrap_err_with(|| format!("snapshotting prepared stylesheet {}", path.display()))?;
             if self.source_maps {
                 self.sources.insert(
@@ -208,6 +217,7 @@ impl<'a> Styles<'a> {
                         );
                     };
                     let target = target.canonicalize().wrap_err_with(context)?;
+                    self.options.select(&target).wrap_err_with(context)?;
                     ensure!(
                         self.inventory.contains(&target),
                         "{}: composition target outside bounded source inventory",
@@ -294,6 +304,13 @@ impl<'a> Styles<'a> {
                     eyre::bail!("{}: CSS URL cannot be external", context());
                 };
                 let target = self.inventory.admit(&target).wrap_err_with(context)?;
+                if url.import {
+                    self.options
+                        .select_stylesheet(&target)
+                        .wrap_err_with(context)?;
+                } else {
+                    self.options.select(&target).wrap_err_with(context)?;
+                }
                 ensure!(
                     self.inventory.contains(&target),
                     "{}: CSS URL outside bounded source inventory: {:?}",
@@ -354,7 +371,7 @@ impl<'a> Styles<'a> {
                     continue;
                 }
                 if matches!(
-                    resource::stylesheet_kind(path, self.options),
+                    resource::stylesheet_kind(path, self.options)?,
                     resource::ResourceKind::Stylesheet { module: true }
                 ) {
                     let text = self.texts[path].text(path)?;
@@ -479,8 +496,8 @@ impl<'a> Styles<'a> {
         digest.update(b"css-resource-v1\0");
         digest.update([u8::from(self.source_maps)]);
         if self.source_maps {
-            digest.update(include_str!("sourcemap.rs"));
-            digest.update(include_str!("css.rs"));
+            digest.update(include_str!("../sourcemap.rs"));
+            digest.update(include_str!("stylesheet.rs"));
         }
         let root_path = self.inventory.relative(self.root, path);
         let root = root_path.as_os_str().as_encoded_bytes();
@@ -513,6 +530,7 @@ impl<'a> Styles<'a> {
                 }
             }
             if style {
+                digest.update([self.options.select_stylesheet(&path)? as u8]);
                 if let Some(dependencies) = self.sass_dependencies.get(&path) {
                     let prepared = self.texts[&path].text(&path)?;
                     let text = prepared.as_bytes();
@@ -520,8 +538,9 @@ impl<'a> Styles<'a> {
                     digest.update(text);
                     digest.update(b"sasso\0");
                     digest.update(sasso::VERSION);
-                    digest.update(include_str!("sass.rs"));
+                    digest.update(include_str!("../sass.rs"));
                     for dependency in dependencies {
+                        digest.update([self.options.select_stylesheet(dependency)? as u8]);
                         if self.source_maps {
                             let source = dependency.as_os_str().as_encoded_bytes();
                             digest.update((source.len() as u64).to_le_bytes());

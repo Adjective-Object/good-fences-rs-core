@@ -4,7 +4,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { discoverCases, managed, runFixtures } from './bundler-fixtures.mjs';
+import { buildProject, discoverCases, managed, runFixtures } from './bundler-fixtures.mjs';
 
 function withCorpus(callback) {
   const managedRoot = fileURLToPath(new URL('../target/p1-test-tmp/', import.meta.url));
@@ -41,6 +41,37 @@ function assertFailure(run, expected, options = {}) {
   assert.equal(result.stage, 'input');
   assert.match(result.error.message, expected);
 }
+
+test('explicit file resources preserve JavaScript suffixes only in the asset namespace', () => {
+  const managedRoot = fileURLToPath(new URL('../target/p1-test-tmp/', import.meta.url));
+  managed(managedRoot, directory => {
+    const root = path.join(directory, 'driver');
+    mkdirSync(root);
+    writeFileSync(path.join(root, 'package.json'), '{"main":"driver.cjs"}');
+    for (const resource of [`assets/${'a'.repeat(64)}.js`, 'hidden.mjs']) {
+      writeFileSync(path.join(root, 'driver.cjs'), `
+const {mkdirSync, writeFileSync} = require('node:fs');
+const path = require('node:path');
+const directory = process.argv[2];
+mkdirSync(directory, {recursive:true});
+const resource = ${JSON.stringify(resource)};
+mkdirSync(path.dirname(path.join(directory, resource)), {recursive:true});
+writeFileSync(path.join(directory, resource), Buffer.from([255, 0, 65]));
+const entry = path.join(directory, 'entry.mjs');
+writeFileSync(entry, 'export {};');
+console.log(JSON.stringify({directory, entries:{'entry.js':entry}, resources:[resource],
+  backend:'native', layout:'native-chunks-v1', warnings:[], publicationWarnings:[]}));
+`);
+      if (resource.startsWith('assets/')) {
+        const build = buildProject(process.execPath, root, ['entry.js']);
+        assert.deepEqual(readFileSync(path.join(build.directory, resource)), Buffer.from([255, 0, 65]));
+      } else {
+        assert.throws(() => buildProject(process.execPath, root, ['entry.js']),
+          /resources cannot hide executable artifacts/u);
+      }
+    }
+  });
+});
 
 function addCase(root, name = 'example', { sources, ...overrides } = {}) {
   const directory = path.join(root, 'synthetic', name);
@@ -292,9 +323,10 @@ for (const [name, mutate, expected] of [
   ['async synthesis without observer', (m) => { m.fixtureConfig = { output: { synthesize_async_boundaries: true } }; }, /requires an outputObservation/u],
   ['null fixture config', (m) => { m.fixtureConfig = null; }, /must be an object/u],
   ['invalid loader', (m) => { m.fixtureConfig = { css: { load: 'custom' } }; }, /invalid css.load/u],
-  ['invalid module suffix', (m) => { m.fixtureConfig = { css: { css_modules: 'ext:../css' } }; }, /invalid css.css_modules/u],
-  ['invalid module exclusions', (m) => { m.fixtureConfig = { css: { css_modules_exclude: '.global.css' } }; }, /invalid css.css_modules_exclude/u],
-  ['invalid excluded suffix', (m) => { m.fixtureConfig = { css: { css_modules_exclude: ['.global.css', '../css'] } }; }, /invalid css.css_modules_exclude/u],
+  ['invalid module suffix', (m) => { m.fixtureConfig = { loaders: { '../css': 'css-modules' } }; }, /invalid loader suffix/u],
+  ['obsolete module exclusions', (m) => { m.fixtureConfig = { css: { css_modules_exclude: '.global.css' } }; }, /exactly/u],
+  ['invalid loader label', (m) => { m.fixtureConfig = { loaders: { '.css': 'everything' } }; }, /invalid loader label/u],
+  ['obsolete extension spelling', (m) => { m.fixtureConfig = { resolveExtensions: ['.js'] }; }, /exactly/u],
   ['oversized fixture config', (m) => { m.fixtureConfig = { output: { base_url: 'x'.repeat(16384) } }; }, /exceeds 16 KiB/u],
   ['observer traversal', (m) => { m.cssObservation = '../observe.mjs'; }, /relative path/u],
   ['nested observer', (m) => { m.cssObservation = 'nested/observe.mjs'; }, /sibling .mjs/u],
@@ -401,14 +433,14 @@ test('async synthesis output contracts validate inputs and retain build/backend/
   });
 });
 
-test('CSS module filename exclusions accept dotted global suffixes', () => {
+test('CSS loader overlays accept dotted global suffixes', () => {
   withCorpus(({ root }) => {
-    const css = {
-      css_modules: 'everything',
-      css_modules_exclude: ['.global.css', '.global.scss', '.global.sass'],
+    const loaders = {
+      '.css': 'css-modules', '.scss': 'scss-modules', '.sass': 'sass-modules',
+      '.global.css': 'css', '.global.scss': 'scss', '.global.sass': 'sass',
     };
-    addCase(root, 'example', { fixtureConfig: { css } });
-    assert.deepEqual(discoverCases(root)[0].manifest.fixtureConfig.css, css);
+    addCase(root, 'example', { fixtureConfig: { loaders } });
+    assert.deepEqual(discoverCases(root)[0].manifest.fixtureConfig.loaders, loaders);
   });
 });
 
@@ -417,7 +449,7 @@ test('custom CSS script suffixes skip CSS syntax checks but still reject malform
     for (const extension of ['js', 'mjs', 'cjs']) {
       const suffix = `.module.${extension}`;
       const directory = addCase(root, extension, {
-        fixtureConfig: { css: { css_modules: `ext:${suffix}` } },
+        fixtureConfig: { loaders: { [suffix]: 'css-modules' } },
         cssObservation: 'observe.mjs',
         expectations: { stdout: ['hello'], backend: 'native' },
         sources: {

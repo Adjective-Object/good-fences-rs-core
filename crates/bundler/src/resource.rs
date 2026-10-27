@@ -1,9 +1,12 @@
-//! Resource preparation keeps original input identity separate from JS coordinates.
+//! Shared prepared-resource identity and require metadata.
 use std::path::{Path, PathBuf};
 
+use crate::loaders::{Loader, LoaderPolicy, StylesheetScoping};
 use ast_segmenter::ModuleFormat;
-use eyre::WrapErr;
-use sha2::{Digest, Sha256};
+
+#[cfg(test)]
+pub(crate) use crate::loaders::file::url_module;
+pub(crate) use crate::loaders::file::{asset_path, public_url_module};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ResourceKind {
@@ -11,9 +14,9 @@ pub(crate) enum ResourceKind {
     Json,
     Stylesheet { module: bool },
     Asset,
+    Rejected,
 }
 
-/// Require surfaces of pure prepared resources, not arbitrary source modules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RequireValue {
     Default,
@@ -21,86 +24,36 @@ pub(crate) enum RequireValue {
     Namespace,
 }
 
-pub(crate) fn kind(path: &Path, options: &crate::build::CssOptions) -> ResourceKind {
-    if options.css_modules.matches(path)
-        || path
-            .extension()
-            .is_some_and(|extension| matches!(extension.to_str(), Some("css" | "scss" | "sass")))
-    {
-        return stylesheet_kind(path, options);
-    }
-    match path.extension().and_then(|extension| extension.to_str()) {
-        Some("json" | "jsonc") => ResourceKind::Json,
-        Some(
-            "js" | "mjs" | "cjs" | "jsx" | "mjsx" | "cjsx" | "ts" | "mts" | "cts" | "tsx" | "mtsx"
-            | "ctsx",
-        ) => ResourceKind::Script,
-        _ => ResourceKind::Asset,
+pub(crate) fn kind(path: &Path, policy: &LoaderPolicy) -> ResourceKind {
+    match policy.select(path) {
+        Ok(loader) if loader.script_syntax().is_some() => ResourceKind::Script,
+        Ok(Loader::Json | Loader::Jsonc | Loader::Locstring) => ResourceKind::Json,
+        Ok(Loader::File) => ResourceKind::Asset,
+        Ok(loader) => ResourceKind::Stylesheet {
+            module: loader
+                .stylesheet()
+                .is_some_and(|(_, scope)| scope == StylesheetScoping::Modules),
+        },
+        Err(_) => ResourceKind::Rejected,
     }
 }
 
-/// A CSS @import supplies a stylesheet even if its filename has no CSS suffix.
-pub(crate) fn stylesheet_kind(path: &Path, options: &crate::build::CssOptions) -> ResourceKind {
-    ResourceKind::Stylesheet {
-        module: (matches!(options.css_modules, crate::build::CssModules::Everything)
-            || options.css_modules.matches(path))
-            && !options.excludes_module(path),
-    }
+pub(crate) fn stylesheet_kind(path: &Path, policy: &LoaderPolicy) -> eyre::Result<ResourceKind> {
+    let loader = policy.select_stylesheet(path)?;
+    Ok(ResourceKind::Stylesheet {
+        module: loader
+            .stylesheet()
+            .is_some_and(|(_, scope)| scope == StylesheetScoping::Modules),
+    })
 }
 
-pub(crate) fn is_asset(path: &Path) -> bool {
-    kind(path, &crate::build::CssOptions::default()) == ResourceKind::Asset
-}
-
-pub(crate) fn url_module(
-    path: &Path,
-    base: &crate::output_url::PublicBase,
-) -> eyre::Result<String> {
-    public_url_module(&base.join(path)?, ModuleFormat::CommonJs)
-}
-
-pub(crate) fn public_url_module(public_url: &str, format: ModuleFormat) -> eyre::Result<String> {
-    Ok(format!(
-        "{} {};\n",
-        export_value(format),
-        serde_json::to_string(public_url)?
-    ))
-}
-
-fn export_value(format: ModuleFormat) -> &'static str {
-    match format {
-        ModuleFormat::CommonJs => "module.exports =",
-        ModuleFormat::Esm => "export default",
-    }
-}
-
-pub(crate) fn asset_path(path: &Path, input: &[u8]) -> PathBuf {
-    let extension = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .filter(|extension| {
-            extension.len() <= 16 && extension.bytes().all(|byte| byte.is_ascii_alphanumeric())
-        })
-        .unwrap_or("bin");
-    PathBuf::from(format!("assets/{:x}.{extension}", Sha256::digest(input)))
-}
-
+/// All generated wrappers are plain JS, independent of original input syntax.
 pub(crate) fn parser_path(path: &Path, format: ModuleFormat) -> PathBuf {
-    let extension = if format == ModuleFormat::Esm {
-        "mjs"
+    path.with_extension(if format == ModuleFormat::Esm {
+        "prepared.mjs"
     } else {
-        "cjs"
-    };
-    if is_asset(path) {
-        path.with_extension(format!("asset.{extension}"))
-    } else if path
-        .extension()
-        .is_some_and(|extension| extension == "json" || extension == "jsonc")
-    {
-        path.with_extension(format!("json.{extension}"))
-    } else {
-        path.to_owned()
-    }
+        "prepared.cjs"
+    })
 }
 
 pub(crate) fn prepare(
@@ -108,113 +61,16 @@ pub(crate) fn prepare(
     input: &[u8],
     base: &crate::output_url::PublicBase,
     format: ModuleFormat,
+    loader: Loader,
 ) -> eyre::Result<String> {
-    if is_asset(path) {
-        if format == ModuleFormat::CommonJs {
-            return url_module(&asset_path(path, input), base);
+    match loader {
+        Loader::Json | Loader::Jsonc => {
+            crate::loaders::json::prepare(path, input, format, loader == Loader::Jsonc)
         }
-        return public_url_module(&base.join(&asset_path(path, input))?, format);
+        Loader::File => crate::loaders::file::prepare(path, input, base, format),
+        _ => eyre::bail!(
+            "loader {loader:?} is not a JSON/file pipeline: {}",
+            path.display()
+        ),
     }
-    let text = std::str::from_utf8(input)
-        .wrap_err_with(|| format!("{}: source is not UTF-8", path.display()))?;
-    if !path
-        .extension()
-        .is_some_and(|extension| extension == "json" || extension == "jsonc")
-    {
-        return Ok(text.to_owned());
-    }
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let normalized;
-    let jsonc = path
-        .extension()
-        .is_some_and(|extension| extension == "jsonc");
-    let text = if jsonc {
-        normalized = normalize_jsonc(text)
-            .wrap_err_with(|| format!("{}: invalid JSONC module", path.display()))?;
-        normalized.as_str()
-    } else {
-        text
-    };
-    serde_json::from_str::<serde::de::IgnoredAny>(text).wrap_err_with(|| {
-        let format = if jsonc { "JSONC" } else { "JSON" };
-        format!("{}: invalid {format} module", path.display())
-    })?;
-    let mut source = format!("{} (", export_value(format));
-    let mut start = 0;
-    let mut bytes = text.bytes().enumerate();
-    while let Some((index, byte)) = bytes.next() {
-        if byte != b'"' {
-            continue;
-        }
-        let mut end = index + 1;
-        while let Some((index, byte)) = bytes.next() {
-            if byte == b'\\' {
-                bytes.next();
-            } else if byte == b'"' {
-                end = index + 1;
-                break;
-            }
-        }
-        if text[end..].trim_start().starts_with(':') {
-            // Computed keys preserve JSON's own "__proto__" properties.
-            source.push_str(&text[start..index]);
-            source.push('[');
-            source.push_str(&text[index..end]);
-            source.push(']');
-            start = end;
-        }
-    }
-    source.push_str(&text[start..]);
-    source.push_str(");\n");
-    Ok(source)
-}
-
-fn normalize_jsonc(text: &str) -> eyre::Result<String> {
-    use oxc_parser::{config::TokensParserConfig, Kind, Parser};
-
-    // Parse as an expression, including object/scalar roots and trailing line comments.
-    // Keep original lexemes: deserializing/reserializing would lose duplicate keys,
-    // negative zero, large numbers and escaped lone surrogates.
-    let source = format!("(\n{text}\n)");
-    // JSONC line comments end only at CR/LF, unlike JavaScript. Keep byte offsets
-    // while hiding JS-only line separators from the lexer, not from the output.
-    let lexer_source = source.replace(['\u{2028}', '\u{2029}'], "   ");
-    let allocator = oxc_allocator::Allocator::default();
-    let parsed = Parser::new(&allocator, &lexer_source, oxc_span::SourceType::mjs())
-        .with_config(TokensParserConfig)
-        .parse();
-    eyre::ensure!(
-        parsed.diagnostics.is_empty() && !parsed.fatal_error,
-        "JSONC syntax errors: {:?}",
-        parsed.diagnostics
-    );
-    let mut normalized = source.as_bytes().to_vec();
-    for comment in &parsed.program.comments {
-        let range = comment.span.start as usize..comment.span.end as usize;
-        let original = source
-            .get(range.clone())
-            .ok_or_else(|| eyre::eyre!("invalid comment span"))?;
-        eyre::ensure!(
-            original.starts_with("//") || original.starts_with("/*"),
-            "only // and /* */ comments are supported"
-        );
-        for byte in &mut normalized[range] {
-            if !matches!(*byte, b'\r' | b'\n') {
-                *byte = b' ';
-            }
-        }
-    }
-    for tokens in parsed.tokens.windows(3) {
-        if tokens[1].kind() == Kind::Comma
-            && matches!(tokens[2].kind(), Kind::RCurly | Kind::RBrack)
-            // Array holes are not trailing commas: leave them for strict validation.
-            && !matches!(tokens[0].kind(), Kind::Comma | Kind::LBrack)
-        {
-            let offset = tokens[1].start() as usize;
-            eyre::ensure!(normalized.get(offset) == Some(&b','), "invalid comma span");
-            normalized[offset] = b' ';
-        }
-    }
-    // Strict JSON validation by the caller rejects every remaining JS/JSON5 extension.
-    Ok(String::from_utf8(normalized[2..2 + text.len()].to_vec())?)
 }

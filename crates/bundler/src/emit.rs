@@ -84,7 +84,7 @@ pub(crate) fn checked_source(
     let config = if let Some(prepared) = graph.file_prepared_resource(file) {
         prepared.config(path, provenance)?
     } else {
-        ast_segmenter::ParserConfig::for_path(&crate::resource::parser_path(path, format), format)?
+        ast_segmenter::ParserConfig::for_path(path, format)?
     };
     ensure!(
         provenance.config().source_type() == config.source_type(),

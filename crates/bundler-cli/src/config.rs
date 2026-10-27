@@ -1,5 +1,5 @@
 use bundler::{
-    build::{BuildOptions, CssLoad, CssModules, OutputOptions},
+    build::{BuildOptions, CssLoad, OutputOptions},
     lazy_modules::{ConstructorExport, LazyRuntime},
 };
 use eyre::WrapErr;
@@ -22,8 +22,9 @@ pub(crate) struct Config {
     css: Css,
     #[serde(rename = "resolveConditions")]
     resolve_conditions: Vec<String>,
-    #[serde(rename = "resolveExtensions")]
+    #[serde(rename = "resolutionExtensions")]
     resolve_extensions: Option<Vec<String>>,
+    loaders: bundler::loaders::LoaderPolicy,
     cache: Cache,
     #[serde(rename = "policyAllowlist")]
     policy_allowlist: Vec<PolicyAllowance>,
@@ -44,6 +45,7 @@ impl Default for Config {
             css: Css::default(),
             resolve_conditions: Vec::new(),
             resolve_extensions: None,
+            loaders: Default::default(),
             cache: Cache::default(),
             policy_allowlist: Vec::new(),
             env: Default::default(),
@@ -148,8 +150,6 @@ impl Constructor {
 #[serde(default, deny_unknown_fields)]
 struct Css {
     load: CssLoad,
-    css_modules: CssModules,
-    css_modules_exclude: Vec<String>,
 }
 
 impl Config {
@@ -169,6 +169,7 @@ impl Config {
         let mut options = BuildOptions::default();
         let config = self;
         options.env = config.env;
+        options.loaders = config.loaders;
         config
             .locale
             .validate()
@@ -228,8 +229,7 @@ impl Config {
             .export_conditions
             .extend(config.resolve_conditions);
         if let Some(extensions) = config.resolve_extensions {
-            options.resolver.prefer_js_extension = false;
-            options.resolver.extensions = extensions
+            options.resolution_extensions = Some(extensions
                 .into_iter()
                 .map(|extension| {
                     let suffix = extension.strip_prefix('.').unwrap_or(&extension);
@@ -240,19 +240,17 @@ impl Config {
                                     || character.is_control()
                                     || "/\\:*?\"<>|".contains(character)
                             }),
-                        "resolveExtensions entries must be nonempty file suffixes without whitespace, path separators or reserved characters: {extension:?}"
+                        "resolutionExtensions entries must be nonempty file suffixes without whitespace, path separators or reserved characters: {extension:?}"
                     );
                     Ok(suffix.to_owned())
                 })
-                .collect::<eyre::Result<_>>()?;
+                .collect::<eyre::Result<_>>()?);
         }
         options.output.base_url = config.output.base_url;
         options.output.min_chunk_bytes = config.output.min_chunk_bytes;
         options.output.synthesize_async_boundaries = config.output.synthesize_async_boundaries;
         options.output.source_maps = config.output.source_maps;
         options.css.load = config.css.load;
-        options.css.css_modules = config.css.css_modules;
-        options.css.css_modules_exclude = config.css.css_modules_exclude;
         Ok(options)
     }
 }
@@ -261,6 +259,42 @@ impl Config {
 mod tests {
     use super::*;
     use test_tmpdir::TmpDir;
+
+    #[test]
+    fn loader_maps_and_resolution_overrides_are_strict_and_typed() {
+        let dir = TmpDir::new();
+        for json in [
+            r#"{"loaders":null}"#,
+            r#"{"loaders":[]}"#,
+            r#"{"loaders":{".js":"javascript"}}"#,
+            r#"{"loaders":{".bad..suffix":"js"}}"#,
+            r#"{"loaders":{".js":"js",".js":"ts"}}"#,
+            r#"{"css":{"css_modules":true}}"#,
+            r#"{"css":{"css_modules_exclude":[]}}"#,
+            r#"{"resolveExtensions":[".js"]}"#,
+        ] {
+            assert!(serde_json::from_str::<Config>(json).is_err(), "{json}");
+        }
+        let config: Config = serde_json::from_str(
+            r#"{"loaders":{".theme":"scss-modules",".jsonc":null},"resolutionExtensions":[".web.ts","ts"]}"#
+        ).unwrap();
+        let options = config.into_options(dir.root()).unwrap();
+        assert_eq!(
+            options.loaders.select(Path::new("x.theme")).unwrap(),
+            bundler::loaders::Loader::ScssModules
+        );
+        assert!(options.loaders.select(Path::new("x.jsonc")).is_err());
+        assert_eq!(
+            options.resolution_extensions,
+            Some(vec!["web.ts".into(), "ts".into()])
+        );
+        assert!(serde_json::from_str::<Config>("{}")
+            .unwrap()
+            .into_options(dir.root())
+            .unwrap()
+            .resolution_extensions
+            .is_none());
+    }
 
     #[test]
     fn localization_configuration_is_strict_and_preserves_empty_pseudo_options() {

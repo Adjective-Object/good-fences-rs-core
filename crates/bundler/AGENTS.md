@@ -1,18 +1,18 @@
 # bundler
 
-Only *.locstring.json gets Ori localization: pure named ESM values plus one
+The selected locstring loader gets Ori localization (default *.locstring.json): pure named ESM values plus one
 clean default object; all underscore metadata is removed. Require resources
 unwrap that default on Node as well as Browser, from ESM callers too.
 Only explicitly marked pure localized defaults authorize
 Node ESM require availability, never arbitrary ESM or ordinary JSON policy changes.
 Check pseudo padding/products and total capacity; reserve fallibly before expansion.
-Load the global locale catalog
-once per build through inventory/snapshot, key generated text by one sealed
+Load the global locale catalog lazily once per build only when locstring is demanded
+through inventory/snapshot, key generated text by one sealed
 config/catalog-byte/match-set fingerprint, and freshly recheck consumed bytes
 and catalog sets at return/publication boundaries. Preserve original resource
 identity separately; no schema bump or runtime string store. Ori pseudo uses
 original UTF-8 byte offsets, rune delimiter rewind and byte-length trailing
-padding; preserve algorithm/table licenses beside localization.rs.
+padding; preserve algorithm/table licenses beside loaders/locstring.rs.
 
 Parsed import.meta.env occurrences are typed virtual imports of one ordinary
 synthetic ESM segment, never source text substitution or host environment reads.
@@ -301,16 +301,23 @@ dependencies as unconditional JS effects.
 Resolve CSS URLs/imports through the injected resolver and checked admission.
 Existing bare relative files win over packages; only missing bare paths try
 package exports/conditions. CSS URL resolution has a separate exact-first policy;
-never apply script `.js` preference to existing extensionless assets.
+never redirect existing extensionless assets through extension probing.
 Never fall back after resolver/admission failures
 or accept external outcomes; preserve URL decoding, suffixes and skipped URLs.
-Validate css_modules and css_modules_exclude before graph loading; central resource selection precedes
-assets for entries/imports/contexts. Custom suffixes identify CSS; Everything
-selects known CSS inputs, never arbitrary JS/JSON/binary graph inputs. CSS imports
-use their own selection, not an inherited module flag.
-Filename suffix exclusions override scoping, never stylesheet classification;
-excluded inputs retain global URL defaults and cannot be composition targets.
-The same CssOptions must reach entries, CSS closures and output naming.
+LoaderPolicy overlays defaults by longest filename suffix, with null blocking
+all fallback and unconditional declaration/native-addon rejection. Select before
+source IO/cache admission. Carry selected syntax/scoping through script/JSON,
+CSS/Sass closures, parser provenance, naming and require surfaces; never redispatch
+from physical extensions. Original m/c format semantics stay separate from syntax.
+Pipeline implementations live in loaders; original paths remain input/map identity.
+CSS context falls back only without a concrete suffix rule, never over explicit
+incompatible/null rules. URL resources still consume checked original bytes.
+css_modules/css_modules_exclude are removed; longer global loader rules replace
+exclusions. BuildOptions.resolution_extensions is the explicit ordered override;
+None derives enabled suffixes by length/alphabetical order, Some([]) disables
+suffix probing. Reject nondefault raw resolver.extensions with migration guidance; preserve
+lower-level resolver callers. BuildSession always disables hidden JS preference.
+Effective loaders and suffix order key resolver/output reuse on every build.
 Keep CSS Oxc pinned separately from JS Oxc and use its re-exported allocator
 (locked 0.137.0; Rust >=1.95). Own decoded selector names, original checked UTF-8
 spans, scope markers and composition requests; never persist its arena nodes.

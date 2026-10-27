@@ -37,9 +37,13 @@ pub(super) fn apply(
             )?,
         };
         if entry.output_name.is_none()
-            && (crate::resource::kind(&entry.path, &options.css)
+            && (crate::resource::kind(&entry.path, &options.loaders)
                 != crate::resource::ResourceKind::Script
-                || crate::transpile::required(&entry.path)
+                || options.loaders.select(&entry.path)?.script_syntax()
+                    != Some(crate::loaders::ScriptSyntax::Js)
+                || !requested
+                    .extension()
+                    .is_some_and(|ext| ext == "js" || ext == "mjs" || ext == "cjs")
                 || (!commonjs && requested.extension().is_some_and(|ext| ext == "cjs")))
         {
             requested.set_extension(if commonjs { "cjs" } else { "mjs" });

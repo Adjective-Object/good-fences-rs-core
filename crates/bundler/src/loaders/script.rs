@@ -14,6 +14,44 @@ use oxc_semantic::SemanticBuilder;
 use oxc_transformer::{Module, TransformOptions, Transformer};
 use url::Url;
 
+use super::{Loader, ScriptSyntax};
+
+pub(crate) fn parser_path(path: &Path, syntax: ScriptSyntax) -> PathBuf {
+    let original = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
+    let prefix = match original {
+        "mjs" | "mjsx" | "mts" | "mtsx" => "m",
+        "cjs" | "cjsx" | "cts" | "ctsx" => "c",
+        _ => "",
+    };
+    let suffix = match syntax {
+        ScriptSyntax::Js => "js",
+        ScriptSyntax::Jsx => "jsx",
+        ScriptSyntax::Ts => "ts",
+        ScriptSyntax::Tsx => "tsx",
+    };
+    path.with_extension(format!("{prefix}{suffix}"))
+}
+
+pub(crate) fn compile_selected(
+    path: &Path,
+    source: &str,
+    package: ModuleFormat,
+    source_maps: bool,
+    loader: Loader,
+) -> eyre::Result<Compiled> {
+    let syntax = loader
+        .script_syntax()
+        .ok_or_else(|| eyre::eyre!("not a script loader"))?;
+    compile_inner(
+        path,
+        &parser_path(path, syntax),
+        source,
+        package,
+        source_maps,
+    )
+    .wrap_err_with(|| format!("{}: Oxc precompilation ({loader:?})", path.display()))
+}
+
 #[derive(Debug)]
 pub(crate) struct Compiled {
     pub source: String,
@@ -22,6 +60,7 @@ pub(crate) struct Compiled {
     pub source_map_hint: Option<oxc_span::Span>,
 }
 
+#[cfg(test)]
 pub(crate) fn required(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|extension| extension.to_str()),
@@ -29,30 +68,31 @@ pub(crate) fn required(path: &Path) -> bool {
     )
 }
 
+#[cfg(test)]
 pub(crate) fn compile(
     path: &Path,
     source: &str,
     package: ModuleFormat,
     source_maps: bool,
 ) -> eyre::Result<Compiled> {
-    compile_inner(path, source, package, source_maps)
+    compile_inner(path, path, source, package, source_maps)
         .wrap_err_with(|| format!("{}: Oxc precompilation", path.display()))
 }
 
 fn compile_inner(
     path: &Path,
+    parser_path: &Path,
     source: &str,
     package: ModuleFormat,
     source_maps: bool,
 ) -> eyre::Result<Compiled> {
-    ensure!(required(path), "unsupported precompiler input extension");
-    let config = ParserConfig::for_path(path, package)?;
+    let config = ParserConfig::for_path(parser_path, package)?;
     ensure!(
         !config.definition(),
         "TypeScript declaration files are not executable inputs"
     );
     let allocator = Allocator::default();
-    let parsed = oxc_utils_parse::parse_bundler_file(&allocator, source, path, package)?;
+    let parsed = oxc_utils_parse::parse_bundler_file(&allocator, source, parser_path, package)?;
     let config = config.resolved(parsed.program.source_type);
     check_errors(
         "parse",
