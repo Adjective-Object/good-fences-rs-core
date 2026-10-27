@@ -12,3 +12,6 @@ Boolean main fields mean no legacy entry path; preserve string paths and exports
 encapsulation, never interpret false as a stub or the filename "false".
 Keep imports as explicit maps of recursive ordered targets; never normalize
 imports using exports' bare-string wildcard extension.
+Use `package_relative_path` only for metadata file paths: strip native roots/
+volumes, retain dot segments for validation, and resolve from the owning manifest.
+Never apply this intentional Node deviation to direct user requests.

@@ -232,6 +232,232 @@ mod tests {
     }
 
     #[test]
+    fn rooted_package_main_rebases_only_metadata_and_retains_proofs() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "entry.mjs" => "",
+            "direct.js" => "",
+            "node_modules/@webauthjs/microsoft.office.webauth.abt/package.json" =>
+                r#"{"name":"@webauthjs/microsoft.office.webauth.abt","version":"4.0.0","main":"/js/Abt.js"}"#,
+            "node_modules/@webauthjs/microsoft.office.webauth.abt/js/Abt.js" => ""
+        };
+        let base = dir.root_join("entry.mjs");
+        let package = "@webauthjs/microsoft.office.webauth.abt";
+        let manifest = dir.root_join(format!("node_modules/{package}/package.json"));
+        let target = dir.root_join(format!("node_modules/{package}/js/Abt.js"));
+        let direct = dir.root_join("direct.js");
+        for environment in [TargetEnv::Node, TargetEnv::Browser] {
+            let mut options = NodeModulesResolverOptions::default_for_env(environment);
+            options
+                .alias
+                .insert("direct".into(), direct.to_str().unwrap().into());
+            // Metadata paths are not user request aliases.
+            options
+                .alias
+                .insert("/js/Abt.js".into(), direct.to_str().unwrap().into());
+            let mut resolver = StructuralResolver::new(dir.root().into(), options, BTreeSet::new());
+            for entry in [
+                "/js/Abt.js",
+                "./js/Abt.js",
+                "js/Abt.js",
+                #[cfg(windows)]
+                r"\js\Abt.js",
+                #[cfg(windows)]
+                r"C:\js\Abt.js",
+                #[cfg(windows)]
+                "D:/js/Abt.js",
+                #[cfg(windows)]
+                r"\\server\share\js\Abt.js",
+            ] {
+                let entry = entry.replace('\\', r"\\");
+                let metadata =
+                    format!(r#"{{"name":"{package}","version":"4.0.0","main":"{entry}"}}"#);
+                std::fs::write(&manifest, &metadata).unwrap();
+                resolver.invalidate();
+                for mode in [ResolutionMode::Import, ResolutionMode::Require] {
+                    let cold = resolver
+                        .resolve_dependency_with_inputs(&base, package, mode)
+                        .unwrap_or_else(|error| panic!("{entry}: {error:#}"));
+                    cold.inputs.validate().unwrap();
+                    assert_eq!(cold.dependency, ResolvedDependency::File(target.clone()));
+                    assert_eq!(tracked(&resolver, &base, package, mode).inputs, cold.inputs);
+                    for request in [direct.to_str().unwrap(), "direct"] {
+                        assert_eq!(
+                            tracked(&resolver, &base, request, mode).dependency,
+                            ResolvedDependency::File(direct.clone())
+                        );
+                    }
+                    std::fs::write(&manifest, r#"{"main":"/js/missing.js"}"#).unwrap();
+                    assert!(cold.inputs.validate().is_err());
+                    std::fs::write(&manifest, &metadata).unwrap();
+                    std::fs::remove_file(&target).unwrap();
+                    assert!(cold.inputs.validate().is_err());
+                    std::fs::write(&target, "").unwrap();
+                    resolver.invalidate();
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rooted_package_legacy_fields_and_browser_paths_preserve_selection() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "entry.mjs" => "",
+            "node_modules/pkg/package.json" => "{}",
+            "node_modules/pkg/main.js" => "",
+            "node_modules/pkg/module.js" => "",
+            "node_modules/pkg/browser.js" => "",
+            "node_modules/pkg/relative.js" => "",
+            "node_modules/pkg/disabled.js" => ""
+        };
+        let base = dir.root_join("entry.mjs");
+        let manifest = dir.root_join("node_modules/pkg/package.json");
+        for (metadata, node, browser) in [
+            (
+                r#"{"main":"/main.js","module":"/module.js","source":"/missing.js","browser":"/browser.js"}"#,
+                "module.js",
+                "browser.js",
+            ),
+            (
+                r#"{"main":"/main.js","browser":{"./main.js":"/browser.js"}}"#,
+                "main.js",
+                "browser.js",
+            ),
+            (
+                r#"{"main":"/main.js","browser":{"/main.js":"./browser.js"}}"#,
+                "main.js",
+                "browser.js",
+            ),
+            (
+                r#"{"main":"./main.js","browser":{"/main.js":"/browser.js","./disabled.js":false,"bare":"/relative.js"}}"#,
+                "main.js",
+                "browser.js",
+            ),
+            (
+                r#"{"main":"/main.js","browser":{"/main.js":false}}"#,
+                "main.js",
+                "main.js",
+            ),
+            (
+                r#"{"main":"/main.js","browser":{"main.js":"/browser.js"}}"#,
+                "main.js",
+                "main.js",
+            ),
+            (
+                r#"{"main":"./main.js","source":"/missing.js"}"#,
+                "main.js",
+                "main.js",
+            ),
+        ] {
+            std::fs::write(&manifest, metadata).unwrap();
+            for (environment, expected) in [(TargetEnv::Node, node), (TargetEnv::Browser, browser)]
+            {
+                let resolver = StructuralResolver::new(
+                    dir.root().into(),
+                    NodeModulesResolverOptions::default_for_env(environment),
+                    BTreeSet::new(),
+                );
+                for mode in [ResolutionMode::Import, ResolutionMode::Require] {
+                    for _ in 0..2 {
+                        assert_eq!(
+                            tracked(&resolver, &base, "pkg", mode).dependency,
+                            ResolvedDependency::File(
+                                dir.root_join(format!("node_modules/pkg/{expected}"))
+                            ),
+                            "{metadata}"
+                        );
+                        if metadata.contains("\"bare\"") {
+                            let inside = dir.root_join("node_modules/pkg/main.js");
+                            assert_eq!(
+                                tracked(&resolver, &inside, "./disabled.js", mode).dependency,
+                                ResolvedDependency::File(
+                                    dir.root_join("node_modules/pkg/disabled.js")
+                                )
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rooted_package_targets_preserve_recursive_conditions_and_encapsulation() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "entry.mjs" => "",
+            "node_modules/pkg/package.json" => r##"{
+                "main":"/wrong.js",
+                "exports":{
+                    ".":{"source":{"import":[false,{"default":"/src/import.js"}],"require":"/src/require.js"},"default":"./relative.js"},
+                    "./feature/*":{"import":"/src/*.js","require":["../invalid","/src/*.js"]},
+                    "./private":null,
+                    "./invalid":["/../outside.js","/%2e%2e/outside.js","/node_modules/x.js","bare.js"],
+                    "./missing":["/missing.js","./relative.js"]
+                },
+                "imports":{"#local":{"import":"/src/import.js","require":["../invalid","/src/require.js"]}}
+            }"##,
+            "node_modules/pkg/src/import.js" => "",
+            "node_modules/pkg/src/require.js" => "",
+            "node_modules/pkg/src/item.js" => "",
+            "node_modules/pkg/relative.js" => "",
+            "node_modules/pkg/private" => "",
+            "node_modules/pkg/unlisted.js" => "",
+            "node_modules/pkg/outside.js" => ""
+        };
+        let base = dir.root_join("entry.mjs");
+        let inside = dir.root_join("node_modules/pkg/relative.js");
+        for environment in [TargetEnv::Node, TargetEnv::Browser] {
+            for source in [false, true] {
+                let mut options = NodeModulesResolverOptions::default_for_env(environment);
+                if source {
+                    options.export_conditions.push("source".into());
+                }
+                let resolver = StructuralResolver::new(dir.root().into(), options, BTreeSet::new());
+                for (mode, file) in [
+                    (ResolutionMode::Import, "import.js"),
+                    (ResolutionMode::Require, "require.js"),
+                ] {
+                    for _ in 0..2 {
+                        for (base, request, target) in [
+                            (
+                                &base,
+                                "pkg",
+                                if source {
+                                    format!("src/{file}")
+                                } else {
+                                    "relative.js".into()
+                                },
+                            ),
+                            (&base, "pkg/feature/item", "src/item.js".into()),
+                            (&inside, "#local", format!("src/{file}")),
+                        ] {
+                            assert_eq!(
+                                tracked(&resolver, base, request, mode).dependency,
+                                ResolvedDependency::File(
+                                    dir.root_join(format!("node_modules/pkg/{target}"))
+                                )
+                            );
+                        }
+                        for request in [
+                            "pkg/private",
+                            "pkg/invalid",
+                            "pkg/unlisted.js",
+                            "pkg/missing",
+                            "pkg/../outside.js",
+                        ] {
+                            assert!(
+                                resolver
+                                    .resolve_dependency_with_inputs(&base, request, mode)
+                                    .is_err(),
+                                "{request}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn package_imports_vfile_conditions_and_one_step_aliases() {
         let dir = test_tmpdir::test_tmpdir! {
             "package.json" => r##"{"exports":{},"imports":{

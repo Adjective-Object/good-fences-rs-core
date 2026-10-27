@@ -1,8 +1,31 @@
 use ahashmap::AHashMap;
 use ftree_cache::context_data::ContextData;
 use serde::Deserialize;
+use std::{
+    borrow::Cow,
+    path::{Component, Path},
+};
 
 use crate::exported_path::ExportedPath;
+
+/// Interpret rooted metadata file paths relative to their manifest directory.
+/// Relative paths and non-path requests are unchanged; callers retain validation.
+pub fn package_relative_path(path: &str) -> Cow<'_, str> {
+    let native = Path::new(path);
+    if !native.has_root() {
+        return Cow::Borrowed(path);
+    }
+    let prefix_len = match native.components().next() {
+        Some(Component::Prefix(prefix)) => prefix.as_os_str().len(),
+        _ => 0,
+    };
+    let relative = path[prefix_len..].trim_start_matches(std::path::is_separator);
+    // Keep dot segments for the target validator, rather than cleaning them away.
+    Cow::Owned(format!(
+        "./{}",
+        relative.replace(std::path::MAIN_SEPARATOR, "/")
+    ))
+}
 
 // Either a json string or a boolean
 #[derive(Debug, Deserialize, Clone, PartialEq)]
@@ -202,6 +225,46 @@ impl ContextData for PackageJson {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn metadata_paths_drop_only_native_roots_and_preserve_validation_input() {
+        for (path, expected) in [
+            ("/js/Abt.js", "./js/Abt.js"),
+            ("/", "./"),
+            ("/../outside.js", "./../outside.js"),
+            ("/./entry.js", "././entry.js"),
+            ("./entry.js", "./entry.js"),
+            ("entry.js", "entry.js"),
+            ("../entry.js", "../entry.js"),
+            ("dependency/subpath", "dependency/subpath"),
+            ("node:path", "node:path"),
+            ("#local", "#local"),
+            (
+                "https://example.test/entry.js",
+                "https://example.test/entry.js",
+            ),
+            ("", ""),
+        ] {
+            assert_eq!(package_relative_path(path), expected, "{path}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn metadata_paths_drop_windows_roots_and_volumes_not_drive_relative_prefixes() {
+        for (path, expected) in [
+            (r"\js\Abt.js", "./js/Abt.js"),
+            (r"C:\js\Abt.js", "./js/Abt.js"),
+            ("D:/js/Abt.js", "./js/Abt.js"),
+            (r"\\server\share\js\Abt.js", "./js/Abt.js"),
+            (r"\\?\C:\js\Abt.js", "./js/Abt.js"),
+            (r"C:js\Abt.js", r"C:js\Abt.js"),
+            (r".\js\Abt.js", r".\js\Abt.js"),
+            (r"C:\..\outside.js", "./../outside.js"),
+        ] {
+            assert_eq!(package_relative_path(path), expected, "{path}");
+        }
+    }
 
     #[test]
     fn boolean_main_is_not_an_entry_path() {

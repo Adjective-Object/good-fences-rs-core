@@ -7448,6 +7448,64 @@ fn commonjs_path_parameters_describe_the_actual_output_owner() {
 }
 
 #[test]
+fn rooted_package_main_builds_with_checked_cache_reuse() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import '@webauthjs/microsoft.office.webauth.abt'; console.log(globalThis.abt);",
+    );
+    let package = "node_modules/@webauthjs/microsoft.office.webauth.abt";
+    write(
+        dir.root(),
+        &format!("{package}/package.json"),
+        r#"{"name":"@webauthjs/microsoft.office.webauth.abt","version":"4.0.0","main":"/js/Abt.js"}"#,
+    );
+    write(
+        dir.root(),
+        &format!("{package}/js/Abt.js"),
+        "globalThis.abt = 'installed';",
+    );
+    for target in [TargetEnv::Node, TargetEnv::Browser] {
+        for cache in [CacheMode::ReadWrite, CacheMode::Disabled] {
+            let mut config = options();
+            config.resolver.target_env = target;
+            config.cache = cache;
+            let mut session = BuildSession::new(dir.root()).unwrap();
+            let cold = session.build(&config).unwrap();
+            assert_eq!(cold.product.artifacts.backend, crate::link::Backend::Native);
+            assert_eq!(observe(&cold.product.artifacts), b"installed\n");
+            let noop = session.build(&config).unwrap();
+            assert!(Rc::ptr_eq(&cold.product, &noop.product));
+            let disk = BuildSession::new(dir.root())
+                .unwrap()
+                .build(&config)
+                .unwrap();
+            assert_eq!(cold.product.artifacts, disk.product.artifacts);
+            if cache == CacheMode::ReadWrite {
+                assert_eq!(disk.counters.source_parses, 0);
+            }
+            write(
+                dir.root(),
+                &format!("{package}/package.json"),
+                r#"{"main":"/js/missing.js"}"#,
+            );
+            assert!(session.build(&config).is_err());
+            assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &cold.product));
+            write(
+                dir.root(),
+                &format!("{package}/package.json"),
+                r#"{"name":"@webauthjs/microsoft.office.webauth.abt","version":"4.0.0","main":"/js/Abt.js"}"#,
+            );
+            assert_eq!(
+                observe(&session.build(&config).unwrap().product.artifacts),
+                b"installed\n"
+            );
+        }
+    }
+}
+
+#[test]
 fn package_export_patterns_are_specific_across_fresh_builds() {
     let dir = TmpDir::new();
     write(

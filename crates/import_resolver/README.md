@@ -63,6 +63,16 @@ mappings. Cached cwd-relative browser destinations are restored to absolute
 package-entry paths before normal filename resolution. Node ignores these
 browser mappings. Boolean `false` mappings do not
 currently synthesize empty modules.
+Metadata file paths are package-relative even when rooted: `main: "/js/Abt.js"`
+selects the package's `js/Abt.js`, not the drive/filesystem root. This applies to
+`module`, browser entry strings and file mapping keys/destinations, and selected
+recursive `exports`/`imports` local targets, including the `source` condition.
+Native Windows rooted/drive/UNC paths lose their root/volume as well. Relative
+metadata retains existing behavior; top-level `source` is not an entry field.
+Bare browser mapping keys and imports dependency redirects remain module requests.
+Direct absolute user imports and explicit request aliases are not rebased.
+Export/import validation, private paths, conditions and consumer inventory
+admission remain authoritative after rebasing.
 Bare-string exports intentionally expose
 the selected root plus arbitrary files within that package, equivalent to adding
 `"./*": "./*"`; unlike explicit maps, this shorthand is not Node-encapsulated.

@@ -27,8 +27,13 @@ root through parent traversal.
 `rewrite_package_import` shares the recursive condition/array evaluator but uses
 imports-specific validation and matching: exact keys, then single-star patterns
 by longest prefix/full key, with no legacy directory-prefix access. Substitute
-every target star and reject traversal, encoded prohibited segments, absolute
-paths and URL targets. Imports may redirect to bare dependencies or other `#`
+every target star and reject traversal, encoded prohibited segments and URL
+targets. Rooted metadata file targets intentionally rebase to `./` paths through
+`packagejson::package_relative_path` before the existing target validation,
+recursively for exports/imports conditions and arrays. Native roots/volumes are
+not filesystem authority; invalid rebased targets remain invalid. Derived export
+rewrites also use rebased paths for reverse visibility.
+Imports may redirect to bare dependencies or other `#`
 requests; resolving those requests and bounding cycles belongs to the resolver.
 
 Run `cargo test -p packagejson_exports` for rewrite and visibility regressions.

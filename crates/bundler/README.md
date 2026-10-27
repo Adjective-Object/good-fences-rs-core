@@ -1820,6 +1820,10 @@ Nearest canonical package metadata determines `.js`
 format; explicit extensions override it. Resolution uses the existing resolver's
 supported package forms, including bare-string root exports and wildcard access
 to arbitrary package files. Export maps still enforce private subpaths.
+Rooted package metadata file paths intentionally resolve from their owning
+manifest directory (`main: "/js/Abt.js"` selects the package's `js/Abt.js`).
+This also covers module/browser paths and recursive exports/imports targets,
+without rebasing direct absolute imports or relaxing checked inventory admission.
 Custom suffix order uses `BuildOptions.resolver.extensions` with
 `prefer_js_extension = false`; otherwise legacy `.js` preference is retained.
 The CLI's `resolveExtensions` sets both, accepting optional leading dots and

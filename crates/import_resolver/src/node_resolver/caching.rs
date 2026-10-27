@@ -12,7 +12,7 @@ use anyhow::{bail, Context, Error, Result};
 use ftree_cache::context_data::{FileContextCache, WithCache};
 use ftree_cache::inputs::{InputObserver, InputProof};
 use packagejson::exported_path::ExportedPathRef;
-use packagejson::{Browser, PackageJson};
+use packagejson::{package_relative_path, Browser, PackageJson};
 use path_clean::PathClean;
 use pathdiff::diff_paths;
 use std::{
@@ -353,7 +353,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             )? {
                 match rewritten.rewritten_export {
                     ExportedPathRef::Exported(exported_rel_path) => {
-                        let path = pkg_dir.join(exported_rel_path);
+                        let path = pkg_dir.join(package_relative_path(exported_rel_path).as_ref());
                         // there was a resolved export, try to resolve it
                         return self
                             .resolve_as_file(&path)
@@ -399,7 +399,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
         };
 
         if let Some(Some(target)) = main_fields.iter().find(|x| x.is_some()) {
-            let path = pkg_dir.join(target);
+            let path = pkg_dir.join(package_relative_path(target).as_ref());
             let resolved = self
                 .resolve_as_file(&path)
                 .or_else(|_| self.resolve_as_directory(&path, false))?;
@@ -552,10 +552,8 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                             )?;
                             if let Some(rewritten_to) = rewritten_to {
                                 match rewritten_to.rewritten_export {
-                                    ExportedPathRef::Exported(exported_rel_path) => nm_dir_path
-                                        .join(NODE_MODULES)
-                                        .join(package_name)
-                                        .join(exported_rel_path),
+                                    ExportedPathRef::Exported(exported_rel_path) => nm_pkg_path
+                                        .join(package_relative_path(exported_rel_path).as_ref()),
                                     // tried to import a file that is explicitly marked private
                                     ExportedPathRef::Private => {
                                         return Err(anyhow::anyhow!(

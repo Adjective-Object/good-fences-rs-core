@@ -6,7 +6,7 @@
 use super::caching::CachingNodeModulesResolver;
 use ahashmap::{AHashMap, AHashSet};
 use anyhow::Result;
-use packagejson::{Browser, PackageJson, StringOrBool};
+use packagejson::{package_relative_path, Browser, PackageJson, StringOrBool};
 use packagejson_exports::PackageExportRewriteData;
 use path_clean::PathClean;
 use std::{
@@ -44,24 +44,25 @@ impl BrowserCache {
             let target_key = Path::new(k);
             let mut components = target_key.components();
 
-            // Relative file paths are sources for this package
-            let source = if let Some(Component::CurDir) = components.next() {
-                let path = pkg_dir.join(k);
-                if let Ok(file) = resolver
-                    .resolve_as_file(&path)
-                    .or_else(|_| resolver.resolve_as_directory(&path, false))
-                {
-                    file.map(|file| file.clean())
+            // Rooted metadata paths name files in this package, not module requests.
+            let source =
+                if target_key.has_root() || matches!(components.next(), Some(Component::CurDir)) {
+                    let path = pkg_dir.join(package_relative_path(k).as_ref());
+                    if let Ok(file) = resolver
+                        .resolve_as_file(&path)
+                        .or_else(|_| resolver.resolve_as_directory(&path, false))
+                    {
+                        file.map(|file| file.clean())
+                    } else {
+                        None
+                    }
                 } else {
                     None
-                }
-            } else {
-                None
-            };
+                };
 
             match v {
                 StringOrBool::Str(dest) => {
-                    let path = pkg_dir.join(dest);
+                    let path = pkg_dir.join(package_relative_path(dest).as_ref());
                     let file = resolver
                         .resolve_as_file(&path)
                         .or_else(|_| resolver.resolve_as_directory(&path, false))?;

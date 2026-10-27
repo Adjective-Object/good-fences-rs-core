@@ -7,6 +7,12 @@ declaration order; consumers must select the first active condition, including
 Boolean `main` values (including the `main: false` used by subpath-only
 packages) are absent legacy entry paths, not filenames or disabled modules.
 String paths remain unchanged; exports still govern package access.
+Consumers use `package_relative_path` at metadata file-path boundaries: rooted
+paths lose their filesystem root/native volume and resolve from the manifest's
+directory (for example, `/js/Abt.js` becomes `./js/Abt.js`). This intentional
+Node deviation does not rewrite parsed metadata, relative paths, bare dependency
+redirects or direct user import requests. Dot segments remain available to each
+field's existing target validator; rebasing does not authorize package escapes.
 Nested condition objects preserve order at every level. Root conditional
 shorthand normalizes to an exact `"."` export, without adding wildcard access.
 Fallback arrays retain ordered recursive targets, including condition objects

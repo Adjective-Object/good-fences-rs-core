@@ -60,6 +60,10 @@ or implicit polyfills. Reject remaining node: requests, missing builtin packages
 and native addons. Preserve original importer/request in errors.
 Apply a dependency's browser object mapping to its selected legacy package entry,
 then retain the importer's request/path mapping policy.
+Rebase rooted metadata file paths through `packagejson::package_relative_path`
+before package joins/target validation, including browser file keys. Preserve
+bare request keys/redirects and direct absolute imports; inventory still admits
+the resolved file through its ordinary checked route.
 An existing exports map forbids filesystem fallback for unmatched/private paths.
 Bare-string exports normalize to root plus "./*":"./*" for arbitrary package
 files (intentional Node deviation); explicit maps keep encapsulation. Reject

@@ -8,7 +8,7 @@ use path_slash::PathBufExt;
 
 use packagejson::{
     exported_path::{ExportedPath, ExportedPathRef},
-    PackageJsonExport, PackageJsonExports,
+    package_relative_path, PackageJsonExport, PackageJsonExports,
 };
 
 // Struct that performs the "export" field remapping from package.json
@@ -69,8 +69,9 @@ fn valid_percent_encoding(target: &str) -> bool {
 }
 
 fn clean_target(target: &str) -> String {
-    if valid_target(target) {
-        clean_path(target)
+    let relative = package_relative_path(target);
+    if valid_target(&relative) {
+        clean_path(&relative)
     } else {
         target.to_owned()
     }
@@ -368,9 +369,12 @@ pub fn rewrite_package_import<'a>(
                 .max_by_key(|(key, _)| (key.find('*').unwrap(), key.len()))
         });
     if let Some((key, target)) = selected {
-        let substitute = |target: &str| match match_star_pattern(key, request) {
-            Some(capture) => target.replace('*', capture),
-            None => target.to_owned(),
+        let substitute = |target: &str| {
+            let target = package_relative_path(target);
+            match match_star_pattern(key, request) {
+                Some(capture) => target.replace('*', capture),
+                None => target.into_owned(),
+            }
         };
         match select_target_with(target, active, &|target| {
             valid_import_target(&substitute(target))
@@ -598,6 +602,121 @@ mod test {
     use super::*;
     use std::collections::{hash_map::HashMap, BTreeMap};
     use test_tmpdir::map2;
+
+    #[test]
+    fn rooted_metadata_targets_share_recursive_selection_and_reverse_visibility() {
+        let package: packagejson::PackageJson = serde_json::from_str(
+            r##"{
+                "exports":{
+                    ".":{"source":{"import":[false,"/src/index.js"]},"default":"./relative.js"},
+                    "./feature/*":{"default":"/src/*.js"}
+                },
+                "imports":{"#feature/*":{"import":[null,"/src/*.js"],"default":"dependency/*"}}
+            }"##,
+        )
+        .unwrap();
+        let rewrites =
+            PackageExportRewriteData::try_from(package.exports.as_ref().unwrap()).unwrap();
+        for (request, conditions, expected) in [
+            (".", vec!["source", "import"], "./src/index.js"),
+            (".", vec!["import"], "./relative.js"),
+            ("./feature/item", vec!["import"], "./src/item.js"),
+        ] {
+            let mut out = String::new();
+            assert_eq!(
+                rewrites
+                    .rewrite_relative_export(request, conditions.clone(), &mut out)
+                    .unwrap()
+                    .unwrap()
+                    .rewritten_export,
+                ExportedPathRef::Exported(expected)
+            );
+            assert!(rewrites.is_exported(expected));
+            assert!(!rewrites.get_exported_conditions(expected).is_empty());
+        }
+        let imports = package.imports.as_ref().unwrap();
+        assert_eq!(
+            rewrite_package_import(imports, "#feature/item", ["import"]).unwrap(),
+            "./src/item.js"
+        );
+        assert_eq!(
+            rewrite_package_import(imports, "#feature/item", ["require"]).unwrap(),
+            "dependency/item"
+        );
+    }
+
+    #[test]
+    fn rebased_metadata_targets_do_not_relax_target_validation() {
+        for target in [
+            "/../outside.js",
+            "/./entry.js",
+            "/%2e%2e/outside.js",
+            "/node_modules/entry.js",
+            "/%6eode_modules/entry.js",
+            "../outside.js",
+            "https://example.test/entry.js",
+            #[cfg(windows)]
+            r"C:\..\outside.js",
+            #[cfg(windows)]
+            r"C:entry.js",
+        ] {
+            let path = serde_json::to_string(target).unwrap();
+            let package: packagejson::PackageJson = serde_json::from_str(&format!(
+                r##"{{"exports":{{".":{path}}},"imports":{{"#entry":{path}}}}}"##
+            ))
+            .unwrap();
+            let rewrites =
+                PackageExportRewriteData::try_from(package.exports.as_ref().unwrap()).unwrap();
+            let error = rewrites
+                .rewrite_relative_export(".", ["import"], &mut String::new())
+                .err()
+                .expect("invalid export must still fail");
+            assert!(
+                format!("{error:#}").contains("ERR_INVALID_PACKAGE_TARGET"),
+                "{target}: {error:#}"
+            );
+            let error =
+                rewrite_package_import(package.imports.as_ref().unwrap(), "#entry", ["import"])
+                    .unwrap_err();
+            assert!(
+                format!("{error:#}").contains("ERR_INVALID_PACKAGE_TARGET"),
+                "{target}: {error:#}"
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_rooted_targets_rebase_before_exports_and_imports_validation() {
+        for path in [
+            r"\src\entry.js",
+            r"C:\src\entry.js",
+            "D:/src/entry.js",
+            r"\\server\share\src\entry.js",
+        ] {
+            let path = serde_json::to_string(path).unwrap();
+            let package: packagejson::PackageJson = serde_json::from_str(&format!(
+                r##"{{"exports":{{".":{{"import":[false,{path}]}}}},"imports":{{"#entry":{{"import":[false,{path}]}}}}}}"##
+            ))
+            .unwrap();
+            let rewrites =
+                PackageExportRewriteData::try_from(package.exports.as_ref().unwrap()).unwrap();
+            let mut out = String::new();
+            assert_eq!(
+                rewrites
+                    .rewrite_relative_export(".", ["import"], &mut out)
+                    .unwrap()
+                    .unwrap()
+                    .rewritten_export,
+                ExportedPathRef::Exported("./src/entry.js")
+            );
+            assert_eq!(
+                rewrite_package_import(package.imports.as_ref().unwrap(), "#entry", ["import"])
+                    .unwrap(),
+                "./src/entry.js"
+            );
+        }
+    }
 
     #[test]
     fn fallback_arrays_distinguish_paths_private_targets_and_unmatched_conditions() {
