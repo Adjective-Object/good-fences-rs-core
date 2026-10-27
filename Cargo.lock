@@ -487,6 +487,7 @@ dependencies = [
  "eyre",
  "import_resolver",
  "indicatif",
+ "sasso",
  "segment_cache",
  "serde",
  "serde_json",

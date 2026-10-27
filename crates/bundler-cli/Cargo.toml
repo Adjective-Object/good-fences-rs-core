@@ -12,6 +12,7 @@ clap = { version = "4.5.13", features = ["derive"] }
 eyre.workspace = true
 import_resolver = { path = "../import_resolver" }
 indicatif = { version = "0.18", default-features = false }
+sasso = { version = "=0.21.0", default-features = false }
 segment_cache = { path = "../segment_cache" }
 serde.workspace = true
 serde_json.workspace = true

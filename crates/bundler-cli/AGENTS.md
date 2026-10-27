@@ -22,3 +22,9 @@ Project discovery is cwd-only; positional fixture calls never discover config.
 `resolveExtensions` is an ordered replacement for resolver suffixes, not an
 append. Normalize optional leading dots, preserve compound suffixes and defaults
 when omitted, and retain the effective order in resolver cache policy.
+Only the standalone `main` installs pinned Sasso `ScopedAlloc`; libraries leave
+global allocator selection to embedders, which must opt in for arena reclamation.
+Keep allocator lifetime coverage in one sequential binary unit test using the
+production allocator. Native regions are fixed 2 GiB per concurrent compile and
+pooled process-wide (approximately 2 GiB Windows private commit each); wasm sizing does
+not apply. System fallbacks can still retain Rc cycles; do not promise leak freedom.

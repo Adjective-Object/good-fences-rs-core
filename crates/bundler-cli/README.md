@@ -189,7 +189,23 @@ absolute working directory. Both take an output writer and return `eyre::Result`
 `cli` owns clap syntax, `invocation` resolves modes/paths, `config` validates JSON
 and translates options, `execute` builds/publishes, `report` writes JSON, and
 `trace` owns scoped tracing and destination safety; `progress` renders lockfile
-counts. `main` only parses and runs.
+counts. `main` installs `sasso::ScopedAlloc`, then parses and runs.
+
+Only the standalone binary selects this global allocator; neither `bundler-cli`
+nor `bundler` libraries change an embedder's allocator. Hosts embedding Sass
+compilation must install the same pinned Sasso `ScopedAlloc` themselves to reclaim
+arena-backed compiler allocations, including retained Rc cycles, after each
+compile. Returned CSS, maps and errors are copied out before reset; importer and
+warning callbacks run with the arena paused.
+
+Native Sasso 0.21.0 uses fixed **2 GiB regions per concurrent compile**, pooled
+process-wide rather than released after a build. On Windows each native region
+commits approximately **2 GiB of private memory**, even for small compilations;
+concurrent Sass compilation multiplies this significant baseline cost.
+`set_arena_bytes` only affects wasm, not native regions.
+Spillover, reservation failure or all 128 slots being occupied falls back to
+System allocation, where Rc-cycle retention remains possible. This is not a
+universal leak fix.
 
 Validate with `cargo test -p bundler-cli`, then
 `cargo build -p bundler-cli && node scripts/bundler-fixtures.mjs`.
