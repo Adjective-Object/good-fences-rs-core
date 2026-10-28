@@ -604,6 +604,7 @@ fn async_modules(
             }
             for dependency in module.parsed.facts().dependencies().iter().filter(|d| {
                 !d.type_only()
+                    && graph.runtime_dependency(file, d.id())
                     && matches!(
                         d.kind(),
                         DependencyKind::Import
@@ -682,6 +683,9 @@ pub(super) fn target_files(
     file: u32,
     dependency: Dependency<'_>,
 ) -> eyre::Result<Vec<u32>> {
+    if !graph.runtime_dependency(file, dependency.id()) {
+        return Ok(Vec::new());
+    }
     if matches!(
         graph.dependency_target(file, dependency.id()),
         Some(DependencyTarget::External(_))
@@ -707,6 +711,7 @@ pub(super) fn has_externals(graph: &SourceGraph, file: u32) -> bool {
         .flat_map(|facts| facts.dependencies())
         .any(|dependency| {
             !dependency.type_only()
+                && graph.runtime_dependency(file, dependency.id())
                 && matches!(
                     graph.dependency_target(file, dependency.id()),
                     Some(DependencyTarget::External(_))
@@ -737,7 +742,7 @@ pub(super) fn namespace_export_names(
                         .file_facts(file)
                         .into_iter()
                         .flat_map(|f| f.exports())
-                        .filter(|e| !e.type_only())
+                        .filter(|e| !e.type_only() && graph.runtime_export(file, e.name()))
                         .filter_map(|e| e.name().map(str::to_owned))
                         .collect()
                 },

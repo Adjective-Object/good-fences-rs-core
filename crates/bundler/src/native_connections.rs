@@ -265,6 +265,7 @@ impl Connections {
                 .iter()
                 .filter(|d| {
                     !d.type_only()
+                        && graph.runtime_dependency(file, d.id())
                         && matches!(
                             d.kind(),
                             DependencyKind::Import
@@ -794,6 +795,16 @@ impl Connections {
             for dependency in module.parsed.facts().dependencies().iter().filter(|d| {
                 !d.type_only() && (d.pattern().is_none() || d.kind() == DependencyKind::Require)
             }) {
+                if !graph.runtime_dependency(file, dependency.id()) {
+                    self.native_requests.insert(
+                        (file, dependency.id()),
+                        NativeRequest {
+                            code: Code::default(),
+                            whole: true,
+                        },
+                    );
+                    continue;
+                }
                 if plan.lazy_modules.modules().iter().any(|module| {
                     module.owner.file_id == file && module.dependency == dependency.id()
                 }) {
@@ -1093,6 +1104,9 @@ impl Connections {
             }
             let mut output = Code::default();
             for export in exports {
+                if !graph.runtime_export(file, export.name()) {
+                    continue;
+                }
                 if export
                     .name()
                     .is_some_and(|name| !symbols.exports[&file].contains_key(name))

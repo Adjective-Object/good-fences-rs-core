@@ -19,6 +19,7 @@ mod resolution_cache;
 mod sass;
 mod style_facts;
 mod transpile;
+mod type_only_wiring;
 mod worker_entries;
 
 #[cfg(any(unix, windows))]

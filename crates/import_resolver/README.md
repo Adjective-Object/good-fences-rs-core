@@ -5,6 +5,11 @@ Resolves Node/package requests using the repository's cached resolver.
 invalidate filesystem/configuration changes through `mark_dirty_root`.
 Structural resolution adds importer, request and mode context without flattening
 the legacy resolver's underlying error chain.
+`StructuralResolver::observe_dependency` returns that result alongside the
+original consulted proof even on failure. Optional metadata consumers retain and
+freshly validate negative probes at final/no-op boundaries; a failed request is
+never a cached resolved target. The successful-only `resolve_dependency_with_inputs`
+API is unchanged.
 
 Run `cargo test -p import_resolver`; filesystem tests use managed directories.
 Default extension probing also accepts `.jsonc`, after the existing extensions;

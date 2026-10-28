@@ -134,6 +134,7 @@ impl Symbols {
                         && !b.type_only()
                         && !b.ambient()
                         && !facts.commonjs()
+                        && graph.runtime_import(file, b.id())
                         && !plan.lazy_modules.consumes_binding(file, b.id())
                 })
                 .collect();
@@ -180,6 +181,7 @@ impl Symbols {
                             })
                             || facts.exports().iter().any(|export| {
                                 !export.type_only()
+                                    && graph.runtime_export(file, export.name())
                                     && export.value() == ExportValue::Binding(binding.id())
                                     && retained.contains(&SegmentKey::new(
                                         file,

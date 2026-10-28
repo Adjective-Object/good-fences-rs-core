@@ -26,6 +26,14 @@ pub enum DependencyTarget {
     Missing(String),
 }
 
+/// Attempt-derived removal of proven type-only connectors, never source facts.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct TypeOnlyWiring {
+    pub imports: AHashSet<BindingId>,
+    pub exports: AHashSet<String>,
+    pub dependencies: AHashSet<DependencyId>,
+}
+
 /// Source-local data and environment-dependent resolutions remain separate.
 #[derive(Debug)]
 pub struct OwnedSourceFileInput {
@@ -159,6 +167,84 @@ pub struct OccurrenceEdge {
 }
 
 impl SourceGraph {
+    /// Admit caller-proven type-only connectors, rejecting executable references
+    /// and attempts to remove explicit evaluation-only clauses.
+    pub fn set_type_only_wiring(
+        &mut self,
+        wiring: AHashMap<u32, TypeOnlyWiring>,
+    ) -> eyre::Result<()> {
+        if self.type_only_wiring == wiring {
+            return Ok(());
+        }
+        for (&file, mask) in &wiring {
+            let facts = self
+                .file_facts(file)
+                .ok_or_else(|| eyre::eyre!("missing type-only wiring source {file}"))?;
+            for &binding in &mask.imports {
+                eyre::ensure!(
+                    facts.imports().iter().any(|i| i.binding() == binding),
+                    "type-only mask is not an import binding"
+                );
+                eyre::ensure!(
+                    !facts
+                        .references()
+                        .iter()
+                        .any(|r| r.binding() == Some(binding)
+                            && !r.type_only()
+                            && !facts.exports().iter().any(|e| e.value()
+                                == ExportValue::Binding(binding)
+                                && e.name().is_some_and(|n| mask.exports.contains(n))
+                                && e.span().start <= r.span().start
+                                && r.span().end <= e.span().end)),
+                    "type-only import binding has executable references"
+                );
+            }
+            for &dependency in &mask.dependencies {
+                let imports: Vec<_> = facts
+                    .imports()
+                    .iter()
+                    .filter(|i| i.dependency() == dependency)
+                    .collect();
+                let exports: Vec<_> = facts.exports().iter().filter(|e| matches!(e.value(), ExportValue::ReExport { dependency: id, .. } if id == dependency)).collect();
+                eyre::ensure!(
+                    (!imports.is_empty() || !exports.is_empty())
+                        && imports.iter().all(|i| mask.imports.contains(&i.binding()))
+                        && exports
+                            .iter()
+                            .all(|e| e.name().is_some_and(|n| mask.exports.contains(n))),
+                    "type-only dependency mask would remove runtime wiring or explicit evaluation"
+                );
+            }
+        }
+        self.type_only_wiring = wiring;
+        self.revision.resolution += 1;
+        self.reexport_cache.lock().unwrap().clear();
+        self.rebuild_edges();
+        Ok(())
+    }
+
+    pub fn runtime_import(&self, file: u32, binding: BindingId) -> bool {
+        !self
+            .type_only_wiring
+            .get(&file)
+            .is_some_and(|w| w.imports.contains(&binding))
+    }
+
+    pub fn runtime_export(&self, file: u32, name: Option<&str>) -> bool {
+        !name.is_some_and(|name| {
+            self.type_only_wiring
+                .get(&file)
+                .is_some_and(|w| w.exports.contains(name))
+        })
+    }
+
+    pub fn runtime_dependency(&self, file: u32, dependency: DependencyId) -> bool {
+        !self
+            .type_only_wiring
+            .get(&file)
+            .is_some_and(|w| w.dependencies.contains(&dependency))
+    }
+
     pub fn from_owned(inputs: impl IntoIterator<Item = OwnedSourceFileInput>) -> Self {
         let inputs: Vec<_> = inputs.into_iter().collect();
         let mut graph = Self::new(inputs.iter().map(|input| {
@@ -279,6 +365,9 @@ impl SourceGraph {
                 let Some(binding) = reference.binding() else {
                     continue;
                 };
+                if !self.runtime_import(file_id, binding) {
+                    continue;
+                }
                 let Some(declaration) = input.facts.bindings().iter().find(|b| b.id() == binding)
                 else {
                     continue;
@@ -308,6 +397,9 @@ impl SourceGraph {
                 }
             }
             for dependency in input.facts.dependencies() {
+                if !self.runtime_dependency(file_id, dependency.id()) {
+                    continue;
+                }
                 if dependency.kind() == DependencyKind::Url {
                     // Resource URLs belong to a different realm, not this evaluation graph.
                     if !matches!(
@@ -393,6 +485,7 @@ impl SourceGraph {
                     .imports()
                     .iter()
                     .filter(|i| i.dependency() == dependency.id())
+                    .filter(|i| self.runtime_import(file_id, i.binding()))
                     .collect();
                 let base = OccurrenceEdge {
                     from: self.segment_at(file_id, dependency.span()),
@@ -449,6 +542,9 @@ impl SourceGraph {
                     });
                 }
                 for export in input.facts.exports() {
+                    if !self.runtime_export(file_id, export.name()) {
+                        continue;
+                    }
                     if let ExportValue::ReExport {
                         dependency: id,
                         imported,
@@ -558,6 +654,65 @@ pub(crate) mod tests {
             })
             .collect();
         OwnedSourceFileInput::from_parsed(path.into(), parsed, resolutions)
+    }
+
+    #[test]
+    fn type_only_wiring_removes_alias_and_evaluation_edges_without_mutating_facts() {
+        let mut graph = SourceGraph::from_owned([
+            input("types.mjs", "export const keep=42;"),
+            input("main.mjs", "import {Type,keep} from 'types.mjs'; export {Type as Alias,keep}; import 'types.mjs';"),
+        ]);
+        let facts = graph.file_facts(1).unwrap();
+        let binding = facts
+            .imports()
+            .iter()
+            .find(|i| i.imported() == ast_segmenter::views::ImportedName::Name("Type"))
+            .unwrap()
+            .binding();
+        let mask = TypeOnlyWiring {
+            imports: AHashSet::from_iter([binding]),
+            exports: AHashSet::from_iter(["Alias".into()]),
+            dependencies: Default::default(),
+        };
+        let revision = graph.revision();
+        graph
+            .set_type_only_wiring(AHashMap::from_iter([(1, mask)]))
+            .unwrap();
+        graph.validate_links().unwrap();
+        assert_ne!(graph.revision(), revision);
+        assert_eq!(graph.file_facts(1).unwrap().imports().len(), 2);
+        assert!(!graph.edges().iter().any(|e| e.binding == Some(binding)));
+        assert!(graph
+            .resolve_optional_export(1, "Alias", crate::Namespace::Value)
+            .unwrap()
+            .is_none());
+        assert!(graph
+            .resolve_export(1, "keep", crate::Namespace::Value)
+            .is_ok());
+        assert!(graph
+            .edges()
+            .iter()
+            .any(|e| e.purpose == EdgePurpose::Execution));
+    }
+
+    #[test]
+    fn type_only_wiring_rejects_executable_reads_and_explicit_side_effect_removal() {
+        for source in [
+            "import {Type} from 'types.mjs'; console.log(Type);",
+            "import 'types.mjs';",
+        ] {
+            let mut graph =
+                SourceGraph::from_owned([input("types.mjs", ""), input("main.mjs", source)]);
+            let facts = graph.file_facts(1).unwrap();
+            let mask = TypeOnlyWiring {
+                imports: facts.imports().iter().map(|i| i.binding()).collect(),
+                dependencies: facts.dependencies().iter().map(|d| d.id()).collect(),
+                exports: Default::default(),
+            };
+            assert!(graph
+                .set_type_only_wiring(AHashMap::from_iter([(1, mask)]))
+                .is_err());
+        }
     }
 
     #[test]

@@ -55,6 +55,15 @@ remain valid after the mutable sidecar is replaced, corrupted or truncated.
 `from_parsed` consumes `ParsedModule::into_parts` without cloning or unpacking the
 fact tree; only graph-owned statement ranges are constructed for wire inputs.
 Graph-derived identities and indexes remain separate from storage.
+`TypeOnlyWiring` is a caller-proven attempt-local connector mask, not cached syntax.
+`set_type_only_wiring` checks that removed imports have no executable references
+and that removed dependencies contain only masked specifiers, never explicit
+evaluation-only imports. It rebuilds both indexes/diagnostics and advances the
+resolution revision. `runtime_import`, `runtime_export` and `runtime_dependency`
+share the admission decision with native emission, including record-derived
+clauses; cached facts remain unchanged. Source/resolution mutation clears masks.
+Only the build coordinator resolves original type evidence or warns; the graph
+does not perform filesystem IO, infer types, or treat arbitrary misses as types.
 `outgoing_indexed` exposes shared occurrence indices for derived plans; indices
 are revision-local, not persistent IDs. The `bundler` library consumes these
 without adding effects policy or usage tags to the shared graph.

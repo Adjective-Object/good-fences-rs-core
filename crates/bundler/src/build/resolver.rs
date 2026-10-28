@@ -257,7 +257,9 @@ impl DependencyResolver for Admitting<'_, '_, '_> {
         specifier: &str,
         mode: ResolutionMode,
     ) -> eyre::Result<ResolvedDependency> {
-        let request = self.resolver.resolve_request(base, specifier, mode)?;
+        let request = self
+            .resolver
+            .resolve_request_with_failures(base, specifier, mode, true)?;
         self.resolver.demand(&request)?;
         let target = request.row.target.owned();
         if let ResolvedDependency::File(path) = &target {
@@ -488,6 +490,7 @@ pub(super) struct BuildResolver<'scratch, 'a> {
     packages: RwLock<BTreeMap<PathBuf, Package<'a>>>,
     bases: RwLock<BTreeMap<PathBuf, PathBuf>>,
     package_inputs: RwLock<Vec<PathInput>>,
+    failed_inputs: RwLock<Vec<InputProof>>,
     last_validation: RwLock<Option<InputSnapshot>>,
     warnings: RwLock<Vec<(PathBuf, String)>>,
     calls: AtomicUsize,
@@ -671,6 +674,7 @@ impl<'scratch, 'a> BuildResolver<'scratch, 'a> {
             packages: RwLock::new(BTreeMap::new()),
             bases: RwLock::new(BTreeMap::new()),
             package_inputs: RwLock::new(Vec::new()),
+            failed_inputs: RwLock::new(Vec::new()),
             last_validation: RwLock::new(None),
             warnings: RwLock::new(Vec::new()),
             calls: AtomicUsize::new(0),
@@ -796,6 +800,12 @@ impl<'scratch, 'a> BuildResolver<'scratch, 'a> {
         }
         for request in requests {
             request.validate_in(&snapshot)?;
+        }
+        let failed_inputs = self.failed_inputs.read().clone();
+        for inputs in failed_inputs {
+            inputs
+                .validate_in(&snapshot)
+                .wrap_err("rechecking failed optional resolution inputs")?;
         }
         *self.last_validation.write() = Some(snapshot);
         Ok(())
@@ -925,6 +935,16 @@ impl<'scratch, 'a> BuildResolver<'scratch, 'a> {
         specifier: &str,
         mode: ResolutionMode,
     ) -> eyre::Result<Arc<CurrentRequest<'a>>> {
+        self.resolve_request_with_failures(base, specifier, mode, false)
+    }
+
+    fn resolve_request_with_failures(
+        &self,
+        base: &Path,
+        specifier: &str,
+        mode: ResolutionMode,
+        retain_failure: bool,
+    ) -> eyre::Result<Arc<CurrentRequest<'a>>> {
         let _span = tracing::info_span!("resolve.request").entered();
         #[cfg(test)]
         if let Some(observer) = &self.observer {
@@ -981,14 +1001,25 @@ impl<'scratch, 'a> BuildResolver<'scratch, 'a> {
         } else {
             self.misses.fetch_add(1, Ordering::Relaxed);
             self.calls.fetch_add(1, Ordering::Relaxed);
-            let tracked = self
-                .inner
-                .resolve_dependency_with_inputs(base, specifier, mode)?;
-            tracked.inputs.validate_in(self.inner.snapshot())?;
-            (
-                Arc::new(Proof::Fresh(tracked.inputs)),
-                Some(tracked.dependency),
-            )
+            let (dependency, inputs) = self.inner.observe_dependency(base, specifier, mode);
+            inputs
+                .validate_in(self.inner.snapshot())
+                .wrap_err_with(|| {
+                    format!(
+                        "observing {mode:?} resolution of {specifier:?} from {}",
+                        base.display()
+                    )
+                })?;
+            let dependency = match dependency {
+                Ok(dependency) => dependency,
+                Err(error) => {
+                    if retain_failure {
+                        self.failed_inputs.write().push(inputs);
+                    }
+                    return Err(error);
+                }
+            };
+            (Arc::new(Proof::Fresh(inputs)), Some(dependency))
         };
         if (self.hits.load(Ordering::Relaxed) + self.misses.load(Ordering::Relaxed))
             .is_multiple_of(1024)

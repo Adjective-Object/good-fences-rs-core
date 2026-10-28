@@ -23,6 +23,44 @@ fn resolver<'s, 'a>(
 }
 
 #[test]
+fn failed_optional_metadata_resolution_rechecks_additions_without_persisting_a_target() {
+    let dir = TmpDir::new();
+    fixture(dir.root());
+    let herd = bumpalo_herd::Herd::new();
+    let scratch = Scratch::new(&herd);
+    let config = BuildOptions::default();
+    let memory = Memory::default();
+    let current = resolver(dir.root(), &config, &memory, &scratch);
+    assert!(current
+        .resolve_request(
+            &dir.root().join("main.mjs"),
+            "./unused.mts",
+            ResolutionMode::Import
+        )
+        .is_err());
+    assert!(current.failed_inputs.read().is_empty());
+    assert!(current
+        .resolve_request_with_failures(
+            &dir.root().join("main.mjs"),
+            "./missing.mts",
+            ResolutionMode::Import,
+            true,
+        )
+        .is_err());
+    current.recheck().unwrap();
+    write(dir.root(), "unused.mts", "export {};");
+    current.recheck().unwrap();
+    assert!(current.requests.read().is_empty());
+    assert!(memory.0.read().is_empty());
+    write(dir.root(), "missing.mts", "export interface Shape {}");
+    let error = current.recheck().unwrap_err();
+    assert!(
+        format!("{error:#}").contains("failed optional resolution inputs"),
+        "{error:#}"
+    );
+}
+
+#[test]
 fn repeated_requests_share_one_current_row_publication_index_and_retained_memo() {
     let dir = TmpDir::new();
     fixture(dir.root());

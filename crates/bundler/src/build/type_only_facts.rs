@@ -719,6 +719,102 @@ pub struct TypeOnlyCache {
 }
 
 impl TypeOnlyCache {
+    /// Lazy original metadata for a route erased before runtime discovery.
+    /// Prepared owners must be supplied by the caller instead of using this path.
+    pub(super) fn load_original(
+        &mut self,
+        inventory: &impl MetadataInputs,
+        storage: &Path,
+        path: &Path,
+        parser_path: &Path,
+        package: ModuleFormat,
+        mode: CacheMode,
+    ) -> eyre::Result<Observation> {
+        let (input, bytes) = inventory.read_declaration(path)?;
+        let bytes =
+            bytes.ok_or_else(|| eyre::eyre!("missing original metadata {}", path.display()))?;
+        let source = std::str::from_utf8(&bytes)
+            .wrap_err_with(|| format!("decoding original metadata {}", path.display()))?;
+        let config = ast_segmenter::ParserConfig::for_path(parser_path, package)?;
+        let requested = Settings::from_config(config, package)?;
+        for seed in [enums::Seed::Semantic, enums::Seed::Bounded] {
+            for commonjs in [requested.commonjs, !requested.commonjs] {
+                if commonjs != requested.commonjs && !requested.detect_esm {
+                    continue;
+                }
+                let effective = Settings {
+                    commonjs,
+                    ..requested
+                };
+                let identity = effective.identity_for(seed);
+                let key = (path.to_owned(), identity);
+                if let Some(old) = self.records.get(&key).filter(|o| o.input == input) {
+                    return Ok(old.clone());
+                }
+                if mode != CacheMode::Disabled {
+                    if let Ok(file) = fs::File::open(sidecar(path)) {
+                        let backing =
+                            SharedBytes::snapshot_in(storage, file).wrap_err_with(|| {
+                                format!("snapshotting original metadata {}", path.display())
+                            })?;
+                        if let Ok(record) =
+                            WireTypeOnlyFacts::from_backing(backing, source, identity)
+                        {
+                            let observation = Observation {
+                                input: input.clone(),
+                                record: Some(record),
+                            };
+                            self.records.insert(key, observation.clone());
+                            return Ok(observation);
+                        }
+                    }
+                }
+            }
+        }
+        let allocator = Allocator::default();
+        let parsed = oxc_utils_parse::parse_bundler_file(&allocator, source, parser_path, package)?;
+        if let Some(error) = parsed.diagnostics.into_iter().next() {
+            return Err(eyre::Report::new(error))
+                .wrap_err_with(|| format!("parsing original metadata {}", path.display()));
+        }
+        let semantic = SemanticBuilder::new()
+            .with_check_syntax_error(true)
+            .with_enum_eval(false)
+            .build(&parsed.program);
+        if let Some(error) = semantic.diagnostics.into_iter().next() {
+            return Err(eyre::Report::new(error))
+                .wrap_err_with(|| format!("analyzing original metadata {}", path.display()));
+        }
+        let effective =
+            Settings::from_config(config.resolved(parsed.program.source_type), package)?;
+        let record = extract_inner(
+            storage,
+            &parsed.program,
+            &semantic.semantic,
+            effective,
+            enums::Seed::Bounded,
+        )?;
+        self.extractions += 1;
+        input.validate()?;
+        if mode == CacheMode::ReadWrite {
+            if let Err(error) = publish(&sidecar(path), &record, &input) {
+                tracing::warn!(target: "bundler::diagnostic", "{error:#}");
+            }
+        }
+        let observation = Observation {
+            input,
+            record: Some(record),
+        };
+        self.records.insert(
+            (
+                path.to_owned(),
+                effective.identity_for(enums::Seed::Bounded),
+            ),
+            observation.clone(),
+        );
+        Ok(observation)
+    }
+
     /// Number of source extractions performed by this shared cache instance.
     pub fn extractions(&self) -> usize {
         self.extractions
@@ -806,29 +902,46 @@ impl TypeOnlyCache {
         let Some(path) = companion(javascript) else {
             return Ok(None);
         };
-        let (input, bytes) = inventory.read_declaration(&path)?;
+        self.load_declaration(inventory, storage, &path, package, mode)
+            .map(Some)
+    }
+
+    /// Checked metadata admission, never an executable loader selection.
+    pub(super) fn load_declaration(
+        &mut self,
+        inventory: &impl MetadataInputs,
+        storage: &Path,
+        path: &Path,
+        package: ModuleFormat,
+        mode: CacheMode,
+    ) -> eyre::Result<(Observation, Option<String>)> {
+        let config = ast_segmenter::ParserConfig::for_path(path, package)?;
+        ensure!(config.definition(), "expected declaration metadata syntax");
+        let (input, bytes) = inventory.read_declaration(path)?;
         let Some(bytes) = bytes else {
-            return Ok(Some((
+            return Ok((
                 Observation {
                     input,
                     record: None,
                 },
                 None,
-            )));
+            ));
         };
-        let config = ast_segmenter::ParserConfig::for_path(&path, package)?;
         let requested = Settings::from_config(config, package)?;
         // Ambiguous .d.ts follows package/static-ESM policy, just like original TS.
         // Disk records use the requested settings plus effective parser mode.
-        let key = (path.clone(), requested.identity_for(enums::Seed::Bounded));
+        let key = (
+            path.to_owned(),
+            requested.identity_for(enums::Seed::Bounded),
+        );
         if let Some(old) = self.records.get(&key) {
             if old.input == input {
-                return Ok(Some((old.clone(), None)));
+                return Ok((old.clone(), None));
             }
         }
         let source = std::str::from_utf8(&bytes)
             .wrap_err_with(|| format!("decoding declaration metadata {}", path.display()))?;
-        let cache = sidecar(&path);
+        let cache = sidecar(path);
         let mut warning = None;
         if mode != CacheMode::Disabled {
             if let Ok(file) = fs::File::open(&cache) {
@@ -854,14 +967,18 @@ impl TypeOnlyCache {
                         };
                         observation.validate()?;
                         self.records.insert(key, observation.clone());
-                        return Ok(Some((observation, None)));
+                        return Ok((observation, None));
                     }
                 }
             }
         }
         let allocator = Allocator::default();
         // Metadata parsing is explicit and separate from executable LoaderPolicy.
-        let parsed = oxc_utils_parse::parse_bundler_file(&allocator, source, &path, package)?;
+        let parsed = oxc_utils_parse::parse_bundler_file(&allocator, source, path, package)?;
+        if let Some(error) = parsed.diagnostics.into_iter().next() {
+            return Err(eyre::Report::new(error))
+                .wrap_err_with(|| format!("parsing declaration metadata {}", path.display()));
+        }
         ensure!(
             parsed.program.source_type.is_typescript_definition(),
             "expected declaration metadata syntax"
@@ -899,7 +1016,7 @@ impl TypeOnlyCache {
         };
         observation.validate()?;
         self.records.insert(key, observation.clone());
-        Ok(Some((observation, warning)))
+        Ok((observation, warning))
     }
 }
 

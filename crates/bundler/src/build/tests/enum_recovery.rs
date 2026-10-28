@@ -513,7 +513,11 @@ fn const_enum_recovery_never_suppresses_nonconst_unknown_unsupported_or_cycles()
             .err()
             .unwrap();
         assert!(
-            format!("{error:#}").contains("missing Value export"),
+            format!("{error:#}").contains(if declaration.starts_with("export interface") {
+                "used as an executable value"
+            } else {
+                "missing Value export"
+            }),
             "{error:#}"
         );
     }

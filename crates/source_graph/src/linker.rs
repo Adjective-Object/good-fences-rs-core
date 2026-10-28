@@ -280,6 +280,9 @@ impl SourceGraph {
         let mut has_explicit = false;
         if let Some(input) = &file.owned {
             for export in input.facts.exports() {
+                if namespace == Namespace::Value && !self.runtime_export(file_id, export.name()) {
+                    continue;
+                }
                 if namespace == Namespace::Value && export.type_only() {
                     continue;
                 }

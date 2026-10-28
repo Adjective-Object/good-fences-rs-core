@@ -1,5 +1,20 @@
 # bundler
 
+Type-only compatibility uses attempt-derived checked graph masks, never source
+mutation or cached repair choices. Follow original aliases/defaults/barrels with
+explicit/star precedence and distinct-origin ambiguity; runtime values and const
+enums are not erasable types. Reject actual imported-value/static namespace uses.
+Every native raw/reconstructed binding and evaluation route consumes the masks;
+pure type clauses have no evaluation edge, mixed values and explicit effects stay.
+Warn once per original unmarked occurrence with original UTF-16 coordinates.
+Reuse prepared GFTY owners; lazily acquire selected TS metadata for erased routes
+through current admitted resolution, never generic JS facts or a runtime frontier.
+Demanded declaration routes use checked GFTY declaration settings/cache, not
+executable loader selection; runtime declaration rejection remains unchanged.
+Metadata-only owners expose demanded alias routes, never their unrelated imports.
+Freshly recheck metadata content and positive/negative route proofs on every
+return/no-op boundary. Retain warnings on the product, not admission decisions.
+
 Const-enum compatibility is an attempt-local prepared-source overlay, never
 consumer inlining or a persisted linking decision. Rebuild from original checked
 JS plus bounded borrowed declaration constants; alias exports share one object.

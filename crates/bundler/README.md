@@ -70,8 +70,34 @@ records without re-extraction, but still perform normal Oxc compilation. Type-on
 source edits refresh original records even if generated JS is unchanged; selected
 syntax and package-format changes invalidate matching metadata. Disabled caching
 does not read/write GFTY sidecars. Const-enum overlay restoration/regeneration
-preserves the original typed owner. This evidence does not yet change linking,
-erase executable clauses or produce type-only compatibility warnings.
+preserves the original typed owner.
+
+On each attempt, checked original evidence identifies names that exist **only**
+as types, following local/import aliases, defaults and explicit/star barrels
+cycle-safely. Real runtime exports win; distinct type origins, unknown names and
+const enums are not an erasure fallback. Original unmarked import/reexport
+occurrences warn with UTF-16 line/column positions and `import type`/`export type`
+guidance, including locally erased imports. Explicit type annotations stay silent.
+Warnings live on the product and replay on cold, memory, disk and no-op builds.
+Executable imported-value uses and bounded static namespace-member reads of
+proven types remain errors, never undefined substitutions or expression erasure.
+
+Graph-local `TypeOnlyWiring` masks remove only proven connectors from binding,
+export and evaluation routes. Native reconstruction and raw-clause emission
+consume the same masks: pure type clauses leave no evaluation import, mixed
+clauses retain values/evaluation, and explicit side-effect imports stay intact.
+Masks/diagnostics are attempt-derived, never persisted in source sidecars.
+Wholly compiler-erased routes resolve through the current checked resolver and
+inventory without becoming runtime modules. Prepared original owners are reused;
+only previously unprepared selected TS providers or demanded declarations need
+lazy metadata parsing. Erased `.d.ts`/`.d.mts`/`.d.cts` routes share the checked
+declaration cache/settings used by lazy companions, without selecting an
+executable loader. Declaration runtime imports and entrypoints remain rejected.
+Metadata-only traversal follows the demanded export routes, not unrelated
+imports/reexports in those providers.
+Valid GFTY hits need no metadata reparse. Positive/negative resolution and original
+content observations are freshly checked before no-op/success returns, so provider
+edits/deletions/additions and resolution/settings changes cannot replay stale warnings.
 
 Borrow `Observation::record().facts()` for local declarations, original exported
 names/routes, import/reexport occurrences and type/executable-use spans, and

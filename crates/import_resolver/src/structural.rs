@@ -107,9 +107,8 @@ impl StructuralResolver {
         specifier: &str,
         mode: ResolutionMode,
     ) -> eyre::Result<TrackedDependency> {
-        let observer = InputObserver::with_snapshot(self.snapshot.clone());
-        let dependency = self.resolve_inner(base, specifier, mode, Some(&observer))?;
-        let inputs = observer.proof();
+        let (dependency, inputs) = self.observe_dependency(base, specifier, mode);
+        let dependency = dependency?;
         inputs.check_errors().wrap_err_with(|| {
             format!(
                 "{mode:?} resolving {specifier:?} from {}: checking input proof",
@@ -117,6 +116,19 @@ impl StructuralResolver {
             )
         })?;
         Ok(TrackedDependency { dependency, inputs })
+    }
+
+    /// Retain the original consulted inputs even when optional resolution fails.
+    /// Callers must validate the proof, not turn an error into a resolved target.
+    pub fn observe_dependency(
+        &self,
+        base: &Path,
+        specifier: &str,
+        mode: ResolutionMode,
+    ) -> (eyre::Result<ResolvedDependency>, InputProof) {
+        let observer = InputObserver::with_snapshot(self.snapshot.clone());
+        let dependency = self.resolve_inner(base, specifier, mode, Some(&observer));
+        (dependency, observer.proof())
     }
 
     fn resolve_inner(
@@ -229,6 +241,31 @@ mod tests {
             .unwrap();
         result.inputs.validate().unwrap();
         result
+    }
+
+    #[test]
+    fn optional_failed_resolution_retains_negative_inputs_before_and_after_addition() {
+        let dir = test_tmpdir::test_tmpdir! { "main.mjs" => "" };
+        let mut resolver = StructuralResolver::new(
+            dir.root().into(),
+            NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
+            BTreeSet::new(),
+        );
+        let base = dir.root().join("main.mjs");
+        let (result, inputs) =
+            resolver.observe_dependency(&base, "./missing.mjs", ResolutionMode::Import);
+        assert!(format!("{:#}", result.unwrap_err()).contains("./missing.mjs"));
+        inputs.validate().unwrap();
+        std::fs::write(dir.root().join("missing.mjs"), "export {};").unwrap();
+        assert!(inputs.validate().is_err());
+        resolver.invalidate();
+        let (result, fresh) =
+            resolver.observe_dependency(&base, "./missing.mjs", ResolutionMode::Import);
+        assert_eq!(
+            result.unwrap(),
+            ResolvedDependency::File(dir.root().join("missing.mjs"))
+        );
+        fresh.validate().unwrap();
     }
 
     #[test]

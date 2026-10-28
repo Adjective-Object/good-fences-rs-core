@@ -1,5 +1,11 @@
 # source_graph
 
+TypeOnlyWiring masks are graph/attempt-local caller-proven connectors. Admission
+rejects executable imported references and explicit evaluation-only clause removal.
+Both edge construction and value export resolution honor them; native consumers
+share runtime_import/export/dependency gates. Facts remain immutable, mask updates
+advance revisions, and source/resolution mutation clears derived masks.
+
 Absent-name diagnostics carry typed target/name/namespace evidence; ambiguity
 never becomes a recoverable miss. Missing-export leaf traversal follows explicit
 renames before stars and terminates cycles without choosing a declaration leaf.

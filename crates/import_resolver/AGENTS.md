@@ -79,6 +79,8 @@ Tracked calls reject masked IO errors. Consumers key request mode/policy and
 freshly validate the returned proof before reuse/success, then invalidate on
 change. Ordinary candidates seal kind/identity/links, not source bytes; only
 content-dependent manifests seal bytes. Do not enumerate directory inventories.
+Optional failed requests retain original proofs through observe_dependency too;
+fresh final/no-op checks must notice additions without inventing a resolved target.
 
 Filesystem observations belong to an explicit resolver epoch. Share exact
 manifest bytes across request modes, but keep target/condition/policy results

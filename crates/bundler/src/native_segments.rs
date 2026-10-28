@@ -1461,6 +1461,7 @@ fn activation_safe(
             .iter()
             .filter(|dependency| {
                 !dependency.type_only()
+                    && graph.runtime_dependency(file, dependency.id())
                     && matches!(
                         dependency.kind(),
                         DependencyKind::Import
@@ -2278,6 +2279,7 @@ pub(super) fn emit(
                 .iter()
                 .filter(|d| {
                     !d.type_only()
+                        && graph.runtime_dependency(file, d.id())
                         && matches!(
                             d.kind(),
                             DependencyKind::Import

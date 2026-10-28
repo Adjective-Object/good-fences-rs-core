@@ -248,7 +248,8 @@ pub(crate) fn plan(
                 continue;
             }
             if reference.binding().is_some_and(|binding| {
-                lazy.is_some_and(|lazy| lazy.consumes_binding(file, binding))
+                !graph.runtime_import(file, binding)
+                    || lazy.is_some_and(|lazy| lazy.consumes_binding(file, binding))
             }) {
                 continue;
             }

@@ -376,7 +376,14 @@ impl BuildSession {
         if let Some(env) = &self.env {
             inputs.push(env.input()?);
         }
-        Ok(SourceGraph::from_owned(inputs))
+        let mut graph = SourceGraph::from_owned(inputs);
+        graph.set_type_only_wiring(
+            self.type_wiring
+                .iter()
+                .filter_map(|(path, mask)| graph.file_id(path).map(|id| (id, mask.clone())))
+                .collect(),
+        )?;
+        Ok(graph)
     }
 
     pub(super) fn recover_enums(
@@ -384,10 +391,11 @@ impl BuildSession {
         inventory: &Inventory,
         options: &BuildOptions,
         declarations: &PreparedDeclarations,
-        previous: &BTreeMap<PathBuf, Source>,
+        sources: (&BTreeMap<PathBuf, Source>, Option<SourceGraph>),
         counters: &mut Counters,
         warnings: &mut Vec<String>,
     ) -> eyre::Result<Recovery> {
+        let (previous, mut initial_graph) = sources;
         let input_key = Fingerprint::of(
             format!(
                 "{:?}:{:?}:{:?}:{:?}:{:?}",
@@ -479,7 +487,17 @@ impl BuildSession {
         let mut recovered: BTreeMap<PathBuf, BTreeMap<String, Enum>> = BTreeMap::new();
         let mut warned = BTreeSet::new();
         loop {
-            let graph = self.prepared_graph(options)?;
+            let graph = if let Some(mut graph) = initial_graph.take() {
+                graph.set_type_only_wiring(
+                    self.type_wiring
+                        .iter()
+                        .filter_map(|(path, mask)| graph.file_id(path).map(|id| (id, mask.clone())))
+                        .collect(),
+                )?;
+                graph
+            } else {
+                self.prepared_graph(options)?
+            };
             let mut changed = BTreeSet::new();
             for demand in demands(&graph) {
                 let mut candidates = Vec::new();

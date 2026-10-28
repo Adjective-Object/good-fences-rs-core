@@ -35,6 +35,7 @@ pub use localization::{LocaleOptions, PseudoLocaleOptions};
 mod enum_recovery;
 mod policy;
 mod prepare;
+mod type_only_wiring;
 pub use policy::{PolicyAllowance, PolicyName, PreparationErrors};
 mod scratch;
 pub mod type_only_facts;
@@ -263,6 +264,7 @@ pub struct BuildSession {
     last: Option<Rc<BuildProduct>>,
     env: Option<env::Module>,
     enum_bases: BTreeMap<PathBuf, Source>,
+    type_wiring: BTreeMap<PathBuf, source_graph::TypeOnlyWiring>,
     type_only_cache: type_only_facts::TypeOnlyCache,
     enum_recovery: Option<enum_recovery::Retained>,
 }
@@ -333,6 +335,7 @@ impl BuildSession {
             last: None,
             env: None,
             enum_bases: BTreeMap::new(),
+            type_wiring: BTreeMap::new(),
             type_only_cache: type_only_facts::TypeOnlyCache::default(),
             enum_recovery: None,
         })
@@ -352,6 +355,7 @@ impl BuildSession {
     }
 
     fn build_inner(&mut self, options: &BuildOptions) -> eyre::Result<BuildResult> {
+        self.type_wiring.clear();
         // Never allow an old derived export to conceal a declaration-only change,
         // including after a failed attempt.
         let mut previous_enums = BTreeMap::new();
@@ -1378,15 +1382,21 @@ impl BuildSession {
         sass_resolver.retain_precise();
         css_url_resolver.retain_precise();
         tracing::info!(target: "bundler::progress", "Checking build fingerprints");
+        let mut wiring = self.type_only_wiring(&inventory, &resolver, options)?;
+        for warning in &wiring.warnings {
+            tracing::warn!(target: "bundler::diagnostic", "{warning}");
+            warnings.push(warning.clone());
+        }
         let mut recovery = self.recover_enums(
             &inventory,
             options,
             &declarations,
-            &previous_enums,
+            (&previous_enums, wiring.graph.take()),
             &mut counters,
             &mut warnings,
         )?;
-        let compatibility_warnings = std::mem::take(&mut recovery.warnings);
+        let mut compatibility_warnings = std::mem::take(&mut recovery.warnings);
+        compatibility_warnings.extend(wiring.warnings.iter().cloned());
         for path in previous_enums.keys().chain(self.enum_bases.keys()) {
             if previous_enums.get(path).map(|s| s.record.source_hash())
                 != self.sources.get(path).map(|s| s.record.source_hash())
@@ -1428,7 +1438,11 @@ impl BuildSession {
         let mut fingerprints = Fingerprints {
             parse,
             resolution: Fingerprint::of(
-                format!("{resolution_key:?}:{resolution_inputs:?}").as_bytes(),
+                format!(
+                    "{resolution_key:?}:{resolution_inputs:?}:{:?}",
+                    wiring.identity
+                )
+                .as_bytes(),
             ),
             effects: options.effects.fingerprint(),
             roots: Fingerprint::of(format!("{entries:?}").as_bytes()),
@@ -1565,6 +1579,7 @@ impl BuildSession {
                     .recheck()
                     .wrap_err("rechecking localization after cache publication")?;
                 recovery.recheck()?;
+                wiring.recheck()?;
                 warnings.sort();
                 counters.record_parses(before_parses);
                 counters.elapsed = start.elapsed();
@@ -1745,6 +1760,7 @@ impl BuildSession {
             .recheck()
             .wrap_err("rechecking localization after cache publication")?;
         recovery.recheck()?;
+        wiring.recheck()?;
         warnings.sort();
         counters.emissions = 1;
         counters.record_parses(before_parses);

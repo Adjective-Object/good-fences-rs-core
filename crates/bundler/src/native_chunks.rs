@@ -231,6 +231,7 @@ fn emit_inner(
                 .iter()
                 .filter(|d| {
                     !d.type_only()
+                        && graph.runtime_dependency(file, d.id())
                         && matches!(
                             d.kind(),
                             DependencyKind::Import

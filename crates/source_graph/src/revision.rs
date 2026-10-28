@@ -67,6 +67,7 @@ impl SourceGraph {
             }
         }
         self.revision.resolution += 1;
+        self.type_only_wiring.clear();
         self.clear_reexport_cache();
         self.rebuild_edges();
         self.validate_links()
@@ -103,6 +104,7 @@ impl SourceGraph {
             self.live_files.push(true);
         }
         self.revision.source += 1;
+        self.type_only_wiring.clear();
         self.revision.resolution += 1;
         self.clear_reexport_cache();
         self.rebuild_edges();
@@ -122,6 +124,7 @@ impl SourceGraph {
         file.resolved_import_paths.clear();
         file.owned = None;
         self.revision.source += 1;
+        self.type_only_wiring.clear();
         self.revision.resolution += 1;
         self.clear_reexport_cache();
         self.rebuild_edges();

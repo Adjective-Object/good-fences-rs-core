@@ -49,6 +49,7 @@ struct SourceGraphFile {
 #[derive(Debug)]
 pub struct SourceGraph {
     revision: GraphRevision,
+    type_only_wiring: AHashMap<u32, TypeOnlyWiring>,
     diagnostics: Vec<LinkDiagnostic>,
     edges: Vec<OccurrenceEdge>,
     outgoing: AHashMap<GraphNode, Vec<usize>>,
@@ -115,6 +116,7 @@ impl SourceGraph {
 
         let mut graph = SourceGraph {
             revision: GraphRevision::default(),
+            type_only_wiring: AHashMap::default(),
             diagnostics: Vec::new(),
             edges: Vec::new(),
             outgoing: AHashMap::default(),
@@ -393,6 +395,7 @@ impl SourceGraph {
             self.live_files.push(true);
         }
         self.revision.source += 1;
+        self.type_only_wiring.clear();
         self.revision.resolution += 1;
         self.rebuild_edges();
         Ok(())

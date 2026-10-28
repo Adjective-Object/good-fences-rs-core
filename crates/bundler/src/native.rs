@@ -148,7 +148,7 @@ fn single_parent(
             .facts()
             .dependencies()
             .iter()
-            .filter(|d| !d.type_only())
+            .filter(|d| !d.type_only() && graph.runtime_dependency(file, d.id()))
         {
             if dependency.kind() == DependencyKind::DynamicImport
                 && !plan.roots.contains_key(&RootId::Async(AsyncSiteId {
@@ -192,6 +192,7 @@ fn single_parent(
             };
             for dependency in module.parsed.facts().dependencies().iter().filter(|d| {
                 !d.type_only()
+                    && graph.runtime_dependency(file, d.id())
                     && matches!(
                         d.kind(),
                         DependencyKind::Import
@@ -431,7 +432,11 @@ impl Activations {
                     }
                 }
             }
-            for dependency in facts.dependencies().iter().filter(|d| !d.type_only()) {
+            for dependency in facts
+                .dependencies()
+                .iter()
+                .filter(|d| !d.type_only() && graph.runtime_dependency(file, d.id()))
+            {
                 if !matches!(
                     dependency.kind(),
                     DependencyKind::Import
@@ -466,7 +471,7 @@ impl Activations {
                 .facts()
                 .dependencies()
                 .iter()
-                .filter(|d| !d.type_only())
+                .filter(|d| !d.type_only() && graph.runtime_dependency(file, d.id()))
             {
                 let dependency_targets = target_files(graph, file, dependency)?;
                 let activates = dependency_targets.iter().any(|f| seen.contains(f));
@@ -668,7 +673,7 @@ fn single(
             .dependencies()
             .iter()
             .rev()
-            .filter(|d| !d.type_only())
+            .filter(|d| !d.type_only() && graph.runtime_dependency(file, d.id()))
         {
             stack.push((target_file(graph, file, dependency)?, false));
         }
