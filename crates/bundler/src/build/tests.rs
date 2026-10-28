@@ -330,6 +330,60 @@ fn precise_native_dynamic_imports_inside_commonjs_use_occurrence_projections() {
 }
 
 #[test]
+fn precise_native_alternate_canonical_routes_keep_only_demanded_barrel_imports() {
+    let dir = TmpDir::new();
+    for (path, source) in [
+        ("main.mjs", "import {usePreviewV2} from './index.mjs'; export const value = usePreviewV2();"),
+        ("index.mjs", "import {generatePreview, usePreview} from './utilities.mjs'; const usePreviewV2 = usePreview; export {generatePreview, usePreview, usePreviewV2};"),
+        ("utilities.mjs", "export {generatePreview} from './generate.mjs'; export {usePreview} from './hook.mjs';"),
+        ("generate.mjs", "export const generatePreview = () => 42;"),
+        ("hook.mjs", "import {generatePreview} from './generate.mjs'; export const usePreview = () => generatePreview();"),
+    ] {
+        write(dir.root(), path, source);
+    }
+    let config = options();
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let cold = session.build(&config).unwrap();
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&cold.product, &noop.product));
+    let disk = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(cold.product.artifacts, disk.product.artifacts);
+    assert!(disk.counters.disk_hits >= 5);
+    for product in [&cold.product, &disk.product] {
+        let utilities = product
+            .graph
+            .file_id(&dir.root().join("utilities.mjs").canonicalize().unwrap())
+            .unwrap();
+        let generator = product
+            .graph
+            .file_id(&dir.root().join("generate.mjs").canonicalize().unwrap())
+            .unwrap();
+        assert!(product
+            .plan
+            .retention
+            .segments
+            .iter()
+            .any(|segment| segment.key == source_graph::SegmentKey::new(generator, 0)));
+        assert!(!product
+            .plan
+            .retention
+            .segments
+            .iter()
+            .any(|segment| segment.key == source_graph::SegmentKey::new(utilities, 0)));
+        assert_eq!(
+            observe_named(
+                &product.artifacts,
+                "import assert from 'node:assert/strict'; const main = await import('./main.mjs'); assert.deepEqual(Object.keys(main), ['value']); assert.equal(main.value, 42);"
+            ),
+            b""
+        );
+    }
+}
+
+#[test]
 fn precise_native_external_seams_preserve_public_exports_after_connector_pruning() {
     for source in [
         "import 'node:fs'; import {unused} from './dep.mjs'; export const value = 42;",

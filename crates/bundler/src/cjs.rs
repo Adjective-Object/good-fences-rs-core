@@ -245,9 +245,9 @@ pub(crate) fn binding_used(
                 && !lazy_modules.is_some_and(|lazy| lazy.consumed_constructor(key, index as u32))
         })
         || facts.exports().iter().any(|export| {
-            // A shared connector does not demand sibling specifiers. Explicit
-            // demands survive a missing declaration so the symbol linker still
-            // diagnoses genuinely incomplete routes.
+            // A canonical declaration can be live through a different route.
+            // Demand this complete route, not siblings sharing its connector.
+            // Explicit demands survive missing nodes for linker diagnostics.
             !export.type_only()
                 && graph.runtime_export(file, export.name())
                 && export.value() == ExportValue::Binding(binding)
@@ -256,8 +256,10 @@ pub(crate) fn binding_used(
                     graph
                         .resolve_export(file, name, Namespace::Value)
                         .is_ok_and(|linked| {
-                            retained(linked.declaration)
-                                || binding_demands.contains(&linked.declaration)
+                            linked
+                                .route
+                                .iter()
+                                .all(|node| retained(*node) || binding_demands.contains(node))
                         })
                 })
         })

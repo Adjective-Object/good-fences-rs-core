@@ -693,7 +693,8 @@ Canonical symbols use owned (file, BindingId) identities and checked export rout
 including barrels/redeclarations. Allocated lexical names are not observable source
 names or rewrite instructions; boundary values retain typed graph identities.
 Symbol/CJS import usage excludes connector-only references; shared export clauses
-demand aliases only with retained/explicitly demanded canonical declarations.
+demand aliases only with complete retained/explicitly demanded checked routes,
+not canonical declaration liveness through another route.
 Keep explicit demands indexed even on incomplete routes; report missing-node
 paths/spans lazily in the error chain.
 No hooks, code JSON, source loading/assembly, eval or runtime compilation.

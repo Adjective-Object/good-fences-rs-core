@@ -2443,6 +2443,119 @@ fn precise_shared_import_export_connector_keeps_only_demanded_bindings() {
 }
 
 #[test]
+fn precise_shared_connector_does_not_confuse_alternate_canonical_routes() {
+    let cases = [
+        (
+            "import {usePreviewV2} from './index.mjs'; console.log(usePreviewV2());",
+            false,
+        ),
+        (
+            "import {generatePreview, usePreviewV2} from './index.mjs'; console.log(generatePreview() + usePreviewV2());",
+            true,
+        ),
+        (
+            "import * as ns from './index.mjs'; console.log(Object.keys(ns).join(','), ns.generatePreview(), ns.usePreviewV2());",
+            true,
+        ),
+    ];
+    for (entry_source, generator_export_used) in cases {
+        let sources = sources(&[
+            ("entry.mjs", entry_source),
+            (
+                "index.mjs",
+                "import {generatePreview, usePreview} from './utilities.mjs'; const usePreviewV2 = usePreview; export {generatePreview, usePreview, usePreviewV2};",
+            ),
+            (
+                "utilities.mjs",
+                "export {generatePreview} from './generate.mjs'; export {usePreview} from './hook.mjs';",
+            ),
+            ("generate.mjs", "export const generatePreview = () => 42;"),
+            (
+                "hook.mjs",
+                "import {generatePreview} from './generate.mjs'; export const usePreview = () => generatePreview();",
+            ),
+        ]);
+        for wire in [false, true] {
+            let graph = graph_with_storage(&sources, wire, ModuleFormat::Esm, wire);
+            let entry = graph.file_id(Path::new("entry.mjs")).unwrap();
+            let index = graph.file_id(Path::new("index.mjs")).unwrap();
+            let utilities = graph.file_id(Path::new("utilities.mjs")).unwrap();
+            let generator = graph.file_id(Path::new("generate.mjs")).unwrap();
+            let policy = EffectPolicy::default();
+            let plan = crate::chunks::partition(
+                &graph,
+                &[RootSeed {
+                    id: RootId::Entry("entry".into()),
+                    evaluation_roots: vec![entry],
+                    binding_roots: vec![],
+                }],
+                &policy,
+            )
+            .unwrap();
+            assert!(retained(
+                &plan,
+                GraphNode::Segment(SegmentKey::new(generator, 0))
+            ));
+            let generator_route = SegmentKey::new(utilities, 0);
+            assert_eq!(
+                retained(&plan, GraphNode::Segment(generator_route)),
+                generator_export_used
+            );
+            let symbols = crate::symbols::Symbols::link(&graph, &plan).unwrap();
+            let binding_demands = crate::cjs::binding_demands(&plan.retention);
+            for import in graph.file_facts(index).unwrap().imports() {
+                let expected = generator_export_used
+                    || import.imported() == ast_segmenter::views::ImportedName::Name("usePreview");
+                assert_eq!(
+                    symbols.imports.contains_key(&(index, import.binding())),
+                    expected
+                );
+                assert_eq!(
+                    crate::cjs::binding_used(
+                        &graph,
+                        index,
+                        import.binding(),
+                        Some(&plan.lazy_modules),
+                        &binding_demands,
+                        |node| retained(&plan, node)
+                    ),
+                    expected
+                );
+            }
+            if generator_export_used {
+                let mut broken = plan.clone();
+                broken
+                    .retention
+                    .segments
+                    .retain(|segment| segment.key != generator_route);
+                let error = crate::symbols::Symbols::link(&graph, &broken)
+                    .err()
+                    .expect("a demanded import must diagnose its missing intermediate route");
+                let report = format!("{error:#}");
+                for expected in [
+                    "linking import \"generatePreview\"",
+                    "first unretained route node Some(\"utilities.mjs\") segment 0",
+                    "canonical import route is not retained",
+                ] {
+                    assert!(report.contains(expected), "{report}");
+                }
+            }
+            let output = esm(&graph, &plan, &policy, &sources).unwrap();
+            let observed = node(&output.files, &output.entries["entry"]);
+            let baseline = node(&sources, Path::new("entry.mjs"));
+            for result in [&baseline, &observed] {
+                assert!(
+                    result.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&result.stderr)
+                );
+            }
+            assert_eq!(observed.stdout, baseline.stdout);
+        }
+    }
+}
+
+#[test]
 fn precise_import_route_failure_retains_lazy_source_context() {
     let sources = sources(&[
         (

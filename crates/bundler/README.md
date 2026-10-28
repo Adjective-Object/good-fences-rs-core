@@ -1745,6 +1745,11 @@ target's evaluation body, even if its bindings are unused. Type-only sites do
 not. Effectful statements keep lexical dependencies; function/default-argument/
 instance-field bodies do not become top-level effects.
 
+For precise linking, an export-only import is used only when its complete checked
+route is retained or explicitly demanded. A live canonical declaration reached
+through another route does not demand unused sibling specifiers in a shared
+connector. Explicit demands still diagnose missing intermediate route nodes.
+
 `RetentionPlan` exposes deterministic retained segments/reasons and additional
 consumer → dependency edges: static evaluation, module effects and effect order.
 `ModuleEffect` edges run from a shared module-evaluation hub to its local effects.
