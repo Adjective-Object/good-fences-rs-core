@@ -34,8 +34,9 @@ mod symbols;
 use loaders::script as transpile;
 mod upstream;
 
-use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
+use ast_segmenter::owned::BindingId;
 use ast_segmenter::views::ModuleFacts;
 use eyre::{ensure, OptionExt};
 use source_graph::{
@@ -176,8 +177,14 @@ fn retain_with_effects(
     precise_dynamic_imports: bool,
     lazy_modules: Option<&lazy_modules::Certification>,
 ) -> eyre::Result<RetentionPlan> {
+    let import_occurrences = ImportOccurrences::new(if precise_dynamic_imports {
+        graph.edges()
+    } else {
+        &[]
+    });
     let mut analysis = Retention {
         graph,
+        import_occurrences: &import_occurrences,
         policy,
         modules: BTreeSet::new(),
         namespaces: HashSet::new(),
@@ -281,8 +288,54 @@ enum Demand {
     Binding(GraphNode, RetentionReason),
 }
 
+#[cfg(test)]
+thread_local! {
+    static IMPORT_OCCURRENCE_WORK: std::cell::Cell<(usize, usize)> =
+        const { std::cell::Cell::new((0, 0)) };
+}
+
+struct ImportOccurrences {
+    outgoing: HashMap<(GraphNode, Option<BindingId>), Vec<usize>>,
+}
+
+impl ImportOccurrences {
+    fn new(edges: &[source_graph::OccurrenceEdge]) -> Self {
+        let mut outgoing = HashMap::<_, Vec<_>>::new();
+        for (index, edge) in edges.iter().enumerate() {
+            #[cfg(test)]
+            IMPORT_OCCURRENCE_WORK.with(|work| {
+                let (build, traversal) = work.get();
+                work.set((build + 1, traversal));
+            });
+            if edge.kind == EdgeKind::Import
+                && edge.purpose == EdgePurpose::Binding
+                && !edge.type_only
+            {
+                outgoing
+                    .entry((edge.from, edge.binding))
+                    .or_default()
+                    .push(index);
+            }
+        }
+        Self { outgoing }
+    }
+
+    fn matching(
+        &self,
+        node: GraphNode,
+        binding: Option<BindingId>,
+    ) -> impl Iterator<Item = usize> + '_ {
+        self.outgoing
+            .get(&(node, binding))
+            .into_iter()
+            .flatten()
+            .copied()
+    }
+}
+
 struct Retention<'g, 'p> {
     graph: &'g SourceGraph,
+    import_occurrences: &'g ImportOccurrences,
     policy: &'p policy::EffectPolicy,
     modules: BTreeSet<u32>,
     namespaces: HashSet<u32>,
@@ -530,6 +583,7 @@ impl Retention<'_, '_> {
         });
         self.queue.push_back(Demand::Evaluation(key.file_id));
         let graph = self.graph;
+        let import_occurrences = self.import_occurrences;
         // Checked export/reference routes already supply selected bindings.
         // A shared import/export connector is not demand for its other specifiers.
         let route_connector = self.precise_dynamic_imports
@@ -569,12 +623,17 @@ impl Retention<'_, '_> {
                     // Local references name an import declaration segment. Project
                     // only that local binding's checked routes onto the real use,
                     // not every specifier sharing the declaration.
-                    for (_, imported) in graph.outgoing_indexed(edge.to).filter(|(_, imported)| {
-                        imported.kind == EdgeKind::Import
-                            && imported.purpose == EdgePurpose::Binding
-                            && !imported.type_only
-                            && imported.binding == edge.binding
-                    }) {
+                    for imported_index in import_occurrences
+                        .matching(edge.to, edge.binding)
+                        .inspect(|_| {
+                            #[cfg(test)]
+                            IMPORT_OCCURRENCE_WORK.with(|work| {
+                                let (build, traversal) = work.get();
+                                work.set((build, traversal + 1));
+                            });
+                        })
+                    {
+                        let imported = &graph.edges()[imported_index];
                         self.edges.insert(RetentionEdge {
                             from: node,
                             to: imported.to,

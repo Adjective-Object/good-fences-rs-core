@@ -495,6 +495,10 @@ evaluation only; unsafe observations, possible `then` exports, receiver calls,
 contexts, CommonJS and external surfaces retain the graph's conservative demand.
 Reachability and diagnostic manifests index namespace edges once per immutable
 retention pass, preserving edge order and independent per-root binding demands.
+Precise retention also indexes binding-import occurrences by declaration node and
+optional local binding once per pass, avoiding repeated declaration-edge scans.
+Lookup preserves occurrence order, duplicates and the incoming reference's
+provenance without changing retention reasons or activation.
 
 `ChunkPlan::async_activations` maps each original occurrence to its independent
 roots. `DiagnosticManifest::async_facades` keeps one activation projection:

@@ -1,5 +1,10 @@
 # bundler
 
+Precise retention indexes runtime binding-import occurrences once per pass by
+declaration node and optional binding identity. Keep ordered original indices,
+including duplicates; projected edges retain the incoming reference's source
+index. Do not share demand state or rescan ordinary local-reference targets.
+
 Namespace adjacency indexes borrow one immutable retention pass and preserve edge
 order/duplicates. Share structure across roots, never demand or visited state;
 binding expansion keeps its per-call cycle guard and unchanged FIFO enqueueing.

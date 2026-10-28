@@ -54,6 +54,222 @@ fn retained_sources<'a>(
 }
 
 #[test]
+fn import_occurrences_inspect_linear_edges_for_local_and_wide_import_references() {
+    for imported in [false, true] {
+        let mut measurements = Vec::new();
+        for width in [64, 128] {
+            let names: Vec<_> = (0..width).map(|index| format!("value{index}")).collect();
+            let references = if imported {
+                names.join(",")
+            } else {
+                vec!["value"; width].join(",")
+            };
+            let source = if imported {
+                format!(
+                    "import {{{}}} from 'helpers.ts'; export function read() {{ return [{references}]; }}",
+                    names.join(",")
+                )
+            } else {
+                format!("export function read() {{ const value = 1; return [{references}]; }}")
+            };
+            let helpers = names
+                .iter()
+                .map(|name| format!("export const {name} = 1;"))
+                .collect::<String>();
+            let graph = SourceGraph::from_owned([
+                input("entry.ts", &source),
+                input("helpers.ts", &helpers),
+            ]);
+            IMPORT_OCCURRENCE_WORK.with(|work| work.set((0, 0)));
+            let root = SegmentKey::new(0, u32::from(imported));
+            let plan = retain_with_effects(
+                &graph,
+                &[0],
+                &[GraphNode::Segment(root)],
+                &policy::EffectPolicy::default(),
+                &BTreeMap::new(),
+                true,
+                None,
+            )
+            .unwrap();
+            let (build_visits, traversal_visits) =
+                IMPORT_OCCURRENCE_WORK.with(std::cell::Cell::get);
+            let mut original_visits = 0;
+            let mut queries = 0;
+            let mut matches = 0;
+            for (index, edge) in graph
+                .edges()
+                .iter()
+                .enumerate()
+                .filter(|(_, edge)| edge.kind == EdgeKind::LocalReference && !edge.type_only)
+            {
+                queries += 1;
+                let expected: Vec<_> = graph
+                    .outgoing_indexed(edge.to)
+                    .inspect(|_| original_visits += 1)
+                    .filter(|(_, imported)| {
+                        imported.kind == EdgeKind::Import
+                            && imported.purpose == EdgePurpose::Binding
+                            && !imported.type_only
+                            && imported.binding == edge.binding
+                    })
+                    .map(|(index, _)| index)
+                    .collect();
+                assert!(plan.edges.contains(&RetentionEdge {
+                    from: edge.from,
+                    to: edge.to,
+                    kind: RetentionEdgeKind::Binding,
+                    source_edge: Some(index),
+                }));
+                for imported_index in &expected {
+                    assert!(plan.edges.contains(&RetentionEdge {
+                        from: edge.from,
+                        to: graph.edges()[*imported_index].to,
+                        kind: RetentionEdgeKind::Binding,
+                        source_edge: Some(index),
+                    }));
+                }
+                matches += expected.len();
+            }
+            assert_eq!(queries, width);
+            assert_eq!(matches, if imported { width } else { 0 });
+            assert_eq!(build_visits, graph.edges().len());
+            assert_eq!(traversal_visits, matches);
+            assert_eq!(plan.modules, if imported { vec![0, 1] } else { vec![0] });
+            assert_eq!(plan.segments.len(), if imported { width + 2 } else { 1 });
+            assert!(plan.segments.iter().any(|segment| {
+                segment.key == root && segment.reasons.contains(&RetentionReason::BindingRoot)
+            }));
+            let indexed_visits = build_visits + traversal_visits;
+            assert!(indexed_visits <= 4 * width);
+            assert!(original_visits >= width * width);
+            measurements.push((indexed_visits, original_visits));
+        }
+        assert!(measurements[1].0 <= 2 * measurements[0].0);
+        assert!(measurements[1].1 >= 3 * measurements[0].1);
+        eprintln!(
+            "import occurrence visits (imported={imported}, indexed/original): {measurements:?}"
+        );
+    }
+}
+
+#[test]
+fn import_occurrences_match_original_filter_order_duplicates_and_optional_identity() {
+    let graph = SourceGraph::from_owned([
+        input("entry.ts", "import {value} from 'helpers.ts'; use(value);"),
+        input("helpers.ts", "export const value = 1;"),
+    ]);
+    let base = graph
+        .edges()
+        .iter()
+        .find(|edge| edge.kind == EdgeKind::Import && edge.purpose == EdgePurpose::Binding)
+        .unwrap()
+        .clone();
+    let other_node = GraphNode::Segment(SegmentKey::new(1, 0));
+    let mut edges = vec![base.clone(); 9];
+    edges[1].binding = None;
+    edges[2].from = other_node;
+    edges[3].kind = EdgeKind::ReExport;
+    edges[4].purpose = EdgePurpose::Evaluation;
+    edges[5].type_only = true;
+    edges[6].activation = Activation::Asynchronous;
+    edges[7].binding = None;
+    let occurrences = ImportOccurrences::new(&edges);
+    for node in [base.from, other_node, GraphNode::Module(99)] {
+        for binding in [base.binding, None, Some(BindingId(u32::MAX))] {
+            let expected: Vec<_> = edges
+                .iter()
+                .enumerate()
+                .filter(|(_, edge)| {
+                    edge.from == node
+                        && edge.kind == EdgeKind::Import
+                        && edge.purpose == EdgePurpose::Binding
+                        && !edge.type_only
+                        && edge.binding == binding
+                })
+                .map(|(index, _)| index)
+                .collect();
+            assert_eq!(
+                occurrences.matching(node, binding).collect::<Vec<_>>(),
+                expected
+            );
+        }
+    }
+    assert_eq!(
+        occurrences
+            .matching(base.from, base.binding)
+            .collect::<Vec<_>>(),
+        [0, 6, 8]
+    );
+    assert_eq!(
+        occurrences.matching(base.from, None).collect::<Vec<_>>(),
+        [1, 7]
+    );
+}
+
+#[test]
+fn import_occurrences_keep_incoming_reference_identity_and_sibling_demands_separate() {
+    let graph = SourceGraph::from_owned([
+        input(
+            "entry.ts",
+            "import {first, second, unused} from 'helpers.ts'; export function read() { return first + first + second; }",
+        ),
+        input(
+            "helpers.ts",
+            "export const first = 1; export const second = 2; export const unused = 3;",
+        ),
+    ]);
+    let plan = retain_with_effects(
+        &graph,
+        &[0],
+        &[GraphNode::Segment(SegmentKey::new(0, 1))],
+        &policy::EffectPolicy::default(),
+        &BTreeMap::new(),
+        true,
+        None,
+    )
+    .unwrap();
+    let mut projected = Vec::new();
+    for (index, edge) in graph
+        .edges()
+        .iter()
+        .enumerate()
+        .filter(|(_, edge)| edge.kind == EdgeKind::LocalReference)
+    {
+        for (_, imported) in graph.outgoing_indexed(edge.to).filter(|(_, imported)| {
+            imported.kind == EdgeKind::Import
+                && imported.purpose == EdgePurpose::Binding
+                && !imported.type_only
+                && imported.binding == edge.binding
+        }) {
+            let expected = RetentionEdge {
+                from: edge.from,
+                to: imported.to,
+                kind: RetentionEdgeKind::Binding,
+                source_edge: Some(index),
+            };
+            assert!(plan.edges.contains(&expected));
+            projected.push(expected);
+        }
+    }
+    assert_eq!(projected.len(), 3);
+    assert_eq!(projected[0].to, projected[1].to);
+    assert_ne!(projected[0].source_edge, projected[1].source_edge);
+    assert!(!plan
+        .segments
+        .iter()
+        .any(|segment| segment.key == SegmentKey::new(1, 2)));
+    assert_eq!(
+        plan.segments
+            .iter()
+            .find(|segment| segment.key == SegmentKey::new(0, 1))
+            .unwrap()
+            .reasons,
+        [RetentionReason::BindingRoot]
+    );
+}
+
+#[test]
 fn execution_constraints_preserve_preinitialization_and_mutable_snapshots() {
     use crate::execution_dependencies::{BarrierReason, ConstraintKind, ExecutionConstraint};
     let source = "export const before = value; export let value = 0; value = 1; export const snapshot = value; value = 2; export function deferred(){ value = 3; return value; }";
