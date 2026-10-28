@@ -8,6 +8,12 @@ use oxc_span::Span;
 
 use crate::{SegmentKey, SourceFileInput, SourceGraph};
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static SEGMENT_INSPECTIONS: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GraphNode {
     Module(u32),
@@ -351,7 +357,11 @@ impl SourceGraph {
         self.files[file_id as usize]
             .segments
             .iter()
-            .position(|s| s.span.start <= span.start && span.end <= s.span.end)
+            .position(|s| {
+                #[cfg(test)]
+                SEGMENT_INSPECTIONS.with(|work| work.set(work.get() + 1));
+                s.span.start <= span.start && span.end <= s.span.end
+            })
             .map_or(GraphNode::Module(file_id), |i| {
                 GraphNode::Segment(SegmentKey::new(file_id, i as u32))
             })

@@ -323,13 +323,31 @@ fn linked_execution_accesses_bypass_barrels_without_repairing_cycle_tdz() {
     let graph = SourceGraph::from_owned([
         input(
             "entry.mjs",
-            "import {value} from 'barrel.mjs'; export const snapshot = value;",
+            "import {value, value as again} from 'barrel.mjs'; export const snapshot = value + again + value;",
         ),
         input("barrel.mjs", "export {value} from 'value.mjs';"),
         input("value.mjs", "import 'entry.mjs'; export let value = 1;"),
     ]);
     let root = GraphNode::Segment(SegmentKey::new(0, 1));
     let plan = retain(&graph, &[0], &[root]).unwrap();
+    let accesses: Vec<_> = plan
+        .execution
+        .accesses
+        .iter()
+        .filter(|access| access.segment == SegmentKey::new(0, 1))
+        .collect();
+    assert_eq!(accesses.len(), 3);
+    assert!(accesses
+        .iter()
+        .all(|access| access.declaration == SegmentKey::new(2, 1)));
+    assert_eq!(
+        accesses
+            .iter()
+            .map(|access| access.reference)
+            .collect::<BTreeSet<_>>()
+            .len(),
+        3
+    );
     let linked = plan
         .execution
         .accesses
@@ -342,6 +360,11 @@ fn linked_execution_accesses_bypass_barrels_without_repairing_cycle_tdz() {
         .barriers
         .iter()
         .any(|b| b.segment == linked.segment && b.reason == BarrierReason::CrossSourceAccess));
+    assert!(!plan
+        .execution
+        .barriers
+        .iter()
+        .any(|b| b.segment == linked.segment && b.reason == BarrierReason::Opaque));
     assert!(!plan
         .execution
         .constraints

@@ -32,6 +32,10 @@ identity plus barrel route; stars exclude default, explicit
 exports win, and ambiguous distinct identities fail. Legacy adapters include
 types/return empty on failure; do not use them for executable validation.
 
+Filter unrelated named exports before mapping their spans to segments. Export
+enumeration and matching-site containment remain scans; this adds no resolution
+cache and does not change candidate or barrel-route ordering.
+
 Source/resolution epochs invalidate derived handles. Remove tombstones IDs;
 recreation appends, never recycles. Patch paths must match input paths.
 ID-indexed liveness stays aligned with file storage; checked ID access never

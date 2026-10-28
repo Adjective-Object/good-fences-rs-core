@@ -5,6 +5,12 @@ use ast_segmenter::{ExportedSymbol, ImportTarget};
 
 use crate::{DependencyTarget, GraphNode, SegmentKey, SourceGraph};
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static EXPORT_CANDIDATE_VISITS: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
 pub(crate) fn exported_name(symbol: &ExportedSymbol) -> &str {
     match symbol {
         ExportedSymbol::Named(name) => name.as_ref(),
@@ -280,17 +286,19 @@ impl SourceGraph {
         let mut has_explicit = false;
         if let Some(input) = &file.owned {
             for export in input.facts.exports() {
+                #[cfg(test)]
+                EXPORT_CANDIDATE_VISITS.with(|work| work.set(work.get() + 1));
                 if namespace == Namespace::Value && !self.runtime_export(file_id, export.name()) {
                     continue;
                 }
                 if namespace == Namespace::Value && export.type_only() {
                     continue;
                 }
-                let node = self.segment_at(file_id, export.span());
                 let is_explicit = export.name().as_deref() == Some(name);
                 if !is_explicit && export.name().is_some() {
                     continue;
                 }
+                let node = self.segment_at(file_id, export.span());
                 has_explicit |= is_explicit;
                 match &export.value() {
                     ExportValue::Binding(binding) if is_explicit => {

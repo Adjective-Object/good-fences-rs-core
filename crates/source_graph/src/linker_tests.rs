@@ -2,6 +2,69 @@ use crate::structure::tests::input;
 use crate::*;
 use ast_segmenter::ExportedSymbol;
 
+fn check_unrelated_named_export_work(width: usize) {
+    let mut barrel = String::from("export {wanted} from 'leaf.mjs';");
+    for index in 1..width {
+        barrel.push_str(&format!("export const unrelated{index} = {index};"));
+    }
+    let graph = SourceGraph::from_owned([
+        input("barrel.mjs", &barrel),
+        input("leaf.mjs", "export const wanted = 1;"),
+    ]);
+    graph.validate_links().unwrap();
+    assert_eq!(graph.file_segments(0).unwrap().len(), width);
+    let binding = graph
+        .file_facts(1)
+        .unwrap()
+        .bindings()
+        .iter()
+        .find(|binding| binding.name() == "wanted")
+        .unwrap()
+        .id();
+    let expected = LinkedExport {
+        identity: ExportIdentity::Binding(1, binding),
+        declaration: GraphNode::Segment(SegmentKey::new(1, 0)),
+        route: vec![
+            GraphNode::Segment(SegmentKey::new(0, 0)),
+            GraphNode::Segment(SegmentKey::new(1, 0)),
+        ],
+    };
+    crate::structure::SEGMENT_INSPECTIONS.with(|work| work.set(0));
+    crate::linker::EXPORT_CANDIDATE_VISITS.with(|work| work.set(0));
+    let queries = 3;
+    for _ in 0..queries {
+        assert_eq!(
+            graph.resolve_export(0, "wanted", Namespace::Value).unwrap(),
+            expected
+        );
+    }
+    let export_visits = crate::linker::EXPORT_CANDIDATE_VISITS.with(|work| work.get());
+    let segment_inspections = crate::structure::SEGMENT_INSPECTIONS.with(|work| work.get());
+    eprintln!(
+        "width={width} queries={queries} export_visits={export_visits} segment_inspections={segment_inspections}"
+    );
+    assert_eq!(
+        export_visits,
+        queries * (width + 1),
+        "export enumeration still visits unrelated names"
+    );
+    assert_eq!(
+        segment_inspections,
+        queries * 4,
+        "only the matching barrel site and leaf declaration need segment lookup"
+    );
+}
+
+#[test]
+fn unrelated_named_exports_skip_segment_inspections_128() {
+    check_unrelated_named_export_work(128);
+}
+
+#[test]
+fn unrelated_named_exports_skip_segment_inspections_256() {
+    check_unrelated_named_export_work(256);
+}
+
 #[test]
 fn missing_names_are_structured_and_routes_preserve_renames_stars_and_cycles() {
     let graph = SourceGraph::from_owned([
