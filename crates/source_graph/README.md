@@ -64,8 +64,8 @@ share the admission decision with native emission, including record-derived
 clauses; cached facts remain unchanged. Source/resolution mutation clears masks.
 Only the build coordinator resolves original type evidence or warns; the graph
 does not perform filesystem IO, infer types, or treat arbitrary misses as types.
-`outgoing_indexed` exposes shared occurrence indices for derived plans; indices
-are revision-local, not persistent IDs. The `bundler` library consumes these
+`outgoing_indexed` and `incoming_indexed` expose shared occurrence indices for
+derived plans; indices are revision-local, not persistent IDs. The `bundler` library consumes these
 without adding effects policy or usage tags to the shared graph.
 
 `resolve_binding` uses lexical IDs, including forward TDZ-bound references.

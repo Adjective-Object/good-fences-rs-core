@@ -220,6 +220,25 @@ pub fn reference_reachability(
     let retained_modules: HashSet<_> = retention.modules.iter().copied().collect();
     let export_names =
         crate::link::namespace_export_names(graph, |_| BTreeSet::from(["default".into()]));
+    let cjs_files: Vec<_> = retention
+        .modules
+        .iter()
+        .copied()
+        .filter(|file| {
+            graph
+                .file_facts(*file)
+                .is_some_and(|facts| facts.commonjs())
+        })
+        .collect();
+    let cjs_requests: HashMap<_, _> = if cjs_files.is_empty() || roots.is_empty() {
+        HashMap::new()
+    } else {
+        let requests = crate::cjs::Requests::new(graph, retention, None);
+        cjs_files
+            .iter()
+            .map(|&file| (file, requests.requests(file)))
+            .collect()
+    };
     let mut result = BTreeMap::new();
     for root in roots {
         ensure!(!result.contains_key(&root.id), "duplicate root identity");
@@ -302,11 +321,8 @@ pub fn reference_reachability(
                 }
             }));
         }
-        for file in retention.modules.iter().copied().filter(|file| {
-            graph
-                .file_facts(*file)
-                .is_some_and(|facts| facts.commonjs())
-        }) {
+        for &file in &cjs_files {
+            let requests = &cjs_requests[&file];
             let module = graph.file_path(file).unwrap().to_owned();
             let mut demanded: BTreeSet<_> = export_requests
                 .iter()
@@ -322,16 +338,20 @@ pub fn reference_reachability(
             let mut initialize = direct_entry || !demanded.is_empty();
             let mut namespace = direct_entry;
             if root.binding_roots.contains(&GraphNode::Module(file)) {
-                demanded.extend(crate::cjs::names(graph, retention, file));
+                demanded.insert("default".into());
+                demanded.extend(requests.iter().filter_map(|(_, request)| match request {
+                    ast_segmenter::owned::ImportedName::Name(name) => Some(name.clone()),
+                    ast_segmenter::owned::ImportedName::Namespace => None,
+                }));
             }
-            for (from, request) in crate::cjs::requests(graph, retention, file) {
-                if !reached.contains(&node_id(graph, from)?) {
+            for (from, request) in requests {
+                if !reached.contains(&node_id(graph, *from)?) {
                     continue;
                 }
                 initialize = true;
                 match request {
                     ast_segmenter::owned::ImportedName::Name(name) => {
-                        demanded.insert(name);
+                        demanded.insert(name.clone());
                     }
                     ast_segmenter::owned::ImportedName::Namespace => namespace = true,
                 }

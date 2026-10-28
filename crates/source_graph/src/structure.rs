@@ -332,11 +332,19 @@ impl SourceGraph {
     }
 
     pub fn incoming(&self, node: GraphNode) -> impl Iterator<Item = &OccurrenceEdge> {
+        self.incoming_indexed(node).map(|(_, edge)| edge)
+    }
+
+    /// Indices are valid only at the current graph revision.
+    pub fn incoming_indexed(
+        &self,
+        node: GraphNode,
+    ) -> impl Iterator<Item = (usize, &OccurrenceEdge)> {
         self.incoming
             .get(&node)
             .into_iter()
             .flatten()
-            .map(|&i| &self.edges[i])
+            .map(|&i| (i, &self.edges[i]))
     }
 
     pub(crate) fn segment_at(&self, file_id: u32, span: Span) -> GraphNode {
@@ -852,9 +860,16 @@ pub(crate) mod tests {
         assert_ne!(sites[0].dependency, sites[1].dependency);
         assert_ne!(sites[2].dependency, sites[3].dependency);
         assert_eq!(sites[2].activation, Activation::Asynchronous);
-        for edge in graph.edges() {
+        for (index, edge) in graph.edges().iter().enumerate() {
             assert_eq!(graph.outgoing(edge.from).filter(|e| *e == edge).count(), 1);
             assert_eq!(graph.incoming(edge.to).filter(|e| *e == edge).count(), 1);
+            assert_eq!(
+                graph
+                    .incoming_indexed(edge.to)
+                    .filter(|(i, e)| *i == index && std::ptr::eq(*e, edge))
+                    .count(),
+                1
+            );
             if edge.purpose == EdgePurpose::Binding {
                 assert_eq!(
                     edge.to,

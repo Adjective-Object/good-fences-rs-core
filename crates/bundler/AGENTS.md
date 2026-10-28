@@ -1,5 +1,10 @@
 # bundler
 
+CJS request indexes belong to exact immutable graph/retention/placement inputs.
+Preserve the first retained origin per source occurrence. Share unplanned requests
+across reachability roots, never their activation/name decisions; apply reached-
+consumer filtering independently. Rebuild planned requests after plan changes.
+
 Type-only compatibility uses attempt-derived checked graph masks, never source
 mutation or cached repair choices. Follow original aliases/defaults/barrels with
 explicit/star precedence and distinct-origin ambiguity; runtime values and const

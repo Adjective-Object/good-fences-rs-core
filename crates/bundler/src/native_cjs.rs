@@ -94,6 +94,10 @@ impl CommonJs {
             namespaces: BTreeMap::new(),
             entries: BTreeMap::new(),
         };
+        let cjs_requests = modules
+            .values()
+            .any(|module| module.parsed.facts().commonjs())
+            .then(|| crate::cjs::Requests::new(graph, &plan.retention, Some(plan)));
         for (&file, module) in modules.iter().filter(|(_, m)| m.parsed.facts().commonjs()) {
             let original = graph.file_path(file).unwrap().to_owned();
             let body = NodeId::Segment {
@@ -121,7 +125,10 @@ impl CommonJs {
 
             // Equal availability roots alone do not permit evaluating a deferred
             // consumer. Merge only adjacent facade parts with equal demand seams.
-            let requests: Vec<_> = crate::cjs::planned_requests(graph, plan, file)
+            let requests: Vec<_> = cjs_requests
+                .as_ref()
+                .unwrap()
+                .requests(file)
                 .into_iter()
                 .filter(|(from, _)| direct_request(graph, *from, file))
                 .collect();

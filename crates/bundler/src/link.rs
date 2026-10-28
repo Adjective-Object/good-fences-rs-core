@@ -723,7 +723,11 @@ pub(super) fn export_names(
     graph: &SourceGraph,
     plan: &ChunkPlan,
 ) -> BTreeMap<u32, BTreeSet<String>> {
-    namespace_export_names(graph, |file| crate::cjs::planned_names(graph, plan, file))
+    let requests = graph
+        .module_ids()
+        .any(|file| graph.file_facts(file).is_some_and(|facts| facts.commonjs()))
+        .then(|| crate::cjs::Requests::new(graph, &plan.retention, Some(plan)));
+    namespace_export_names(graph, |file| requests.as_ref().unwrap().names(file))
 }
 
 pub(super) fn namespace_export_names(

@@ -304,6 +304,12 @@ pub fn diagnostic_manifest(
             }
         }
     }
+    let cjs_requests = plan
+        .retention
+        .modules
+        .iter()
+        .any(|&file| graph.file_facts(file).is_some_and(|facts| facts.commonjs()))
+        .then(|| crate::cjs::Requests::new(graph, &plan.retention, Some(plan)));
     for file in plan.retention.modules.iter().copied().filter(|file| {
         graph
             .file_facts(*file)
@@ -319,7 +325,14 @@ pub fn diagnostic_manifest(
             (initialize.clone(), NodeId::Module(module.clone())),
             (namespace.clone(), initialize.clone()),
         ];
-        let names = crate::cjs::planned_names(graph, plan, file);
+        let requests = cjs_requests.as_ref().unwrap().requests(file);
+        let names: BTreeSet<_> = requests
+            .iter()
+            .filter_map(|(_, request)| match request {
+                ast_segmenter::owned::ImportedName::Name(name) => Some(name.clone()),
+                ast_segmenter::owned::ImportedName::Namespace => None,
+            })
+            .collect();
         for name in names.iter().filter(|name| name.as_str() != "default") {
             dependencies.push((
                 NodeId::CommonJsProxy {
@@ -329,7 +342,7 @@ pub fn diagnostic_manifest(
                 initialize.clone(),
             ));
         }
-        for (from, request) in crate::cjs::planned_requests(graph, plan, file) {
+        for (from, request) in requests {
             let from = node_id(graph, from)?;
             dependencies.push((from.clone(), initialize.clone()));
             let requested = match request {

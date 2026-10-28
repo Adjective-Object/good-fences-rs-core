@@ -513,6 +513,10 @@ runtime or mutable namespace cells are introduced.
 CommonJS snapshot recovery follows planned facade demands rather than retained
 multi-export statements; native external seams prune direct and local export
 clauses to the same retained surface.
+Request discovery indexes retained occurrences and membership once per immutable
+planning/emission pass. Reachability shares those requests across roots, but
+filters activation and snapshot demand independently for each root. Placement-
+filtered requests are rebuilt for each exact plan, never reused across revisions.
 
 ### Lazy-module certification and graph overlays
 
