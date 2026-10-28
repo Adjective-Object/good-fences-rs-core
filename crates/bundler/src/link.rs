@@ -734,6 +734,7 @@ pub(super) fn namespace_export_names(
     graph: &SourceGraph,
     commonjs: impl Fn(u32) -> BTreeSet<String>,
 ) -> BTreeMap<u32, BTreeSet<String>> {
+    let stage = crate::planning::Stage::new("namespace_names");
     let mut names: BTreeMap<_, BTreeSet<_>> = graph
         .module_ids()
         .map(|file| {
@@ -753,7 +754,9 @@ pub(super) fn namespace_export_names(
             )
         })
         .collect();
+    let mut rounds = 0usize;
     loop {
+        rounds += 1;
         let previous = names.clone();
         for file in graph.module_ids() {
             for export in graph
@@ -779,6 +782,14 @@ pub(super) fn namespace_export_names(
             }
         }
         if names == previous {
+            tracing::info!(
+                target: "bundler::progress",
+                files = names.len(),
+                file_name_pairs = names.values().map(BTreeSet::len).sum::<usize>(),
+                rounds,
+                "Namespace counts"
+            );
+            stage.finish();
             return names;
         }
     }

@@ -1,5 +1,9 @@
 # bundler
 
+Planning checkpoints use coarse RAII stages on the existing progress/trace targets;
+numeric summaries never retain graph owners or expose paths/requests. Interrupted
+stages end on error/unwind; checkpoints do not claim allocator attribution.
+
 Precise retention indexes runtime binding-import occurrences once per pass by
 declaration node and optional binding identity. Keep ordered original indices,
 including duplicates; projected edges retain the incoming reference's source

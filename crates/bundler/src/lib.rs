@@ -22,6 +22,7 @@ pub mod loaders;
 mod lockfile;
 pub mod manifest;
 mod output_url;
+mod planning;
 pub mod policy;
 mod prepared_text;
 pub mod publish;
@@ -177,6 +178,7 @@ fn retain_with_effects(
     precise_dynamic_imports: bool,
     lazy_modules: Option<&lazy_modules::Certification>,
 ) -> eyre::Result<RetentionPlan> {
+    let stage = planning::Stage::new("retention");
     let import_occurrences = ImportOccurrences::new(if precise_dynamic_imports {
         graph.edges()
     } else {
@@ -247,7 +249,7 @@ fn retain_with_effects(
         lazy_modules,
         &analysis.effects,
     )?;
-    Ok(RetentionPlan {
+    let plan = RetentionPlan {
         revision: graph.revision(),
         policy_fingerprint: policy.fingerprint(),
         modules: analysis.modules.into_iter().collect(),
@@ -269,7 +271,18 @@ fn retain_with_effects(
         effect_order,
         execution,
         warnings,
-    })
+    };
+    tracing::info!(
+        target: "bundler::progress",
+        modules = plan.modules.len(),
+        segments = plan.segments.len(),
+        edges = plan.edges.len(),
+        effects = plan.effects.len(),
+        async_boundaries = plan.async_boundaries.len(),
+        "Retention counts"
+    );
+    stage.finish();
+    Ok(plan)
 }
 
 fn node_key(node: GraphNode) -> (u32, u32, u32) {

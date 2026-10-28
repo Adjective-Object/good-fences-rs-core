@@ -84,6 +84,7 @@ pub(crate) fn plan(
     lazy: Option<&crate::lazy_modules::Certification>,
     effects: &BTreeMap<SegmentKey, crate::effects::StatementEffects>,
 ) -> eyre::Result<ExecutionPlan> {
+    let stage = crate::planning::Stage::new("execution");
     let mut constraints = BTreeSet::new();
     let mut accesses = BTreeSet::new();
     let mut barriers = BTreeSet::new();
@@ -408,11 +409,21 @@ pub(crate) fn plan(
             }
         }
     }
-    Ok(ExecutionPlan {
+    let plan = ExecutionPlan {
         constraints: constraints.into_iter().collect(),
         accesses: accesses.into_iter().collect(),
         barriers: barriers.into_iter().collect(),
-    })
+    };
+    tracing::info!(
+        target: "bundler::progress",
+        segments = retained.len(),
+        constraints = plan.constraints.len(),
+        accesses = plan.accesses.len(),
+        barriers = plan.barriers.len(),
+        "Execution counts"
+    );
+    stage.finish();
+    Ok(plan)
 }
 
 fn add(

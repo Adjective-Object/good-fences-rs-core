@@ -1632,6 +1632,7 @@ impl BuildSession {
             })
             .wrap_err("planning retained modules and chunks")?;
         warnings.extend(plan.retention.warnings.iter().cloned());
+        let mapping_stage = crate::planning::Stage::new("source_map_preparation");
         let mappings = self
             .sources
             .iter()
@@ -1672,6 +1673,12 @@ impl BuildSession {
                 })
             })
             .collect::<eyre::Result<BTreeMap<_, _>>>()?;
+        tracing::info!(
+            target: "bundler::progress",
+            sources = mappings.len(),
+            "Source map preparation counts"
+        );
+        mapping_stage.finish();
         tracing::info!(target: "bundler::progress", "Linking and emitting native chunks");
         let mut artifacts = link::esm_plan_configured(
             &graph,

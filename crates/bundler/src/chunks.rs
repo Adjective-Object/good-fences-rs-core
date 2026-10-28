@@ -2,6 +2,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use eyre::{ensure, OptionExt};
 use source_graph::{Activation, GraphNode, GraphRevision, SourceGraph};
@@ -152,7 +153,9 @@ pub(crate) fn add_reachability_roots(
     reachability: &BTreeMap<RootId, ReachedNodes>,
     node_roots: &mut BTreeMap<NodeId, BTreeSet<RootId>>,
 ) {
+    let stage = crate::planning::Stage::new("root_mask_inversion");
     let Some(first) = reachability.values().next() else {
+        stage.finish();
         return;
     };
     let mut masks = vec![BTreeSet::new(); first.nodes.len()];
@@ -164,6 +167,14 @@ pub(crate) fn add_reachability_roots(
     for (node, mask) in first.nodes.iter().zip(masks) {
         node_roots.insert(node.clone(), mask);
     }
+    tracing::info!(
+        target: "bundler::progress",
+        roots = reachability.len(),
+        nodes = first.nodes.len(),
+        memberships = reachability.values().map(ReachedNodes::len).sum::<usize>(),
+        "Root mask counts"
+    );
+    stage.finish();
 }
 
 #[derive(PartialEq, Eq, Hash)]
@@ -389,6 +400,7 @@ pub(crate) fn compact_reachability(
     policy: &EffectPolicy,
     roots: &[RootSeed],
 ) -> eyre::Result<BTreeMap<RootId, ReachedNodes>> {
+    let stage = crate::planning::Stage::new("compact_reachability");
     ensure!(
         retention.is_current(graph, policy),
         "stale retention revision or effect policy"
@@ -428,6 +440,8 @@ pub(crate) fn compact_reachability(
     };
     let mut result = BTreeMap::new();
     let mut identities = ReachabilityNodes::default();
+    let mut memberships = 0usize;
+    let mut progress = Instant::now();
     for root in roots {
         ensure!(!result.contains_key(&root.id), "duplicate root identity");
         let mut export_requests = BTreeSet::new();
@@ -550,9 +564,32 @@ pub(crate) fn compact_reachability(
                 }
             }
         }
+        memberships += reached.len();
         result.insert(root.id.clone(), reached);
+        if progress.elapsed() >= Duration::from_secs(1) {
+            tracing::info!(
+                target: "bundler::progress",
+                roots = result.len(),
+                total_roots = roots.len(),
+                nodes = identities.nodes.len(),
+                memberships,
+                "Reachability progress"
+            );
+            progress = Instant::now();
+        }
     }
-    Ok(identities.finish(result))
+    tracing::info!(
+        target: "bundler::progress",
+        roots = result.len(),
+        nodes = identities.nodes.len(),
+        memberships,
+        "Reachability counts"
+    );
+    let canonical = crate::planning::Stage::new("reachability_canonicalization");
+    let result = identities.finish(result);
+    canonical.finish();
+    stage.finish();
+    Ok(result)
 }
 
 fn commonjs_export_requests(
@@ -750,6 +787,7 @@ fn partition_impl(
     precise_dynamic_imports: bool,
     lazy_runtimes: &[crate::lazy_modules::LazyRuntime],
 ) -> eyre::Result<ChunkPlan> {
+    let stage = crate::planning::Stage::new("partition");
     graph.validate_links()?;
     let lazy_modules = crate::lazy_modules::certify(graph, policy, lazy_runtimes)?;
     let ecco_effects = crate::effect_analysis::analyze(graph, policy)?;
@@ -776,7 +814,15 @@ fn partition_impl(
             "duplicate entry identity"
         );
     }
+    let mut round = 0usize;
     let (retention, reachability) = loop {
+        round += 1;
+        tracing::info!(
+            target: "bundler::progress",
+            round,
+            roots = roots.len(),
+            "Partition round begin"
+        );
         let evaluation: Vec<_> = roots
             .values()
             .flat_map(|r| r.evaluation_roots.iter().copied())
@@ -889,6 +935,7 @@ fn partition_impl(
             break (retention, reached);
         }
     };
+    let initialization = crate::planning::Stage::new("node_root_initialization");
     let mut node_roots: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
     for file in graph.module_ids() {
         if let Some(segments) = graph.file_segments(file) {
@@ -905,7 +952,9 @@ fn partition_impl(
             }
         }
     }
+    initialization.finish();
     add_reachability_roots(&reachability, &mut node_roots);
+    let grouping = crate::planning::Stage::new("chunk_grouping");
     let mut chunks: BTreeMap<ChunkId, Vec<NodeId>> = BTreeMap::new();
     for (node, roots) in &node_roots {
         if !roots.is_empty() {
@@ -915,6 +964,16 @@ fn partition_impl(
                 .push(node.clone());
         }
     }
+    tracing::info!(
+        target: "bundler::progress",
+        rounds = round,
+        roots = roots.len(),
+        nodes = node_roots.len(),
+        distinct_masks = chunks.len(),
+        "Partition counts"
+    );
+    grouping.finish();
+    stage.finish();
     Ok(ChunkPlan {
         revision: graph.revision(),
         policy_fingerprint: policy.fingerprint(),

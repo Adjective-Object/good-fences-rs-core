@@ -21,6 +21,14 @@ High-level `bundler::progress` tracing events mark build/publication phases and
 report numeric preparation/cache counts at most once per second. The library
 installs no subscriber; bundler-cli reports these events to stderr independently
 of its optional duration trace.
+Planning checkpoints also cover retention, execution constraints, namespace names,
+compact reachability, root-mask inversion, chunk grouping and source-map preparation.
+Each stage logs a begin and an end (`checkpoint`: 0 begin, 1 complete, 2 interrupted),
+including elapsed milliseconds; numeric summaries count roots, memberships and
+distinct nonempty masks without recording paths or requests. These are owner counts,
+not allocator/live-byte measurements. Long reachability walks report cumulative
+completed-root counts at most once per second, never per node/edge. Libraries
+remain subscriber-free.
 The separate `bundler::progress::discovery` events sample root-relative filenames
 and traversed directories for stderr feedback, at most once per second per kind;
 these path-bearing events are excluded from duration traces.
