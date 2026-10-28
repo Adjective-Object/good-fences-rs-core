@@ -488,6 +488,8 @@ are pruned. These requests follow each root's namespace-binding provenance,
 not module evaluation alone. Missing properties need
 evaluation only; unsafe observations, possible `then` exports, receiver calls,
 contexts, CommonJS and external surfaces retain the graph's conservative demand.
+Reachability and diagnostic manifests index namespace edges once per immutable
+retention pass, preserving edge order and independent per-root binding demands.
 
 `ChunkPlan::async_activations` maps each original occurrence to its independent
 roots. `DiagnosticManifest::async_facades` keeps one activation projection:

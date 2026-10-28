@@ -1,5 +1,9 @@
 # bundler
 
+Namespace adjacency indexes borrow one immutable retention pass and preserve edge
+order/duplicates. Share structure across roots, never demand or visited state;
+binding expansion keeps its per-call cycle guard and unchanged FIFO enqueueing.
+
 CJS request indexes belong to exact immutable graph/retention/placement inputs.
 Preserve the first retained origin per source occurrence. Share unplanned requests
 across reachability roots, never their activation/name decisions; apply reached-

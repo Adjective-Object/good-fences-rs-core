@@ -6,7 +6,8 @@ use eyre::{ensure, OptionExt};
 use source_graph::{GraphRevision, SourceGraph};
 
 use crate::chunks::{
-    async_seed, enqueue_binding, node_id, AsyncSiteId, ChunkId, ChunkPlan, NodeId, RootId, RootSeed,
+    async_seed, enqueue_binding, node_id, AsyncSiteId, ChunkId, ChunkPlan, NamespaceEdges, NodeId,
+    RootId, RootSeed,
 };
 use crate::{policy::EffectPolicy, RetentionEdgeKind};
 
@@ -266,6 +267,7 @@ pub fn diagnostic_manifest(
             }
         }
     }
+    let namespaces = NamespaceEdges::new(&plan.retention);
     for edge in &plan.retention.edges {
         if matches!(
             edge.kind,
@@ -288,7 +290,7 @@ pub fn diagnostic_manifest(
             edge.kind,
             RetentionEdgeKind::Binding | RetentionEdgeKind::Require
         ) {
-            enqueue_binding(&plan.retention, edge.to, &mut targets);
+            enqueue_binding(&namespaces, edge.to, &mut targets);
         } else {
             targets.push_back(edge.to);
         }

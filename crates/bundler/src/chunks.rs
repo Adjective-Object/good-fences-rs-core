@@ -208,6 +208,7 @@ pub fn reference_reachability(
         "stale retention revision or effect policy"
     );
     let mut outgoing = HashMap::<_, Vec<_>>::new();
+    let namespaces = NamespaceEdges::new(retention);
     for edge in &retention.edges {
         if !matches!(
             edge.kind,
@@ -258,7 +259,7 @@ pub fn reference_reachability(
             .map(GraphNode::Module)
             .collect();
         for &node in &root.binding_roots {
-            enqueue_binding(retention, node, &mut queue);
+            enqueue_binding(&namespaces, node, &mut queue);
         }
         let mut visited = HashSet::new();
         let mut reached = BTreeSet::new();
@@ -289,7 +290,7 @@ pub fn reference_reachability(
                     edge.kind,
                     RetentionEdgeKind::Binding | RetentionEdgeKind::Require
                 ) {
-                    enqueue_binding(retention, edge.to, &mut queue);
+                    enqueue_binding(&namespaces, edge.to, &mut queue);
                     if let GraphNode::Module(file) = edge.to {
                         namespace_modules.push(file);
                     }
@@ -309,16 +310,9 @@ pub fn reference_reachability(
             for name in &export_names[&file] {
                 commonjs_export_requests(graph, file, name, &mut export_requests);
             }
-            namespace_modules.extend(retention.edges.iter().filter_map(|edge| {
-                if edge.from == GraphNode::Module(file) && edge.kind == RetentionEdgeKind::Namespace
-                {
-                    match edge.to {
-                        GraphNode::Module(target) => Some(target),
-                        _ => None,
-                    }
-                } else {
-                    None
-                }
+            namespace_modules.extend(namespaces.targets(file).filter_map(|target| match target {
+                GraphNode::Module(target) => Some(target),
+                _ => None,
             }));
         }
         for &file in &cjs_files {
@@ -399,26 +393,60 @@ fn commonjs_export_requests(
     }
 }
 
+pub(crate) struct NamespaceEdges<'a> {
+    outgoing: HashMap<u32, Vec<&'a crate::RetentionEdge>>,
+    #[cfg(test)]
+    edge_visits: std::cell::Cell<usize>,
+}
+
+impl<'a> NamespaceEdges<'a> {
+    pub(crate) fn new(retention: &'a RetentionPlan) -> Self {
+        let mut outgoing = HashMap::<_, Vec<_>>::new();
+        #[cfg(test)]
+        let mut edge_visits = 0;
+        for edge in &retention.edges {
+            #[cfg(test)]
+            {
+                edge_visits += 1;
+            }
+            if let GraphNode::Module(file) = edge.from {
+                if edge.kind == RetentionEdgeKind::Namespace {
+                    outgoing.entry(file).or_default().push(edge);
+                }
+            }
+        }
+        Self {
+            outgoing,
+            #[cfg(test)]
+            edge_visits: std::cell::Cell::new(edge_visits),
+        }
+    }
+
+    fn targets(&self, file: u32) -> impl Iterator<Item = GraphNode> + '_ {
+        self.outgoing.get(&file).into_iter().flatten().map(|edge| {
+            #[cfg(test)]
+            self.edge_visits.set(self.edge_visits.get() + 1);
+            edge.to
+        })
+    }
+}
+
 pub(crate) fn enqueue_binding(
-    retention: &RetentionPlan,
+    namespaces: &NamespaceEdges<'_>,
     node: GraphNode,
     queue: &mut VecDeque<GraphNode>,
 ) {
     queue.push_back(node);
     let mut pending = vec![node];
     let mut seen = HashSet::new();
-    while let Some(module @ GraphNode::Module(_)) = pending.pop() {
+    while let Some(module @ GraphNode::Module(file)) = pending.pop() {
         if !seen.insert(module) {
             continue;
         }
-        for edge in retention
-            .edges
-            .iter()
-            .filter(|edge| edge.from == module && edge.kind == RetentionEdgeKind::Namespace)
-        {
-            queue.push_back(edge.to);
-            if matches!(edge.to, GraphNode::Module(_)) {
-                pending.push(edge.to);
+        for target in namespaces.targets(file) {
+            queue.push_back(target);
+            if matches!(target, GraphNode::Module(_)) {
+                pending.push(target);
             }
         }
     }

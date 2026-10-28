@@ -180,6 +180,134 @@ fn namespace_binding_edges_and_entry_binding_roots_include_pure_declarations() {
 }
 
 #[test]
+fn binding_queue_namespace_work_is_linear_in_edges_and_demands() {
+    let graph = SourceGraph::from_owned([input("entry.ts", "")]);
+    let mut measurements = Vec::new();
+    for width in [64, 128] {
+        let mut retention = retain(&graph, &[0], &[]).unwrap();
+        retention.edges.clear();
+        for file in 0..width {
+            for kind in std::iter::once(RetentionEdgeKind::Namespace)
+                .chain(std::iter::repeat_n(RetentionEdgeKind::Binding, 8))
+            {
+                retention.edges.push(crate::RetentionEdge {
+                    from: GraphNode::Module(file),
+                    to: GraphNode::Segment(SegmentKey::new(file, 0)),
+                    kind,
+                    source_edge: None,
+                });
+            }
+        }
+        let namespaces = NamespaceEdges::new(&retention);
+        let mut queue = VecDeque::new();
+        let demands = 16 * width as usize;
+        for _root in 0..16 {
+            for file in 0..width {
+                enqueue_binding(&namespaces, GraphNode::Module(file), &mut queue);
+                assert_eq!(
+                    queue.drain(..).collect::<Vec<_>>(),
+                    [
+                        GraphNode::Module(file),
+                        GraphNode::Segment(SegmentKey::new(file, 0))
+                    ]
+                );
+            }
+        }
+        measurements.push((
+            width,
+            namespaces.edge_visits.get(),
+            retention.edges.len() + demands,
+        ));
+    }
+    eprintln!("binding namespace edge visits (width, actual, bound): {measurements:?}");
+    for (width, actual, bound) in measurements {
+        assert!(actual <= bound, "width {width}: {actual} > {bound}");
+    }
+}
+
+#[test]
+fn binding_queue_preserves_fifo_duplicates_cycles_and_repeated_demand() {
+    let graph = SourceGraph::from_owned([input("entry.ts", "")]);
+    let mut retention = retain(&graph, &[0], &[]).unwrap();
+    let m = GraphNode::Module;
+    let s = |file| GraphNode::Segment(SegmentKey::new(file, 0));
+    retention.edges = [
+        (m(0), m(1), RetentionEdgeKind::Namespace),
+        (m(0), s(0), RetentionEdgeKind::Namespace),
+        (m(0), s(99), RetentionEdgeKind::Binding),
+        (m(0), m(2), RetentionEdgeKind::Namespace),
+        (m(0), m(1), RetentionEdgeKind::Namespace),
+        (m(1), m(2), RetentionEdgeKind::Namespace),
+        (m(1), s(1), RetentionEdgeKind::Namespace),
+        (s(0), s(99), RetentionEdgeKind::Namespace),
+        (m(2), m(0), RetentionEdgeKind::Namespace),
+        (m(2), s(2), RetentionEdgeKind::Namespace),
+    ]
+    .map(|(from, to, kind)| crate::RetentionEdge {
+        from,
+        to,
+        kind,
+        source_edge: None,
+    })
+    .into();
+    let namespaces = NamespaceEdges::new(&retention);
+    let expected = [m(0), m(1), s(0), m(2), m(1), m(2), s(1), m(0), s(2)];
+    let mut queue = VecDeque::from([s(99)]);
+    enqueue_binding(&namespaces, m(0), &mut queue);
+    enqueue_binding(&namespaces, m(0), &mut queue);
+    assert_eq!(
+        queue.drain(..).collect::<Vec<_>>(),
+        std::iter::once(s(99))
+            .chain(expected)
+            .chain(expected)
+            .collect::<Vec<_>>()
+    );
+    enqueue_binding(&namespaces, m(0), &mut queue);
+    assert_eq!(queue.drain(..).collect::<Vec<_>>(), expected);
+    enqueue_binding(&namespaces, s(0), &mut queue);
+    assert_eq!(queue.into_iter().collect::<Vec<_>>(), [s(0)]);
+}
+
+#[test]
+fn binding_queue_keeps_evaluation_selected_and_namespace_roots_independent() {
+    let graph = SourceGraph::from_owned([
+        input(
+            "barrel.ts",
+            "export { first } from 'first.ts'; export { second } from 'second.ts';",
+        ),
+        input("first.ts", "export const first = 1;"),
+        input("second.ts", "export const second = 2;"),
+    ]);
+    let namespace = RootSeed {
+        id: RootId::Entry("namespace".into()),
+        evaluation_roots: vec![],
+        binding_roots: vec![GraphNode::Module(0)],
+    };
+    let selected = RootSeed {
+        id: RootId::Entry("selected".into()),
+        evaluation_roots: vec![0],
+        binding_roots: vec![GraphNode::Segment(SegmentKey::new(1, 0))],
+    };
+    let retention = retain(&graph, &[0], &namespace.binding_roots).unwrap();
+    let policy = EffectPolicy::default();
+    let roots = [entry(0), selected.clone(), namespace.clone()];
+    let reached = reference_reachability(&graph, &retention, &policy, &roots).unwrap();
+    for (root, first, second) in [
+        (entry(0).id, false, false),
+        (selected.id, true, false),
+        (namespace.id, true, true),
+    ] {
+        assert_eq!(reached[&root].contains(&segment("first.ts", 0)), first);
+        assert_eq!(reached[&root].contains(&segment("second.ts", 0)), second);
+    }
+    let reversed = roots.into_iter().rev().collect::<Vec<_>>();
+    assert_eq!(
+        reached,
+        reference_reachability(&graph, &retention, &policy, &reversed).unwrap()
+    );
+}
+
+#[test]
 fn tombstones_empty_modules_and_policy_changes_do_not_reuse_plans() {
     let mut graph = SourceGraph::from_owned([
         input("removed.ts", ""),
