@@ -29,6 +29,15 @@ distinct nonempty masks without recording paths or requests. These are owner cou
 not allocator/live-byte measurements. Long reachability walks report cumulative
 completed-root counts at most once per second, never per node/edge. Libraries
 remain subscriber-free.
+`ChunkPlan::node_roots` and `ChunkId::0` use immutable `chunks::RootMask`
+instead of owned `BTreeSet<RootId>` values. Inversion shares one canonical root
+dictionary and interns equal scalar masks directly, without first cloning root
+paths/names per membership. Cloning a mask shares storage. Borrow canonical roots
+with `iter()`/`&mask`; membership, set comparisons and iteration remain value-based
+across different plan dictionaries. `to_owned_set()` explicitly projects an owned
+set; `RootMask::from(owned_set)` (or collecting root values) constructs an independent
+mask. Construct a diagnostic chunk key with `ChunkId(owned_set.into())`.
+Mutation of set storage is no longer exposed; derived-plan rebuilds replace masks.
 The separate `bundler::progress::discovery` events sample root-relative filenames
 and traversed directories for stderr feedback, at most once per second per kind;
 these path-bearing events are excluded from duration traces.

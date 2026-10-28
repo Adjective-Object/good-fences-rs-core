@@ -264,8 +264,9 @@ pub(crate) fn extract(
         policy,
         &plan.roots.values().cloned().collect::<Vec<_>>(),
     )?;
+    let empty = crate::chunks::RootMask::default();
     for mask in plan.node_roots.values_mut() {
-        mask.clear();
+        *mask = empty.clone();
     }
     add_reachability_roots(&plan.reachability, &mut plan.node_roots);
     plan.chunks = BTreeMap::new();

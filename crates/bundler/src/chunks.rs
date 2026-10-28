@@ -9,6 +9,10 @@ use source_graph::{Activation, GraphNode, GraphRevision, SourceGraph};
 
 use crate::{policy::EffectPolicy, RetentionEdgeKind, RetentionPlan};
 
+#[path = "root_mask.rs"]
+mod root_mask;
+pub use root_mask::{RootMask, RootMaskIter};
+
 /// Source occurrence identity, independent of file/edge insertion order.
 /// Offsets identify sites only within the stamped source graph revision.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -151,21 +155,37 @@ impl ExactSizeIterator for ReachedNodeIter<'_> {}
 
 pub(crate) fn add_reachability_roots(
     reachability: &BTreeMap<RootId, ReachedNodes>,
-    node_roots: &mut BTreeMap<NodeId, BTreeSet<RootId>>,
+    node_roots: &mut BTreeMap<NodeId, RootMask>,
 ) {
     let stage = crate::planning::Stage::new("root_mask_inversion");
     let Some(first) = reachability.values().next() else {
         stage.finish();
         return;
     };
-    let mut masks = vec![BTreeSet::new(); first.nodes.len()];
-    for (root, reached) in reachability {
+    let roots: Arc<[RootId]> = reachability.keys().cloned().collect();
+    let mut counts = vec![0; first.nodes.len()];
+    for reached in reachability.values() {
         for &index in &reached.indices {
-            masks[index].insert(root.clone());
+            counts[index] += 1;
         }
     }
+    let mut masks: Vec<_> = counts.into_iter().map(Vec::with_capacity).collect();
+    // Canonical root order makes every inverted mask sorted without tree nodes.
+    for (root, reached) in reachability.values().enumerate() {
+        for &index in &reached.indices {
+            masks[index].push(root);
+        }
+    }
+    let mut shared = HashSet::<Arc<[usize]>>::new();
     for (node, mask) in first.nodes.iter().zip(masks) {
-        node_roots.insert(node.clone(), mask);
+        let indices = if let Some(indices) = shared.get(mask.as_slice()) {
+            indices.clone()
+        } else {
+            let indices: Arc<[usize]> = mask.into();
+            shared.insert(indices.clone());
+            indices
+        };
+        node_roots.insert(node.clone(), RootMask::new(roots.clone(), indices));
     }
     tracing::info!(
         target: "bundler::progress",
@@ -672,7 +692,7 @@ pub(crate) fn enqueue_binding(
 
 /// The exact nonempty root set is the logical identity, not a filename/ordinal.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ChunkId(pub BTreeSet<RootId>);
+pub struct ChunkId(pub RootMask);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChunkPlan {
@@ -683,7 +703,7 @@ pub struct ChunkPlan {
     pub roots: BTreeMap<RootId, RootSeed>,
     pub reachability: BTreeMap<RootId, ReachedNodes>,
     /// Includes dead source modules/segments with empty sets.
-    pub node_roots: BTreeMap<NodeId, BTreeSet<RootId>>,
+    pub node_roots: BTreeMap<NodeId, RootMask>,
     /// Exactly one chunk per nonempty set, without merging or hoisting.
     pub chunks: BTreeMap<ChunkId, Vec<NodeId>>,
     /// Derived reference occurrences, never source dependency IDs or cached facts.
@@ -936,19 +956,20 @@ fn partition_impl(
         }
     };
     let initialization = crate::planning::Stage::new("node_root_initialization");
-    let mut node_roots: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
+    let mut node_roots: BTreeMap<_, RootMask> = BTreeMap::new();
+    let empty = RootMask::default();
     for file in graph.module_ids() {
         if let Some(segments) = graph.file_segments(file) {
             node_roots
                 .entry(node_id(graph, GraphNode::Module(file))?)
-                .or_default();
+                .or_insert_with(|| empty.clone());
             for index in 0..segments.len() {
                 node_roots
                     .entry(node_id(
                         graph,
                         GraphNode::Segment(source_graph::SegmentKey::new(file, index as u32)),
                     )?)
-                    .or_default();
+                    .or_insert_with(|| empty.clone());
             }
         }
     }

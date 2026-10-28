@@ -780,7 +780,7 @@ fn mask<'a>(
     graph: &SourceGraph,
     plan: &'a ChunkPlan,
     key: source_graph::SegmentKey,
-) -> &'a BTreeSet<RootId> {
+) -> &'a crate::chunks::RootMask {
     &plan.node_roots[&crate::chunks::node_id(graph, GraphNode::Segment(key)).unwrap()]
 }
 

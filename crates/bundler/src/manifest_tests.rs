@@ -232,9 +232,9 @@ fn precise_manifest_projects_one_original_activation_onto_independent_roots() {
         module: "effects.ts".into(),
         index: 0,
     };
-    let a_chunk = ChunkId(BTreeSet::from([a.clone()]));
-    let b_chunk = ChunkId(BTreeSet::from([b.clone()]));
-    let shared_chunk = ChunkId(both);
+    let a_chunk = ChunkId(BTreeSet::from([a.clone()]).into());
+    let b_chunk = ChunkId(BTreeSet::from([b.clone()]).into());
+    let shared_chunk = ChunkId(both.into());
     assert_eq!(plan.chunk_for(&a_node), Some(a_chunk.clone()));
     assert_eq!(plan.chunk_for(&b_node), Some(b_chunk.clone()));
     assert_eq!(plan.chunk_for(&effect_node), Some(shared_chunk.clone()));

@@ -839,6 +839,10 @@ Canonical diagnostic nodes use paths, not insertion-dependent file numbers.
 Reachability shares one pass-local canonical NodeId dictionary; per-root sorted
 indices never own paths. Remap graph-local discovery handles into canonical order
 before exposing iteration; the owned reference projection is not production state.
+Invert directly into scalar root indices over one immutable plan-local RootId
+dictionary; intern equal scalar masks before installing node/chunk handles.
+Never materialize owned root payloads per membership. RootMask comparisons/hash
+use canonical values across dictionaries; owned sets are explicit projections.
 Root traversal follows synchronous retention constraints only; namespace
 binding demand differs from module evaluation. Empty modules keep identities.
 Partition only reachable async sites to a fixed point; dead nodes have empty

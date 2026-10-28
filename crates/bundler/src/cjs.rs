@@ -291,7 +291,10 @@ mod tests {
         );
         assert_eq!(
             plan.node_roots[&proxy(None)],
-            roots.iter().map(|root| root.id.clone()).collect()
+            roots
+                .iter()
+                .map(|root| root.id.clone())
+                .collect::<BTreeSet<_>>()
         );
         assert!(!plan.node_roots.contains_key(&proxy(Some("unused".into()))));
         let requests = Requests::new(&graph, &plan.retention, Some(&plan)).requests(5);

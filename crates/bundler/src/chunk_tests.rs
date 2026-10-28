@@ -183,7 +183,7 @@ fn individual_async_sites_do_not_carry_parent_roots_or_activate_dead_sites() {
     let partitioned = partition(&graph, &[entry(0)], &EffectPolicy::default()).unwrap();
     assert_eq!(
         partitioned.node_roots[&module("shared.ts")],
-        roots.iter().map(|r| r.id.clone()).collect()
+        roots.iter().map(|r| r.id.clone()).collect::<BTreeSet<_>>()
     );
     assert_exact_partition(&partitioned);
 
@@ -872,7 +872,7 @@ fn precise_selected_local_commonjs_exports_keep_the_conservative_surface() {
                 module: "dep.cjs".into(),
                 name: Some(name.into()),
             }),
-            Some(&BTreeSet::from([root.clone()]))
+            Some(&BTreeSet::from([root.clone()]).into())
         );
     }
     assert_eq!(
