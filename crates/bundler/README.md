@@ -1675,7 +1675,9 @@ CommonJS stays opaque. Native binding/TDZ barriers and add-only forced effects
 remain distinct from Ecco's expression effects. Structural force rules targeting
 deferred bodies, opaque CommonJS/external execution, captured lexical initialization/TDZ barriers, or disabling PURE
 annotations conservatively disable inferred pruning; cached precursors and
-source-level PURE lowering remain unchanged. Ecco's existing unknown-execution
+source-level PURE lowering remain unchanged. These graph-wide fallbacks validate
+the precursors but skip constructing/solving an unused global effect graph.
+Ecco's existing unknown-execution
 widening can also prevent pruning otherwise pure calls.
 
 `BuildOptions.declarations` enables JavaScript and the requested resolver target's

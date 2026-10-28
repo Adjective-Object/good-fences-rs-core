@@ -52,19 +52,6 @@ fn analyze_inner(
                 .ok_or_eyre("missing Ecco precursor")?,
         )?;
     }
-    let result = analysis.solve(
-        &|file: &u32, reference: ecco::views::ExternalReferenceView<'_>| {
-            resolve(graph, *file, reference).wrap_err_with(|| {
-                format!(
-                    "{}: effect reference at bytes {}..{}",
-                    graph.file_path(*file).unwrap().display(),
-                    reference.span().start,
-                    reference.span().end
-                )
-            })
-        },
-    )?;
-    let mut effects = BTreeMap::new();
     // shortcut: deferred policy/TDZ barriers disable inferred pruning until Ecco
     // exposes invocation-specific policy and initialization-error dependencies.
     // Low-level inputs may also lack the build's probe read contracts. Their
@@ -119,12 +106,30 @@ fn analyze_inner(
                     })
             })
         });
+    if structural_override {
+        // Precursors are still validated above, but none of the solve's results
+        // can refine structural retention. Do not instantiate its global graph.
+        return Ok(BTreeMap::new());
+    }
+    let result = analysis.solve(
+        &|file: &u32, reference: ecco::views::ExternalReferenceView<'_>| {
+            resolve(graph, *file, reference).wrap_err_with(|| {
+                format!(
+                    "{}: effect reference at bytes {}..{}",
+                    graph.file_path(*file).unwrap().display(),
+                    reference.span().start,
+                    reference.span().end
+                )
+            })
+        },
+    )?;
+    let mut effects = BTreeMap::new();
     for (file, analyzed) in result.files {
         let facts = graph.file_facts(file).unwrap();
         let segments = graph.file_segments(file).unwrap();
         // Prepared CSS ESM stubs perform DOM writes and throw without a document.
         // Caller DOM declarations must never infer those operations away.
-        if structural_override || facts.commonjs() || graph.file_prepared_resource(file).is_some() {
+        if facts.commonjs() || graph.file_prepared_resource(file).is_some() {
             continue;
         }
         for root in analyzed.roots {

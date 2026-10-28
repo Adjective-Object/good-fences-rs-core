@@ -175,6 +175,8 @@ Missing package maps remain errors; repair dangling directives explicitly in
 maintained package patches, never synthesize original mappings or silently fall back.
 Keep immutable AST/Ecco owners alive through graph and worker reads; never
 unpack cached facts for linking, validation, execution constraints or recipes.
+Check graph-wide structural effect fallbacks before instantiating the Ecco solve;
+retain borrowed precursor validation even when no inferred results can be used.
 Precompile TS/TSX/JSX with pinned Oxc before extraction/resolution. Preserve
 original file identity and checked generated-JS provenance; low-level emission
 still rejects raw typed/JSX modes. Automatic JSX runtime requests use normal
