@@ -451,6 +451,11 @@ The symbol linker uses scope-hoisted direct ESM bindings and native
 imports/exports only across actual output chunks. Root sets remain reachability
 analysis, not mandatory physical partitions. Public entry/export boundaries
 constrain output; pure segments may move according to binding dependencies.
+`ChunkPlan::reachability` shares canonical path-bearing node identities across
+roots and stores compact sorted membership indices. Its `ReachedNodes` values
+support ordered iteration and membership checks; `reference_reachability` retains
+the owned `BTreeSet<NodeId>` projection for reference/debug callers. Graph-local
+discovery order never determines chunk identity or public node order.
 Sparse mandatory execution components and consumer demand choose physical owners;
 pure siblings and shared declarations co-locate without whole-module absorption.
 Native SCC evaluation remains entrance-dependent, not permission to concatenate.

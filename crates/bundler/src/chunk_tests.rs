@@ -37,6 +37,124 @@ fn oracle_handles_chain_diamond_scc_and_empty_identity() {
 }
 
 #[test]
+fn overlapping_roots_share_canonical_path_storage() {
+    let prefix = "long-application-package-component\\".repeat(7);
+    let paths: Vec<_> = (0..160)
+        .map(|index| format!("{prefix}{index:04}.ts"))
+        .collect();
+    let sources: Vec<_> = (0..160)
+        .map(|index| {
+            if index < 32 {
+                format!("import '{}'; import '{}';", paths[32], paths[159])
+            } else if index < 159 {
+                format!("import '{}'; import '{}';", paths[index + 1], paths[159])
+            } else {
+                // A shared cycle must neither duplicate membership nor lose roots.
+                format!("import '{}'; run();", paths[32])
+            }
+        })
+        .collect();
+    // JS specifiers use escaped native separators, while graph paths stay native.
+    let graph = SourceGraph::from_owned(
+        paths
+            .iter()
+            .zip(&sources)
+            .map(|(path, source)| input(path, &source.replace('\\', "\\\\"))),
+    );
+    let roots: Vec<_> = (0..32)
+        .map(|file| RootSeed {
+            id: RootId::Entry(format!("entry-{file:02}")),
+            ..entry(file)
+        })
+        .collect();
+    let policy = EffectPolicy::default();
+    let plan = partition(&graph, &roots, &policy).unwrap();
+    let mut identities = HashSet::new();
+    let mut memberships = 0;
+    for (root, nodes) in &plan.reachability {
+        let start = plan.roots[root].evaluation_roots[0] as usize;
+        let modules: Vec<_> = nodes
+            .iter()
+            .filter_map(|node| match node {
+                NodeId::Module(path) => Some(path),
+                _ => None,
+            })
+            .collect();
+        let expected: Vec<_> = std::iter::once(&paths[start])
+            .chain(&paths[32..])
+            .map(std::path::PathBuf::from)
+            .collect();
+        assert_eq!(modules, expected.iter().collect::<Vec<_>>());
+        assert!(nodes.iter().eq(nodes.into_iter()));
+        assert!(nodes.iter().rev().eq(nodes.into_iter().rev()));
+        assert_eq!(nodes.len(), nodes.iter().count());
+        assert!(!nodes.is_empty());
+        for node in nodes {
+            identities.insert(node as *const NodeId);
+            memberships += 1;
+            assert!(nodes.contains(node));
+        }
+        assert!(!nodes.contains(&module("absent.ts")));
+    }
+    let unique = plan
+        .node_roots
+        .values()
+        .filter(|mask| !mask.is_empty())
+        .count();
+    assert_eq!(
+        identities.len(),
+        unique,
+        "root overlap must not allocate another path-bearing identity"
+    );
+    assert!(memberships > 24 * unique);
+    let legacy = reference_reachability(&graph, &plan.retention, &policy, &roots).unwrap();
+    let legacy_identities: HashSet<_> = legacy
+        .values()
+        .flatten()
+        .map(|node| node as *const NodeId)
+        .collect();
+    assert_eq!(legacy_identities.len(), memberships);
+    for (root, nodes) in &plan.reachability {
+        assert!(nodes.iter().eq(legacy[root].iter()));
+    }
+    eprintln!(
+        "overlapping roots: memberships={memberships}, legacy path identities={}, compact path identities={unique}",
+        legacy_identities.len()
+    );
+    let mut reversed = roots.clone();
+    reversed.reverse();
+    let other = compact_reachability(&graph, &plan.retention, &policy, &reversed).unwrap();
+    assert_eq!(plan.reachability, other);
+}
+
+#[test]
+fn compact_membership_and_equality_do_not_depend_on_other_roots() {
+    let graph = SourceGraph::from_owned([input("a.ts", ""), input("b.ts", "")]);
+    let policy = EffectPolicy::default();
+    let retention = retain(&graph, &[0, 1], &[]).unwrap();
+    let empty = RootSeed {
+        id: RootId::Entry("empty".into()),
+        evaluation_roots: vec![],
+        binding_roots: vec![],
+    };
+    let additional = RootSeed {
+        id: RootId::Entry("additional".into()),
+        ..entry(1)
+    };
+    let first =
+        compact_reachability(&graph, &retention, &policy, &[entry(0), empty.clone()]).unwrap();
+    let second =
+        compact_reachability(&graph, &retention, &policy, &[entry(0), additional]).unwrap();
+    assert_eq!(first[&entry(0).id], second[&entry(0).id]);
+    assert!(first[&empty.id].is_empty());
+    assert_eq!(first[&empty.id].iter().len(), 0);
+    for path in ["a.ts", "b.ts", "absent.ts"] {
+        assert!(!first[&empty.id].contains(&module(path)));
+    }
+    assert!(!second[&entry(0).id].contains(&module("b.ts")));
+}
+
+#[test]
 fn individual_async_sites_do_not_carry_parent_roots_or_activate_dead_sites() {
     let graph = SourceGraph::from_owned([
         input("entry.ts", "import 'shared.ts'; import('shared.ts'); import('shared.ts'); function dead() { return import('dead.ts'); }"),
@@ -998,7 +1116,10 @@ fn randomized_small_graphs_match_module_oracle_and_insertion_order() {
             shuffled.edges.swap(i, other);
         }
         assert_eq!(
-            plan.reachability,
+            plan.reachability
+                .iter()
+                .map(|(root, nodes)| (root.clone(), nodes.iter().cloned().collect::<BTreeSet<_>>()))
+                .collect::<BTreeMap<_, _>>(),
             reference_reachability(
                 &graph,
                 &shuffled,

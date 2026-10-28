@@ -827,6 +827,9 @@ webpackIgnore true imports remain native and never enter context/route rewriting
 Compose original arguments through cached operations; evaluate once at the source
 site, preserving lazy activation, native rejection timing and CJS cached identity.
 Canonical diagnostic nodes use paths, not insertion-dependent file numbers.
+Reachability shares one pass-local canonical NodeId dictionary; per-root sorted
+indices never own paths. Remap graph-local discovery handles into canonical order
+before exposing iteration; the owned reference projection is not production state.
 Root traversal follows synchronous retention constraints only; namespace
 binding demand differs from module evaluation. Empty modules keep identities.
 Partition only reachable async sites to a fixed point; dead nodes have empty

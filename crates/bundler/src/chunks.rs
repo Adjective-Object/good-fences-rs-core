@@ -1,6 +1,7 @@
 //! Exact synchronous reachability over retention constraints, not execution order.
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use eyre::{ensure, OptionExt};
 use source_graph::{Activation, GraphNode, GraphRevision, SourceGraph};
@@ -63,6 +64,179 @@ pub struct RootSeed {
     pub evaluation_roots: Vec<u32>,
     /// A module binding root requests its namespace, unlike evaluation alone.
     pub binding_roots: Vec<GraphNode>,
+}
+
+/// One root's canonical node order, sharing path-bearing identities across roots.
+#[derive(Clone)]
+pub struct ReachedNodes {
+    nodes: Arc<[NodeId]>,
+    indices: Box<[usize]>,
+}
+
+impl PartialEq for ReachedNodes {
+    fn eq(&self, other: &Self) -> bool {
+        if Arc::ptr_eq(&self.nodes, &other.nodes) {
+            self.indices == other.indices
+        } else {
+            self.iter().eq(other.iter())
+        }
+    }
+}
+
+impl Eq for ReachedNodes {}
+
+impl ReachedNodes {
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &NodeId> + DoubleEndedIterator {
+        self.indices.iter().map(|&index| &self.nodes[index])
+    }
+
+    pub fn contains(&self, node: &NodeId) -> bool {
+        self.nodes
+            .binary_search(node)
+            .is_ok_and(|index| self.indices.binary_search(&index).is_ok())
+    }
+
+    pub fn len(&self) -> usize {
+        self.indices.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.indices.is_empty()
+    }
+}
+
+impl std::fmt::Debug for ReachedNodes {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_set().entries(self.iter()).finish()
+    }
+}
+
+impl<'a> IntoIterator for &'a ReachedNodes {
+    type Item = &'a NodeId;
+    type IntoIter = ReachedNodeIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        ReachedNodeIter {
+            nodes: &self.nodes,
+            indices: self.indices.iter(),
+        }
+    }
+}
+
+pub struct ReachedNodeIter<'a> {
+    nodes: &'a [NodeId],
+    indices: std::slice::Iter<'a, usize>,
+}
+
+impl<'a> Iterator for ReachedNodeIter<'a> {
+    type Item = &'a NodeId;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.indices.next().map(|&index| &self.nodes[index])
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.indices.size_hint()
+    }
+}
+
+impl DoubleEndedIterator for ReachedNodeIter<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.indices.next_back().map(|&index| &self.nodes[index])
+    }
+}
+
+impl ExactSizeIterator for ReachedNodeIter<'_> {}
+
+pub(crate) fn add_reachability_roots(
+    reachability: &BTreeMap<RootId, ReachedNodes>,
+    node_roots: &mut BTreeMap<NodeId, BTreeSet<RootId>>,
+) {
+    let Some(first) = reachability.values().next() else {
+        return;
+    };
+    let mut masks = vec![BTreeSet::new(); first.nodes.len()];
+    for (root, reached) in reachability {
+        for &index in &reached.indices {
+            masks[index].insert(root.clone());
+        }
+    }
+    for (node, mask) in first.nodes.iter().zip(masks) {
+        node_roots.insert(node.clone(), mask);
+    }
+}
+
+#[derive(PartialEq, Eq, Hash)]
+enum ReachabilityKey {
+    Source(GraphNode),
+    CommonJsProxy(u32, Option<String>),
+    CommonJsNamespace(u32),
+}
+
+#[derive(Default)]
+struct ReachabilityNodes {
+    indices: HashMap<ReachabilityKey, usize>,
+    nodes: Vec<NodeId>,
+}
+
+impl ReachabilityNodes {
+    fn intern(&mut self, graph: &SourceGraph, key: ReachabilityKey) -> eyre::Result<usize> {
+        if let Some(&index) = self.indices.get(&key) {
+            return Ok(index);
+        }
+        let node = match &key {
+            ReachabilityKey::Source(node) => node_id(graph, *node)?,
+            ReachabilityKey::CommonJsProxy(file, name) => NodeId::CommonJsProxy {
+                module: graph
+                    .file_path(*file)
+                    .ok_or_eyre("missing CJS module")?
+                    .to_owned(),
+                name: name.clone(),
+            },
+            ReachabilityKey::CommonJsNamespace(file) => NodeId::CommonJsNamespace(
+                graph
+                    .file_path(*file)
+                    .ok_or_eyre("missing CJS module")?
+                    .to_owned(),
+            ),
+        };
+        let index = self.nodes.len();
+        self.nodes.push(node);
+        self.indices.insert(key, index);
+        Ok(index)
+    }
+
+    fn finish(self, roots: BTreeMap<RootId, Vec<usize>>) -> BTreeMap<RootId, ReachedNodes> {
+        drop(self.indices);
+        // Discovery uses graph-local handles; only canonical NodeId order escapes.
+        let mut ordered: Vec<_> = self.nodes.into_iter().enumerate().collect();
+        ordered.sort_unstable_by(|(_, left), (_, right)| left.cmp(right));
+        let mut canonical = vec![0; ordered.len()];
+        let nodes: Arc<[NodeId]> = ordered
+            .into_iter()
+            .enumerate()
+            .map(|(index, (original, node))| {
+                canonical[original] = index;
+                node
+            })
+            .collect();
+        roots
+            .into_iter()
+            .map(|(root, mut indices)| {
+                for index in &mut indices {
+                    *index = canonical[*index];
+                }
+                indices.sort_unstable();
+                (
+                    root,
+                    ReachedNodes {
+                        nodes: Arc::clone(&nodes),
+                        indices: indices.into_boxed_slice(),
+                    },
+                )
+            })
+            .collect()
+    }
 }
 
 pub fn node_id(graph: &SourceGraph, node: GraphNode) -> eyre::Result<NodeId> {
@@ -203,6 +377,18 @@ pub fn reference_reachability(
     policy: &EffectPolicy,
     roots: &[RootSeed],
 ) -> eyre::Result<BTreeMap<RootId, BTreeSet<NodeId>>> {
+    Ok(compact_reachability(graph, retention, policy, roots)?
+        .into_iter()
+        .map(|(root, nodes)| (root, nodes.iter().cloned().collect()))
+        .collect())
+}
+
+pub(crate) fn compact_reachability(
+    graph: &SourceGraph,
+    retention: &RetentionPlan,
+    policy: &EffectPolicy,
+    roots: &[RootSeed],
+) -> eyre::Result<BTreeMap<RootId, ReachedNodes>> {
     ensure!(
         retention.is_current(graph, policy),
         "stale retention revision or effect policy"
@@ -241,6 +427,7 @@ pub fn reference_reachability(
             .collect()
     };
     let mut result = BTreeMap::new();
+    let mut identities = ReachabilityNodes::default();
     for root in roots {
         ensure!(!result.contains_key(&root.id), "duplicate root identity");
         let mut export_requests = BTreeSet::new();
@@ -262,12 +449,12 @@ pub fn reference_reachability(
             enqueue_binding(&namespaces, node, &mut queue);
         }
         let mut visited = HashSet::new();
-        let mut reached = BTreeSet::new();
+        let mut reached = Vec::new();
         while let Some(node) = queue.pop_front() {
             if !visited.insert(node) {
                 continue;
             }
-            reached.insert(node_id(graph, node)?);
+            reached.push(identities.intern(graph, ReachabilityKey::Source(node))?);
             ensure!(
                 match node {
                     GraphNode::Module(file) => retained_modules.contains(&file),
@@ -317,7 +504,6 @@ pub fn reference_reachability(
         }
         for &file in &cjs_files {
             let requests = &cjs_requests[&file];
-            let module = graph.file_path(file).unwrap().to_owned();
             let mut demanded: BTreeSet<_> = export_requests
                 .iter()
                 .filter(|(target, _)| *target == file)
@@ -339,7 +525,7 @@ pub fn reference_reachability(
                 }));
             }
             for (from, request) in requests {
-                if !reached.contains(&node_id(graph, *from)?) {
+                if !visited.contains(from) {
                     continue;
                 }
                 initialize = true;
@@ -351,27 +537,22 @@ pub fn reference_reachability(
                 }
             }
             if initialize {
-                reached.insert(NodeId::CommonJsProxy {
-                    module: module.clone(),
-                    name: None,
-                });
-                reached.extend(
-                    demanded
-                        .into_iter()
-                        .filter(|name| name != "default")
-                        .map(|name| NodeId::CommonJsProxy {
-                            module: module.clone(),
-                            name: Some(name),
-                        }),
-                );
+                reached.push(identities.intern(graph, ReachabilityKey::CommonJsProxy(file, None))?);
+                for name in demanded.into_iter().filter(|name| name != "default") {
+                    reached.push(
+                        identities
+                            .intern(graph, ReachabilityKey::CommonJsProxy(file, Some(name)))?,
+                    );
+                }
                 if namespace {
-                    reached.insert(NodeId::CommonJsNamespace(module.clone()));
+                    reached
+                        .push(identities.intern(graph, ReachabilityKey::CommonJsNamespace(file))?);
                 }
             }
         }
         result.insert(root.id.clone(), reached);
     }
-    Ok(result)
+    Ok(identities.finish(result))
 }
 
 fn commonjs_export_requests(
@@ -463,7 +644,7 @@ pub struct ChunkPlan {
     pub retention: RetentionPlan,
     /// Graph-local seeds, retained for facade construction at this revision.
     pub roots: BTreeMap<RootId, RootSeed>,
-    pub reachability: BTreeMap<RootId, BTreeSet<NodeId>>,
+    pub reachability: BTreeMap<RootId, ReachedNodes>,
     /// Includes dead source modules/segments with empty sets.
     pub node_roots: BTreeMap<NodeId, BTreeSet<RootId>>,
     /// Exactly one chunk per nonempty set, without merging or hoisting.
@@ -615,7 +796,7 @@ fn partition_impl(
             Some(&lazy_modules),
         )?;
         let seeds: Vec<_> = roots.values().cloned().collect();
-        let reached = reference_reachability(graph, &retention, policy, &seeds)?;
+        let reached = compact_reachability(graph, &retention, policy, &seeds)?;
         let mut added = false;
         for &index in &retention.async_boundaries {
             let consumer = node_id(graph, graph.edges()[index].from)?;
@@ -724,14 +905,7 @@ fn partition_impl(
             }
         }
     }
-    for (root, nodes) in &reachability {
-        for node in nodes {
-            node_roots
-                .entry(node.clone())
-                .or_default()
-                .insert(root.clone());
-        }
-    }
+    add_reachability_roots(&reachability, &mut node_roots);
     let mut chunks: BTreeMap<ChunkId, Vec<NodeId>> = BTreeMap::new();
     for (node, roots) in &node_roots {
         if !roots.is_empty() {

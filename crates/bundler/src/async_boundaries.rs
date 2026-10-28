@@ -6,8 +6,8 @@ use eyre::OptionExt;
 use source_graph::{EdgeKind, ExportIdentity, GraphNode, SegmentKey, SourceGraph};
 
 use crate::chunks::{
-    node_id, reference_reachability, AsyncSiteId, ChunkId, ChunkPlan, GeneratedBoundary, RootId,
-    RootSeed,
+    add_reachability_roots, compact_reachability, node_id, AsyncSiteId, ChunkId, ChunkPlan,
+    GeneratedBoundary, RootId, RootSeed,
 };
 use crate::{policy::EffectPolicy, RetentionEdgeKind};
 
@@ -258,7 +258,7 @@ pub(crate) fn extract(
         !(e.kind == RetentionEdgeKind::BindingEvaluation
             && matches!(e.from, GraphNode::Segment(key) if candidates.contains(&key)))
     });
-    plan.reachability = reference_reachability(
+    plan.reachability = compact_reachability(
         graph,
         &plan.retention,
         policy,
@@ -267,14 +267,7 @@ pub(crate) fn extract(
     for mask in plan.node_roots.values_mut() {
         mask.clear();
     }
-    for (root, nodes) in &plan.reachability {
-        for node in nodes {
-            plan.node_roots
-                .entry(node.clone())
-                .or_default()
-                .insert(root.clone());
-        }
-    }
+    add_reachability_roots(&plan.reachability, &mut plan.node_roots);
     plan.chunks = BTreeMap::new();
     for (node, roots) in &plan.node_roots {
         if !roots.is_empty() {
