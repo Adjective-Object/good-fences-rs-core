@@ -57,12 +57,14 @@ Structural verification and UTF-8 span/containment/discriminant checks precede
 borrowed access. Stylesheet facts have no fixed byte cap and production loads use
 the same private mapped backing; resolved targets and linked names are not cached.
 
-`WireTypeOnlyFacts` uses independent schema/extractor 1 (`GFTY`), sealing original
+`WireTypeOnlyFacts` uses independent schema 1/extractor 2 (`GFTY`), sealing original
 TypeScript bytes, selected syntax/package/extractor settings and nested typed facts
 with big-endian XXH3-128. Both roots receive bounded structural verification;
 borrowed semantic validation checks discriminants, UTF-8/owner spans, ordering,
 local/export presence consistency, enum links and constant payload/diagnostic
 requirements before construction. Optional numeric scalars preserve negative zero.
+Extractor 2 invalidates older import-use attribution: merged explicit type imports
+and local values now retain namespace-sensitive evidence without a schema change.
 Expanded enum strings are capped at 64 KiB each and 4 MiB total, with checked
 arithmetic both before packing owned facts and during borrowed cache validation.
 These limits do not cap original source bytes or the entire fact tree.

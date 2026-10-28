@@ -61,6 +61,11 @@ not the physical extension, controls capture; JS/JSX and generated enum overlays
 never extract generic TypeScript metadata. Neither API reparses the original tree.
 JavaScript extraction is rejected.
 Supply an existing writable private-backing directory to either cache entrypoint.
+Import uses follow Oxc binding and namespace evidence, not identifier spelling.
+An explicit type import may share a merged symbol with a local value: ordinary
+type references remain import uses, while executable reads and `typeof` queries
+refer to the local value. Lexical shadows are not import uses; an imported type
+without a local value still cannot be used as an executable value.
 
 Prepared sources retain the checked mapped original record alongside compiler
 metadata, separately from generated-JS facts and coordinates. Memory/no-op builds
@@ -121,7 +126,7 @@ unresolved members have **no** numeric/string payload. Negative zero and empty/
 NUL-containing string values are preserved. Namespace/external-module metadata
 outside the top-level model is diagnosed rather than flattened or guessed.
 
-Independent `.types.seg.fb` records use `GFTY` schema/extractor 1, original-source/
+Independent `.types.seg.fb` records use `GFTY` schema 1/extractor 2, original-source/
 selected-syntax/package/implementation seals and private mapped borrowed storage.
 Read-only/disabled misses still map private snapshots; disabled mode never reads
 or writes sidecars. Corrupt sidecars regenerate; writes are best-effort atomic

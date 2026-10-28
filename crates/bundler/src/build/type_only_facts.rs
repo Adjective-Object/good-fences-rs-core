@@ -17,7 +17,7 @@ use oxc_ast_visit::{walk, Visit};
 use oxc_ecmascript::BoundNames;
 use oxc_semantic::{Semantic, SemanticBuilder};
 use oxc_span::{GetSpan, Span};
-use oxc_syntax::symbol::SymbolId;
+use oxc_syntax::symbol::{SymbolFlags, SymbolId};
 use segment_cache::CacheMode;
 
 mod enums;
@@ -588,8 +588,23 @@ impl<'a> Visit<'a> for Extraction<'_, 'a> {
                     .scoping()
                     .find_binding(reference.scope_id(), id.name)
             });
-            if let Some(index) = symbol.and_then(|id| self.imports.get(&id)) {
+            if let Some((symbol, index)) =
+                symbol.and_then(|symbol| self.imports.get(&symbol).map(|index| (symbol, *index)))
+            {
                 let flags = reference.flags();
+                // Oxc merges disjoint type/value declarations into one symbol.
+                // A local value supplies reads/typeof, not the explicit type import;
+                // ordinary type references must still belong to that import.
+                if self.facts.occurrences[index].explicit_type
+                    && (reference.is_value() || flags.is_value_as_type() || self.type_query)
+                    && self
+                        .semantic
+                        .scoping()
+                        .symbol_flags(symbol)
+                        .intersects(SymbolFlags::Value)
+                {
+                    return;
+                }
                 if reference.is_type() || reference.is_value() || flags.is_value_as_type() {
                     let mut usage = wire::UseT::default();
                     usage.span = span(id.span);
@@ -597,7 +612,7 @@ impl<'a> Visit<'a> for Extraction<'_, 'a> {
                     usage.value_use =
                         reference.is_value() && !flags.is_value_as_type() && !self.type_query;
                     usage.value_as_type = flags.is_value_as_type() || self.type_query;
-                    self.facts.occurrences[*index].uses.push(usage);
+                    self.facts.occurrences[index].uses.push(usage);
                 }
             }
         }

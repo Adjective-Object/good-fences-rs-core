@@ -1,6 +1,6 @@
 # cache_flatbuffers
 
-- Independent `type_only_facts.fbs` schema/extractor 1 owns checked borrowed
+- Independent `type_only_facts.fbs` schema 1/extractor 2 owns checked borrowed
   `GFTY` original-TypeScript evidence. Validate both roots, UTF-8/owner/order
   relationships, merged local/export presence, enum declaration links and typed
   constant/diagnostic payloads before construction. Optional numeric values retain
@@ -9,6 +9,8 @@
   these are expanded-value limits, not a whole-source/facts byte cap.
   Explicit private mapped backing on cold/hit/read-only/disabled
   paths; never unpack or persist graph resolution/repair/admission decisions.
+  Extractor 2 attributes merged explicit-type-import/local-value uses by semantic
+  namespace; older use evidence must miss without changing the wire layout.
 
 - Independent `resolution.fbs` schema 2 owns verified borrowed `GFRS` records.
   Package/dependency/policy identities and typed scoped proofs do not change
@@ -22,7 +24,7 @@
 - Schema 23/extractor 41 adds required typed CommonJS surface/access/name tables
   and literal-bracket namespace-read extraction. Keep wrapper-reference/name/
   unknown-site coverage borrowed and source-local; old source records miss.
-  Independent GFTY schema/extractor 1 and its evaluator budgets stay unchanged.
+  Independent GFTY versions and its evaluator budgets are separate.
 - Extractor 42 marks value-consuming object replacements unknown; only complete
   discarded expression-statement assignments prove a nonescaping CJS object.
 - ImportMetaEnv appends a DependencyKind discriminant without changing table

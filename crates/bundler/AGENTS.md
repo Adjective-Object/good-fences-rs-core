@@ -35,13 +35,17 @@ unknown surfaces never read companions. Dot/string-bracket namespace demands use
 cached recipes; require-only reflection/escape remains conservative.
 
 Original-TypeScript/declaration evidence shares TypeOnlyFacts (`GFTY`, independent
-schema/extractor 1). Extract from the original parsed TS tree and checked enum-
+schema 1/extractor 2). Extract from the original parsed TS tree and checked enum-
 enabled semantics, never generic JS or a second parse before transformation.
 Lazy exact declaration companions use scoped inventory/snapshot proofs, including
 misses; retain and freshly validate those proofs at final/no-op boundaries.
 Share checked mapped records across importers/attempts, not source buffers;
 hot epoch hits must not rehash/re-read source per importer. Preserve type/value
 merges, original occurrence/use spans and ordered const-enum values/diagnostics.
+Attribute import uses by semantic binding and namespace: Oxc may merge an explicit
+type import with a local value. Reads/typeof then belong to that local value;
+type references still belong to the import. Pure type-import value reads remain
+illegal, and lexical shadows never become import uses.
 No graph resolution, recovery/erasure/admission choices or generated enum code
 belongs in this metadata. Unsupported/unresolved constants never get fake values.
 Standalone declaration semantics disable upstream enum evaluation (its string

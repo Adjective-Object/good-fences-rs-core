@@ -59,6 +59,40 @@ fn checked_original_source_settings_and_corruption() {
 }
 
 #[test]
+fn previous_extractor_cannot_replay_merged_import_use_facts() {
+    let dir = directory();
+    let source = "type T = null;";
+    let record = WireTypeOnlyFacts::encode_in(dir.path(), source, [3; 16], facts()).unwrap();
+    let root = flatbuffers::root::<wire::TypeOnlyFacts<'_>>(
+        &record.backing()[..record.backing().len() - CHECKSUM_BYTES],
+    )
+    .unwrap();
+    let mut builder = flatbuffers::FlatBufferBuilder::new();
+    let facts = builder.create_vector(root.facts().bytes());
+    let previous = wire::TypeOnlyFacts::create(
+        &mut builder,
+        &wire::TypeOnlyFactsArgs {
+            schema: SCHEMA,
+            extractor: 1,
+            source_hash: Some(root.source_hash()),
+            config_hash: Some(root.config_hash()),
+            records_hash: Some(root.records_hash()),
+            facts: Some(facts),
+        },
+    );
+    wire::finish_type_only_facts_buffer(&mut builder, previous);
+    let mut bytes = builder.finished_data().to_vec();
+    bytes.extend_from_slice(&hash128(builder.finished_data()));
+    let error = WireTypeOnlyFacts::from_backing(
+        SharedBytes::snapshot_in(dir.path(), bytes.as_slice()).unwrap(),
+        source,
+        [3; 16],
+    )
+    .unwrap_err();
+    assert!(format!("{error:#}").contains("TypeOnlyFacts version mismatch"));
+}
+
+#[test]
 fn semantic_validation_rejects_bad_discriminants_spans_and_aliases() {
     let dir = directory();
     let source = "type T = null;";

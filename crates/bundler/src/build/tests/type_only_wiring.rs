@@ -259,6 +259,65 @@ fn type_only_wiring_erased_imports_warn_at_original_utf16_specifier_and_explicit
 }
 
 #[test]
+fn type_only_wiring_import_type_and_local_value_share_a_name_across_cache_modes() {
+    for import in [
+        "import { getItem, setItem, type LocalStorageKeys } from './storage.mts';",
+        "import { getItem, setItem } from './storage.mts'; import type { LocalStorageKeys } from './storage.mts';",
+    ] {
+        for cache in [CacheMode::ReadWrite, CacheMode::ReadOnly, CacheMode::Disabled] {
+            let dir = TmpDir::new();
+            write(dir.root(), "storage.mts", "export type LocalStorageKeys = 'OwaSessionCount' | 'NpsDismissCount'; export function getItem(_self: unknown, key: LocalStorageKeys) { return key === 'OwaSessionCount' ? '42' : null; } export function setItem() {}");
+            let source = format!("{import}
+const LocalStorageKeys: Record<string, LocalStorageKeys> = {{
+    OwaSessionCount: 'OwaSessionCount', NpsDismissCount: 'NpsDismissCount'
+}};
+export function getSessionCount() {{
+    return parseInt(getItem(self, LocalStorageKeys.OwaSessionCount) ?? '0');
+}}
+type Query = typeof LocalStorageKeys;
+type Imported = import('./storage.mts').LocalStorageKeys;
+function shadow(LocalStorageKeys: number) {{ return LocalStorageKeys; }}
+globalThis.self = globalThis;
+console.log(getSessionCount(), shadow(7));");
+            write(dir.root(), "main.mts", &source);
+            let path = dir.root().join("main.mts");
+            let mut config = typed();
+            config.cache = cache;
+            let mut session = BuildSession::new(dir.root()).unwrap();
+            let cold = session.build(&config).unwrap();
+            assert_eq!(observe(&cold.product.artifacts), b"42 7\n");
+            assert!(cold.product.compatibility_warnings.is_empty());
+            let first = session.sources[&path].transpiled.as_ref().unwrap()
+                .original_facts.as_ref().unwrap().record().unwrap().clone();
+            let occurrence = first.facts().occurrences().iter().find(|o| {
+                o.local().is_some_and(|n| n.value() == "LocalStorageKeys")
+            }).unwrap();
+            assert_eq!(occurrence.uses().len(), 1);
+            assert!(occurrence.uses().get(0).type_use());
+            assert_eq!(occurrence.uses().get(0).span().start(), source.find("LocalStorageKeys> =").unwrap() as u32);
+            let extractions = session.type_only_cache.extractions();
+            let noop = session.build(&config).unwrap();
+            assert!(Rc::ptr_eq(&cold.product, &noop.product));
+            assert_eq!(noop.counters.source_parses, 0);
+            config.output.min_chunk_bytes += 1;
+            let memory = session.build(&config).unwrap();
+            assert_eq!(observe(&memory.product.artifacts), b"42 7\n");
+            assert_eq!(memory.counters.source_parses, 0);
+            assert_eq!(session.type_only_cache.extractions(), extractions);
+            assert_eq!(session.sources[&path].transpiled.as_ref().unwrap()
+                .original_facts.as_ref().unwrap().record().unwrap().backing().as_ptr(),
+                first.backing().as_ptr());
+            let mut disk = BuildSession::new(dir.root()).unwrap();
+            let loaded = disk.build(&config).unwrap();
+            assert_eq!(loaded.product.artifacts, memory.product.artifacts);
+            assert_eq!(observe(&loaded.product.artifacts), b"42 7\n");
+            assert!(loaded.product.compatibility_warnings.is_empty());
+            assert_eq!(disk.type_only_cache.extractions(), if cache == CacheMode::ReadWrite { 0 } else { extractions });
+        }
+    }
+}
+
+#[test]
 fn type_only_wiring_actual_values_still_fail_without_erasing_expressions() {
     for body in [
         "import {Shape} from './types.mts'; console.log(Shape);",

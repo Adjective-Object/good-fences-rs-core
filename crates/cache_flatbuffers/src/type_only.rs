@@ -5,7 +5,7 @@ use eyre::{ensure, Result};
 use crate::{hash128, type_only_wire as wire, SharedBytes, CHECKSUM_BYTES};
 
 const SCHEMA: u32 = 1;
-const EXTRACTOR: u32 = 1;
+const EXTRACTOR: u32 = 2;
 
 /// Expanded enum strings, independent of the size of the original source.
 pub const TYPE_ONLY_STRING_VALUE_BYTES: usize = 64 * 1024;

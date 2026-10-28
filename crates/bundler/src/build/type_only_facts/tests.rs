@@ -111,6 +111,108 @@ const a: S = { width: Value };
 }
 
 #[test]
+fn import_uses_distinguish_merged_type_and_value_namespaces() {
+    let storage = directory();
+    for import in [
+        "import { type Keys } from './storage';",
+        "import type { Keys } from './storage';",
+        "import type * as Keys from './storage';",
+    ] {
+        let source = format!(
+            "{import}
+const Keys: Record<string, Keys> = {{ count: 'count' }};
+type Query = typeof Keys;
+type Qualified = Keys.Member;
+type Imported = import('./storage').Keys;
+function parameter(Keys: number) {{ return Keys; }}
+function local() {{ const Keys = 2; return Keys; }}
+console.log(Keys.count);"
+        );
+        let record = facts(storage.path(), "namespaces.ts", &source, ModuleFormat::Esm);
+        let occurrence = record.facts().occurrences().get(0);
+        let uses: Vec<_> = occurrence
+            .uses()
+            .iter()
+            .map(|u| {
+                (
+                    u.span().start(),
+                    u.type_use(),
+                    u.value_use(),
+                    u.value_as_type(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            uses,
+            [
+                (source.find("Keys> =").unwrap() as u32, true, false, false),
+                (
+                    source.find("Keys.Member").unwrap() as u32,
+                    true,
+                    false,
+                    false
+                ),
+            ],
+            "{import}: annotations refer to the imported type, not the local value"
+        );
+        assert!(record
+            .facts()
+            .occurrences()
+            .iter()
+            .any(|o| o.kind() == wire::OccurrenceKind::TypeImport
+                && o.imported().unwrap().value() == "Keys"));
+    }
+}
+
+#[test]
+fn import_uses_keep_illegal_values_queries_and_namespace_references() {
+    let storage = directory();
+    for import in [
+        "import type { Keys } from './storage';",
+        "import type * as Keys from './storage';",
+    ] {
+        let source = format!(
+            "{import}
+type Query = typeof Keys;
+type Qualified = Keys.Member;
+function parameter(Keys: number) {{ return Keys; }}
+function local() {{ const Keys = 2; return Keys; }}
+console.log(Keys);"
+        );
+        let record = facts(storage.path(), "uses.ts", &source, ModuleFormat::Esm);
+        let uses: Vec<_> = record
+            .facts()
+            .occurrences()
+            .get(0)
+            .uses()
+            .iter()
+            .map(|u| {
+                (
+                    u.span().start(),
+                    u.type_use(),
+                    u.value_use(),
+                    u.value_as_type(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            uses,
+            [
+                (source.find("Keys;").unwrap() as u32, true, false, true),
+                (
+                    source.find("Keys.Member").unwrap() as u32,
+                    true,
+                    false,
+                    false
+                ),
+                (source.rfind("Keys);").unwrap() as u32, false, true, false),
+            ],
+            "{import}"
+        );
+    }
+}
+
+#[test]
 fn enum_constants_and_diagnostic_evidence() {
     let storage = directory();
     let record = facts(
