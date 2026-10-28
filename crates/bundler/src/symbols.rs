@@ -2,8 +2,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use ast_segmenter::owned::BindingId;
-use ast_segmenter::views::{ExportValue, ImportedName};
-use eyre::{ensure, OptionExt};
+use ast_segmenter::views::ImportedName;
+use eyre::{ensure, OptionExt, WrapErr};
 use source_graph::{ExportIdentity, GraphNode, LinkedExport, Namespace, SegmentKey, SourceGraph};
 
 use crate::chunks::ChunkPlan;
@@ -63,6 +63,25 @@ fn allocate_name(
     name
 }
 
+fn route_location(graph: &SourceGraph, node: GraphNode) -> String {
+    match node {
+        GraphNode::Segment(key) => format!(
+            "{:?} segment {} bytes {:?}",
+            graph.file_path(key.file_id),
+            key.segment_idx,
+            graph
+                .file_segments(key.file_id)
+                .and_then(|segments| segments.get(key.segment_idx as usize))
+                .map(|segment| (segment.span.start, segment.span.end))
+        ),
+        GraphNode::Module(file) => format!("{:?} module", graph.file_path(file)),
+        GraphNode::Unlinked {
+            file_id,
+            dependency,
+        } => format!("{:?} dependency {:?}", graph.file_path(file_id), dependency),
+    }
+}
+
 impl Symbols {
     pub fn link(graph: &SourceGraph, plan: &ChunkPlan) -> eyre::Result<Self> {
         ensure!(
@@ -71,6 +90,12 @@ impl Symbols {
         );
         graph.validate_links()?;
         let retained: BTreeSet<_> = plan.retention.segments.iter().map(|s| s.key).collect();
+        let mut binding_demands = crate::cjs::binding_demands(&plan.retention);
+        binding_demands.extend(
+            plan.roots
+                .values()
+                .flat_map(|root| root.binding_roots.iter().copied()),
+        );
         let generated_constructors: std::collections::HashSet<_> = plan.lazy_modules.modules().iter()
             .filter(|module| plan.async_activations.values().any(|activation| {
                 matches!(activation.origin, crate::chunks::AsyncOrigin::Lazy { declaration, module_candidate, .. }
@@ -81,12 +106,12 @@ impl Symbols {
                 .and_then(|reference| reference.binding())
                 .map(|binding| (module.owner.file_id, binding)))
             .collect();
-        let route_retained = |linked: &LinkedExport| {
-            linked.route.iter().all(|node| match node {
-                GraphNode::Segment(key) => retained.contains(key),
-                _ => super::link::retained(plan, *node),
-            })
+        let node_retained = |node| match node {
+            GraphNode::Segment(key) => retained.contains(&key),
+            _ => super::link::retained(plan, node),
         };
+        let route_retained =
+            |linked: &LinkedExport| linked.route.iter().all(|&node| node_retained(node));
         let mut files = plan.retention.modules.clone();
         files.sort_by_key(|&file| graph.file_path(file));
         // Reserve nested names and free references across sources: relocating a
@@ -158,39 +183,14 @@ impl Symbols {
                     continue;
                 }
                 if binding.import() {
-                    let source_used = if plan.lazy_modules.modules().is_empty() {
-                        crate::cjs::binding_used(graph, &plan.retention, file, binding.id())
-                    } else {
-                        facts
-                            .references()
-                            .iter()
-                            .enumerate()
-                            .any(|(index, reference)| {
-                                let segment = SegmentKey::new(
-                                    file,
-                                    segments
-                                        .partition_point(|s| s.span.end <= reference.span().start)
-                                        as u32,
-                                );
-                                !reference.type_only()
-                                    && reference.binding() == Some(binding.id())
-                                    && retained.contains(&segment)
-                                    && !plan
-                                        .lazy_modules
-                                        .consumed_constructor(segment, index as u32)
-                            })
-                            || facts.exports().iter().any(|export| {
-                                !export.type_only()
-                                    && graph.runtime_export(file, export.name())
-                                    && export.value() == ExportValue::Binding(binding.id())
-                                    && retained.contains(&SegmentKey::new(
-                                        file,
-                                        segments
-                                            .partition_point(|s| s.span.end <= export.span().start)
-                                            as u32,
-                                    ))
-                            })
-                    };
+                    let source_used = crate::cjs::binding_used(
+                        graph,
+                        file,
+                        binding.id(),
+                        Some(&plan.lazy_modules),
+                        &binding_demands,
+                        node_retained,
+                    );
                     if plan.precise_dynamic_imports
                         && !source_used
                         && !generated_constructors.contains(&(file, binding.id()))
@@ -242,10 +242,24 @@ impl Symbols {
                     linked
                         .route
                         .extend(declarations.into_iter().map(GraphNode::Segment));
-                    ensure!(
-                        route_retained(&linked),
-                        "canonical import route is not retained"
-                    );
+                    if let Some(&missing) = linked.route.iter().find(|&&node| !node_retained(node))
+                    {
+                        return Err(eyre::eyre!("canonical import route is not retained"))
+                            .wrap_err_with(|| {
+                                format!(
+                                    "linking import {:?} binding {:?} ({:?}) from request {:?}, imported {:?}, at {:?}: canonical identity {:?}, declaration {}; first unretained route node {}",
+                                    binding.name(),
+                                    binding.id(),
+                                    graph.file_path(file),
+                                    dependency.specifier(),
+                                    import.imported(),
+                                    (import.span().start, import.span().end),
+                                    linked.identity,
+                                    route_location(graph, linked.declaration),
+                                    route_location(graph, missing),
+                                )
+                            });
+                    }
                     result.imports.insert((file, binding.id()), linked);
                     continue;
                 }

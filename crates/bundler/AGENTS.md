@@ -692,6 +692,10 @@ DOM recording proves insertion/activation, never browser rendering or readiness.
 Canonical symbols use owned (file, BindingId) identities and checked export routes,
 including barrels/redeclarations. Allocated lexical names are not observable source
 names or rewrite instructions; boundary values retain typed graph identities.
+Symbol/CJS import usage excludes connector-only references; shared export clauses
+demand aliases only with retained/explicitly demanded canonical declarations.
+Keep explicit demands indexed even on incomplete routes; report missing-node
+paths/spans lazily in the error chain.
 No hooks, code JSON, source loading/assembly, eval or runtime compilation.
 Source read-only eval identity references remain native; this does not authorize
 unshadowed eval operations or generated evaluators.

@@ -490,6 +490,12 @@ The internal `symbols::Symbols::link` builds checked canonical
 `(file, BindingId)` definitions and import/export routes using the shared graph
 resolver. Native emission reuses that plan, preserving intermediate barrels and
 every retained var declaration.
+Import usage checks shared by symbol linking and CommonJS requests exclude
+connector-only references; an exported alias requires its canonical declaration
+to be retained or explicitly demanded, not merely a retained shared export clause.
+Explicit demands remain checked even if a declaration is missing. Real reads
+require complete canonical routes. Missing-route errors retain importer/request/binding context,
+canonical identity and the first missing source segment's path/byte span.
 Source imports and references carry binding-availability, execution/activation,
 native-external-validation and exact-public-surface obligations; they do not
 prescribe physical module seams. `RetentionPlan` and canonical symbols feed the

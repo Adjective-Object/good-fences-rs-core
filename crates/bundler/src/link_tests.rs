@@ -2340,6 +2340,162 @@ fn native_boundaries_keep_namespace_escapes_receivers_and_writes_native() {
 }
 
 #[test]
+fn precise_shared_import_export_connector_keeps_only_demanded_bindings() {
+    for (entry_source, barrel_read, sibling_used) in [
+        (
+            "import {a} from './barrel.mjs'; console.log(a);",
+            "console.log(a);",
+            false,
+        ),
+        (
+            "import {a} from './barrel.mjs'; console.log(a);",
+            "console.log(a, unused);",
+            true,
+        ),
+        (
+            "import {a, unused} from './barrel.mjs'; console.log(a, unused);",
+            "console.log(a);",
+            true,
+        ),
+    ] {
+        let sources = sources(&[
+            ("entry.mjs", entry_source),
+            (
+                "barrel.mjs",
+                &format!(
+                    "import {{a, unused}} from './leaf.mjs'; export {{a, unused}}; {barrel_read}"
+                ),
+            ),
+            ("leaf.mjs", "export const a=1; export const unused=2;"),
+        ]);
+        for wire in [false, true] {
+            let graph = graph_with_storage(&sources, wire, ModuleFormat::Esm, wire);
+            let entry = graph.file_id(Path::new("entry.mjs")).unwrap();
+            let barrel = graph.file_id(Path::new("barrel.mjs")).unwrap();
+            let leaf = graph.file_id(Path::new("leaf.mjs")).unwrap();
+            let policy = EffectPolicy::default();
+            let plan = crate::chunks::partition(
+                &graph,
+                &[RootSeed {
+                    id: RootId::Entry("entry".into()),
+                    evaluation_roots: vec![entry],
+                    binding_roots: vec![],
+                }],
+                &policy,
+            )
+            .unwrap();
+            assert_eq!(
+                retained(&plan, GraphNode::Segment(SegmentKey::new(leaf, 1))),
+                sibling_used
+            );
+            let symbols = crate::symbols::Symbols::link(&graph, &plan).unwrap();
+            let binding_demands = crate::cjs::binding_demands(&plan.retention);
+            for import in graph.file_facts(barrel).unwrap().imports() {
+                let expected = import.imported() == ast_segmenter::views::ImportedName::Name("a")
+                    || sibling_used;
+                assert_eq!(
+                    symbols.imports.contains_key(&(barrel, import.binding())),
+                    expected
+                );
+                assert_eq!(
+                    crate::cjs::binding_used(
+                        &graph,
+                        barrel,
+                        import.binding(),
+                        Some(&plan.lazy_modules),
+                        &binding_demands,
+                        |node| retained(&plan, node)
+                    ),
+                    expected
+                );
+            }
+            let real_read = GraphNode::Segment(SegmentKey::new(barrel, 2));
+            let (index, reference) = graph
+                .outgoing_indexed(real_read)
+                .find(|(_, edge)| edge.kind == source_graph::EdgeKind::LocalReference)
+                .unwrap();
+            assert!(plan.retention.edges.iter().any(|edge| {
+                edge.source_edge == Some(index)
+                    && edge.from == reference.from
+                    && edge.to == GraphNode::Segment(SegmentKey::new(leaf, 0))
+            }));
+            let connector = GraphNode::Segment(SegmentKey::new(barrel, 1));
+            for (index, _) in graph
+                .outgoing_indexed(connector)
+                .filter(|(_, edge)| edge.kind == source_graph::EdgeKind::LocalReference)
+            {
+                assert!(!plan
+                    .retention
+                    .edges
+                    .iter()
+                    .any(|edge| edge.source_edge == Some(index)));
+            }
+            let output = esm(&graph, &plan, &policy, &sources).unwrap();
+            assert_eq!(output.backend, Backend::Native);
+            if !sibling_used {
+                assert!(!output
+                    .files
+                    .values()
+                    .any(|source| source.contains("unused")));
+            }
+        }
+    }
+}
+
+#[test]
+fn precise_import_route_failure_retains_lazy_source_context() {
+    let sources = sources(&[
+        (
+            "entry.mjs",
+            "import {value as local, keep} from './barrel.mjs'; export {local}; console.log(keep);",
+        ),
+        ("barrel.mjs", "export {value, keep} from './leaf.mjs';"),
+        (
+            "leaf.mjs",
+            "var value=1; var value=2; export {value}; export const keep=3;",
+        ),
+    ]);
+    let graph = graph(&sources, false);
+    let entry = graph.file_id(Path::new("entry.mjs")).unwrap();
+    let leaf = graph.file_id(Path::new("leaf.mjs")).unwrap();
+    let policy = EffectPolicy::default();
+    let plan = crate::chunks::partition(
+        &graph,
+        &[RootSeed {
+            id: RootId::Entry("entry".into()),
+            evaluation_roots: vec![entry],
+            binding_roots: vec![GraphNode::Module(entry)],
+        }],
+        &policy,
+    )
+    .unwrap();
+    for (index, bytes) in [(0, (0, 12)), (1, (13, 25))] {
+        let missing = SegmentKey::new(leaf, index);
+        let mut broken = plan.clone();
+        broken
+            .retention
+            .segments
+            .retain(|segment| segment.key != missing);
+        let error = crate::symbols::Symbols::link(&graph, &broken)
+            .err()
+            .expect("a public alias must still diagnose its missing declaration");
+        let report = format!("{error:#}");
+        for expected in [
+            "linking import \"local\" binding BindingId(",
+            "entry.mjs",
+            "request \"./barrel.mjs\"",
+            "imported Name(\"value\")",
+            "canonical identity Binding(",
+            &format!("first unretained route node Some(\"leaf.mjs\") segment {index} bytes Some({bytes:?})"),
+            "canonical import route is not retained",
+        ] {
+            assert!(report.contains(expected), "{report}");
+        }
+        assert!(error.chain().count() > 1, "{report}");
+    }
+}
+
+#[test]
 fn canonical_imports_and_public_aliases_share_definitions_not_names() {
     use source_graph::ExportIdentity;
     let sources = sources(&[
@@ -2412,7 +2568,8 @@ fn canonical_imports_and_public_aliases_share_definitions_not_names() {
         .segments
         .retain(|segment| segment.key != SegmentKey::new(leaf, 1));
     let error = crate::symbols::Symbols::link(&graph, &plan).err().unwrap();
-    assert!(error.to_string().contains("import route is not retained"));
+    let report = format!("{error:#}");
+    assert!(report.contains("import route is not retained"), "{report}");
 }
 
 #[test]

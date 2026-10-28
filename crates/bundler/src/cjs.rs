@@ -5,7 +5,7 @@ use ast_segmenter::owned::{BindingId, ImportedName};
 use ast_segmenter::views::ExportValue;
 use source_graph::{DependencyTarget, ExportIdentity, GraphNode, Namespace, SourceGraph};
 
-use crate::RetentionPlan;
+use crate::{RetentionEdgeKind, RetentionPlan};
 
 #[cfg(test)]
 thread_local! {
@@ -23,6 +23,7 @@ pub(crate) struct Requests<'a> {
     plan: Option<&'a crate::chunks::ChunkPlan>,
     modules: HashSet<u32>,
     segments: HashSet<source_graph::SegmentKey>,
+    binding_demands: HashSet<GraphNode>,
     demand_from: HashMap<usize, GraphNode>,
     native_externals: bool,
 }
@@ -70,6 +71,7 @@ impl<'a> Requests<'a> {
             plan,
             modules,
             segments,
+            binding_demands: binding_demands(retention),
             demand_from,
             native_externals,
         }
@@ -134,7 +136,14 @@ fn requests_with_plan(requests: &Requests<'_>, file: u32) -> Vec<(GraphNode, Imp
             };
             if !requests.native_externals
                 && edge.binding.is_some_and(|binding| {
-                    !binding_used_with(graph, from, binding, |node| requests.retained(node))
+                    !binding_used(
+                        graph,
+                        from,
+                        binding,
+                        None,
+                        &requests.binding_demands,
+                        |node| requests.retained(node),
+                    )
                 })
             {
                 return None;
@@ -186,48 +195,72 @@ fn requests_with_plan(requests: &Requests<'_>, file: u32) -> Vec<(GraphNode, Imp
         .collect()
 }
 
-pub(crate) fn binding_used(
-    graph: &SourceGraph,
-    retention: &RetentionPlan,
-    file: u32,
-    binding: BindingId,
-) -> bool {
-    binding_used_with(graph, file, binding, |node| retained(retention, node))
+pub(crate) fn binding_demands(retention: &RetentionPlan) -> HashSet<GraphNode> {
+    retention
+        .edges
+        .iter()
+        .filter(|edge| {
+            matches!(
+                edge.kind,
+                RetentionEdgeKind::Binding
+                    | RetentionEdgeKind::Namespace
+                    | RetentionEdgeKind::Require
+            )
+        })
+        .map(|edge| edge.to)
+        .collect()
 }
 
-fn binding_used_with(
+pub(crate) fn binding_used(
     graph: &SourceGraph,
     file: u32,
     binding: BindingId,
+    lazy_modules: Option<&crate::lazy_modules::Certification>,
+    binding_demands: &HashSet<GraphNode>,
     retained: impl Fn(GraphNode) -> bool,
 ) -> bool {
     let Some(facts) = graph.file_facts(file) else {
         return false;
     };
     let segments = graph.file_segments(file).unwrap();
-    let live = |span: oxc_span::Span| {
+    let segment = |span: oxc_span::Span| {
         let index = segments.partition_point(|s| s.span.end <= span.start);
-        retained(GraphNode::Segment(source_graph::SegmentKey::new(
-            file,
-            index as u32,
-        )))
+        source_graph::SegmentKey::new(file, index as u32)
     };
     facts
         .references()
         .iter()
-        .any(|r| !r.type_only() && r.binding() == Some(binding) && live(r.span()))
-        || facts
-            .exports()
-            .iter()
-            .any(|e| !e.type_only() && e.value() == ExportValue::Binding(binding) && live(e.span()))
-}
-
-fn retained(retention: &RetentionPlan, node: GraphNode) -> bool {
-    match node {
-        GraphNode::Module(file) => retention.modules.contains(&file),
-        GraphNode::Segment(key) => retention.segments.iter().any(|s| s.key == key),
-        GraphNode::Unlinked { .. } => false,
-    }
+        .enumerate()
+        .any(|(index, reference)| {
+            if reference.type_only() || reference.binding() != Some(binding) {
+                return false;
+            }
+            let key = segment(reference.span());
+            retained(GraphNode::Segment(key))
+                && !facts
+                    .emission()
+                    .segments()
+                    .get(key.segment_idx as usize)
+                    .is_some_and(|recipe| recipe.connector_only())
+                && !lazy_modules.is_some_and(|lazy| lazy.consumed_constructor(key, index as u32))
+        })
+        || facts.exports().iter().any(|export| {
+            // A shared connector does not demand sibling specifiers. Explicit
+            // demands survive a missing declaration so the symbol linker still
+            // diagnoses genuinely incomplete routes.
+            !export.type_only()
+                && graph.runtime_export(file, export.name())
+                && export.value() == ExportValue::Binding(binding)
+                && retained(GraphNode::Segment(segment(export.span())))
+                && export.name().is_some_and(|name| {
+                    graph
+                        .resolve_export(file, name, Namespace::Value)
+                        .is_ok_and(|linked| {
+                            retained(linked.declaration)
+                                || binding_demands.contains(&linked.declaration)
+                        })
+                })
+        })
 }
 
 #[cfg(test)]
